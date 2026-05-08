@@ -4,12 +4,15 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Args;
+use std::sync::Arc;
+
 use n3ur0n_adapters::openai::OpenAIConfig;
 use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_node::IdentityFile;
 use n3ur0n_node::client as peer_client;
 use n3ur0n_node::discovery;
-use n3ur0n_server::bootstrap::BackendKind;
+use n3ur0n_node::runtime::RuntimeConfig;
+use n3ur0n_server::bootstrap::{BackendKind, PlannerKind};
 use n3ur0n_server::{bootstrap, http};
 use n3ur0n_storage::peers as peers_repo;
 use serde_json::Value;
@@ -57,6 +60,32 @@ pub(crate) struct ServeArgs {
     /// Bearer token for the OpenAI-compatible endpoint (optional).
     #[arg(long, env = "N3UR0N_OPENAI_API_KEY", hide_env_values = true)]
     pub(crate) openai_api_key: Option<String>,
+
+    /// Planner selector. `none` = no planner (manual mode only); `llm` =
+    /// LLM-driven planner using the `--planner-llm-*` flags below.
+    #[arg(long, env = "N3UR0N_PLANNER_MODE", default_value = "none")]
+    pub(crate) planner_mode: String,
+
+    /// Base URL of the LLM endpoint used by the planner (defaults to the
+    /// chat backend's URL when `--backend ollama|openai`).
+    #[arg(long, env = "N3UR0N_PLANNER_LLM_BASE_URL")]
+    pub(crate) planner_llm_base_url: Option<String>,
+
+    /// Model identifier for the planner LLM (e.g. `llama3.1:8b`).
+    #[arg(long, env = "N3UR0N_PLANNER_LLM_MODEL")]
+    pub(crate) planner_llm_model: Option<String>,
+
+    /// Bearer token for the planner LLM endpoint (optional).
+    #[arg(long, env = "N3UR0N_PLANNER_LLM_API_KEY", hide_env_values = true)]
+    pub(crate) planner_llm_api_key: Option<String>,
+
+    /// Max concurrent planner dispatches (semaphore).
+    #[arg(long, env = "N3UR0N_MAX_CONCURRENT_PLANNERS", default_value_t = 4)]
+    pub(crate) max_concurrent_planners: usize,
+
+    /// Max active conversations in LRU cache.
+    #[arg(long, env = "N3UR0N_MAX_ACTIVE_CONVERSATIONS", default_value_t = 50)]
+    pub(crate) max_active_conversations: usize,
 }
 
 #[derive(Debug, Args)]
@@ -141,9 +170,9 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
 
     let backend_kind = parse_backend_kind(
         &args.backend,
-        args.openai_base_url,
-        args.openai_model,
-        args.openai_api_key,
+        args.openai_base_url.clone(),
+        args.openai_model.clone(),
+        args.openai_api_key.clone(),
     )?;
     let node = bootstrap::load_node(&dir, args.endpoint, bootstrap_peers.clone(), backend_kind).await?;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], args.port));
@@ -152,8 +181,6 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
     if !bootstrap_peers.is_empty() {
         let bg = node.clone();
         tokio::spawn(async move {
-            // Tiny delay so our own listener is up before we attempt the first
-            // outbound (bootstrap peers may be the same compose stack restarting).
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let outcomes = n3ur0n_node::discovery::bootstrap_initial_peers(&bg, &bootstrap_peers).await;
             for o in &outcomes {
@@ -166,7 +193,27 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
         });
     }
 
-    http::serve(addr, node).await
+    // Optional planner runtime.
+    let planner_kind = parse_planner_kind(
+        &args.planner_mode,
+        args.planner_llm_base_url,
+        args.planner_llm_model,
+        args.planner_llm_api_key,
+    )?;
+    let runtime = if let Some(kind) = planner_kind {
+        let cfg = RuntimeConfig {
+            max_concurrent_planners: args.max_concurrent_planners,
+            max_active_conversations: args.max_active_conversations,
+        };
+        let rt = bootstrap::build_runtime(node.clone(), kind, cfg)?;
+        tracing::info!("planner runtime configured");
+        Some(Arc::new(rt))
+    } else {
+        tracing::info!("no planner configured (manual mode only)");
+        None
+    };
+
+    http::serve(addr, node, runtime).await
 }
 
 pub(crate) async fn keys(args: KeysArgs) -> Result<()> {
@@ -278,6 +325,40 @@ fn parse_backend_kind(
             }))
         }
         other => anyhow::bail!("unknown backend: {other}"),
+    }
+}
+
+fn parse_planner_kind(
+    name: &str,
+    base_url: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+) -> Result<Option<PlannerKind>> {
+    match name.to_ascii_lowercase().as_str() {
+        "none" | "" | "off" => Ok(None),
+        "llm" | "ollama" => {
+            let base_url = base_url.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--planner-llm-base-url (or env N3UR0N_PLANNER_LLM_BASE_URL) required when --planner-mode llm"
+                )
+            })?;
+            let model = model.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--planner-llm-model (or env N3UR0N_PLANNER_LLM_MODEL) required when --planner-mode llm"
+                )
+            })?;
+            let backend = OpenAIConfig {
+                base_url,
+                default_model: model.clone(),
+                api_key,
+                description: None,
+            };
+            Ok(Some(PlannerKind::Llm {
+                backend,
+                model_hint: Some(model),
+            }))
+        }
+        other => anyhow::bail!("unknown planner mode: {other}"),
     }
 }
 

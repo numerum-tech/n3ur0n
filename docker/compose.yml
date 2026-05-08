@@ -31,8 +31,14 @@ services:
     <<: *node
     container_name: n3uron-node-a
     hostname: node-a
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       N3UR0N_ENDPOINT: http://node-a:4242
+      # node-a runs the local planner: a 7B/8B model on the host's Ollama.
+      N3UR0N_PLANNER_MODE: llm
+      N3UR0N_PLANNER_LLM_BASE_URL: ${PLANNER_BASE_URL:-http://host.docker.internal:11434}
+      N3UR0N_PLANNER_LLM_MODEL: ${PLANNER_MODEL:-llama3.1:8b}
       RUST_LOG: info,n3ur0n=debug
     ports:
       - "4242:4242"

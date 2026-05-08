@@ -6,45 +6,61 @@
 //! - `/api/v0/health`                local health
 //! - `/api/v0/whoami`                returns local instance_id
 //! - `/api/v0/peers`                 returns local peer directory
+//! - `/api/v0/peers/refresh`         signed describe_self + upsert
+//! - `/api/v0/peers/discover`        cascade depth-1
 //! - `/api/v0/chat`                  proxies a signed invoke to a chosen peer
+//! - `/api/v0/invoke`                generic signed invoke
+//! - `/api/v0/conversations*`        conversation CRUD + dispatch (cookie scoped)
 //! - `/ui` and `/ui/*`               static HTML chat UI embedded via rust-embed
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::Result;
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Json, Path, State};
-use axum::http::{StatusCode, header};
+use axum::extract::{DefaultBodyLimit, Json, Path, Request, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use n3ur0n_core::SignedMessage;
 use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_node::client as peer_client;
+use n3ur0n_node::conversation;
+use n3ur0n_node::runtime::NodeRuntime;
 use n3ur0n_node::{Node, NodeError, handle_request};
+use n3ur0n_storage::conversations as conv_repo;
 use n3ur0n_storage::peers as peers_repo;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tower_http::trace::TraceLayer;
+use uuid::Uuid;
 
 const META_LIMIT: usize = 16 * 1024;
 const INVOKE_LIMIT: usize = 1024 * 1024;
 const LOCAL_API_LIMIT: usize = 256 * 1024;
+const CLIENT_ID_COOKIE: &str = "n3ur0n_client_id";
+const CLIENT_ID_MAX_AGE: u64 = 31_536_000; // 1 year
 
 #[derive(Clone)]
 struct AppState {
     node: Node,
+    runtime: Option<Arc<NodeRuntime>>,
 }
+
+#[derive(Clone, Debug)]
+struct ClientId(String);
 
 #[derive(RustEmbed)]
 #[folder = "ui/"]
 struct UiAssets;
 
-/// Build the HTTP router for a given [`Node`]. Exposed so integration tests
-/// can mount it without binding a TCP listener.
-pub fn app(node: Node) -> Router {
-    let state = AppState { node };
+/// Build the HTTP router. `runtime` is `None` when the node has no planner
+/// configured — `/api/v0/conversations/:id/messages` returns 503 in that case.
+pub fn app(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
+    let state = AppState { node, runtime };
 
     let api_v0 = Router::new()
         .route("/health", get(health))
@@ -60,7 +76,17 @@ pub fn app(node: Node) -> Router {
             "/invoke",
             post(api_invoke).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
+        .route("/conversations", get(conv_list).post(conv_create))
+        .route(
+            "/conversations/:id",
+            get(conv_get).patch(conv_patch).delete(conv_delete),
+        )
+        .route(
+            "/conversations/:id/messages",
+            post(conv_messages).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
+        )
         .layer(DefaultBodyLimit::max(META_LIMIT))
+        .layer(middleware::from_fn(client_id_middleware))
         .with_state(state.clone());
 
     let proto_v0 = Router::new()
@@ -81,11 +107,66 @@ pub fn app(node: Node) -> Router {
         .layer(TraceLayer::new_for_http())
 }
 
-pub async fn serve(addr: SocketAddr, node: Node) -> Result<()> {
+pub async fn serve(
+    addr: SocketAddr,
+    node: Node,
+    runtime: Option<Arc<NodeRuntime>>,
+) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "listening");
-    axum::serve(listener, app(node)).await?;
+    axum::serve(listener, app(node, runtime)).await?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// client_id middleware (cookie-based, no auth)
+// ---------------------------------------------------------------------------
+
+async fn client_id_middleware(mut req: Request, next: Next) -> Response {
+    let existing = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(parse_client_cookie);
+
+    let (cid, is_new) = match existing {
+        Some(v) => (v, false),
+        None => (format!("cli_{}", Uuid::new_v4().simple()), true),
+    };
+
+    req.extensions_mut().insert(ClientId(cid.clone()));
+
+    let mut resp = next.run(req).await;
+
+    if is_new {
+        let cookie = format!(
+            "{name}={value}; Path=/; Max-Age={age}; HttpOnly; SameSite=Lax",
+            name = CLIENT_ID_COOKIE,
+            value = cid,
+            age = CLIENT_ID_MAX_AGE
+        );
+        if let Ok(hv) = HeaderValue::from_str(&cookie) {
+            resp.headers_mut().append(header::SET_COOKIE, hv);
+        }
+    }
+
+    resp
+}
+
+fn parse_client_cookie(raw: &str) -> Option<String> {
+    for part in raw.split(';') {
+        let trimmed = part.trim();
+        if let Some(rest) = trimmed.strip_prefix(&format!("{CLIENT_ID_COOKIE}=")) {
+            if !rest.is_empty() {
+                return Some(rest.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn extract_client_id(req: &Request) -> Option<&str> {
+    req.extensions().get::<ClientId>().map(|c| c.0.as_str())
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +200,7 @@ async fn post_message(
 }
 
 // ---------------------------------------------------------------------------
-// Local UI / API routes
+// Local API: peers
 // ---------------------------------------------------------------------------
 
 async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
@@ -170,15 +251,11 @@ struct ChatMessage {
 
 #[derive(Debug, Deserialize)]
 struct ChatRequest {
-    /// Endpoint URL of the peer to query.
     peer_endpoint: String,
-    /// Single-shot prompt; mutually exclusive with `messages`.
     #[serde(default)]
     prompt: Option<String>,
-    /// Multi-turn conversation history.
     #[serde(default)]
     messages: Option<Vec<ChatMessage>>,
-    /// Optional override of the default model on the remote peer.
     #[serde(default)]
     model: Option<String>,
 }
@@ -234,7 +311,6 @@ async fn api_chat(
 
 #[derive(Debug, Deserialize)]
 struct PeersDiscoverRequest {
-    /// Capability name to cascade-search for.
     capability: String,
 }
 
@@ -278,9 +354,6 @@ struct InvokeRequest {
     args: Value,
 }
 
-/// Generic capability invoker — feeds whatever JSON `args` to the named
-/// capability on the remote peer. Used by the UI's capability picker for
-/// non-chat capabilities.
 async fn api_invoke(
     State(state): State<AppState>,
     Json(req): Json<InvokeRequest>,
@@ -307,6 +380,286 @@ async fn api_invoke(
         "reply": reply.envelope.payload,
     }))
     .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Local API: conversations
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct CreateConversationRequest {
+    #[serde(default)]
+    title: Option<String>,
+}
+
+async fn conv_create(
+    State(state): State<AppState>,
+    req: Request,
+) -> Response {
+    let cid = match extract_client_id(&req) {
+        Some(v) => v.to_string(),
+        None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
+    };
+    let (_, body) = req.into_parts();
+    let bytes = match axum::body::to_bytes(body, LOCAL_API_LIMIT).await {
+        Ok(b) => b,
+        Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+    let payload: CreateConversationRequest = if bytes.is_empty() {
+        CreateConversationRequest { title: None }
+    } else {
+        match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+        }
+    };
+
+    let title = payload
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    match conversation::create(state.node.db(), &cid, title) {
+        Ok(state_obj) => Json(json!({
+            "id": state_obj.id,
+            "client_id": state_obj.client_id,
+            "title": state_obj.title,
+            "created_at": state_obj.created_at,
+            "updated_at": state_obj.updated_at,
+        }))
+        .into_response(),
+        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+async fn conv_list(
+    State(state): State<AppState>,
+    req: Request,
+) -> Response {
+    let cid = match extract_client_id(&req) {
+        Some(v) => v.to_string(),
+        None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
+    };
+    match conv_repo::list_for_client(state.node.db(), &cid, 200) {
+        Ok(rows) => {
+            let body: Vec<Value> = rows
+                .into_iter()
+                .map(|r| {
+                    json!({
+                        "id": r.id,
+                        "title": r.title,
+                        "created_at": r.created_at,
+                        "updated_at": r.updated_at,
+                    })
+                })
+                .collect();
+            Json(json!({"conversations": body})).into_response()
+        }
+        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+async fn conv_get(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    req: Request,
+) -> Response {
+    let cid = match extract_client_id(&req) {
+        Some(v) => v.to_string(),
+        None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
+    };
+    match conversation::load(state.node.db(), &id, &cid) {
+        Ok(s) => Json(json!({
+            "id": s.id,
+            "title": s.title,
+            "created_at": s.created_at,
+            "updated_at": s.updated_at,
+            "turns": s.ui_turns(),
+        }))
+        .into_response(),
+        Err(e) => map_conv_load_error(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PatchConversationRequest {
+    title: Option<String>,
+}
+
+async fn conv_patch(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    req: Request,
+) -> Response {
+    let cid = match extract_client_id(&req) {
+        Some(v) => v.to_string(),
+        None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
+    };
+    let (_, body) = req.into_parts();
+    let bytes = match axum::body::to_bytes(body, LOCAL_API_LIMIT).await {
+        Ok(b) => b,
+        Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+    let payload: PatchConversationRequest = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+
+    // Ownership check via load()
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    match conversation::load(state.node.db(), &id, &cid) {
+        Ok(_) => {
+            if let Err(e) = conv_repo::update_meta(
+                state.node.db(),
+                &id,
+                payload.title.as_deref(),
+                now,
+            ) {
+                return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+            }
+            // Best-effort cache invalidation if runtime is configured.
+            if let Some(rt) = &state.runtime {
+                let rt = rt.clone();
+                let id_clone = id.clone();
+                tokio::spawn(async move { rt.evict(&id_clone).await });
+            }
+            Json(json!({"id": id, "title": payload.title, "updated_at": now})).into_response()
+        }
+        Err(e) => map_conv_load_error(e),
+    }
+}
+
+async fn conv_delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    req: Request,
+) -> Response {
+    let cid = match extract_client_id(&req) {
+        Some(v) => v.to_string(),
+        None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
+    };
+    match conversation::load(state.node.db(), &id, &cid) {
+        Ok(_) => {
+            if let Err(e) = conv_repo::delete(state.node.db(), &id) {
+                return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+            }
+            if let Some(rt) = &state.runtime {
+                let rt = rt.clone();
+                let id_clone = id.clone();
+                tokio::spawn(async move { rt.evict(&id_clone).await });
+            }
+            (StatusCode::NO_CONTENT, "").into_response()
+        }
+        Err(e) => map_conv_load_error(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ConversationMessageRequest {
+    message: String,
+}
+
+async fn conv_messages(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    req: Request,
+) -> Response {
+    let cid = match extract_client_id(&req) {
+        Some(v) => v.to_string(),
+        None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
+    };
+    let runtime = match &state.runtime {
+        Some(rt) => rt.clone(),
+        None => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no_planner: this node has no planner configured. Use /api/v0/chat for manual mode.",
+            );
+        }
+    };
+
+    let (_, body) = req.into_parts();
+    let bytes = match axum::body::to_bytes(body, LOCAL_API_LIMIT).await {
+        Ok(b) => b,
+        Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+    let payload: ConversationMessageRequest = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+    let message = payload.message.trim().to_string();
+    if message.is_empty() {
+        return api_error(StatusCode::BAD_REQUEST, "message is empty");
+    }
+
+    // Auto-title on first user message if none set.
+    if let Ok(record) = conv_repo::get(state.node.db(), &id) {
+        if let Some(rec) = record {
+            if rec.client_id != cid {
+                return api_error(StatusCode::NOT_FOUND, "conversation not found");
+            }
+            if rec.title.is_none() {
+                let title = auto_title(&message, 8);
+                let now = time::OffsetDateTime::now_utc().unix_timestamp();
+                let _ = conv_repo::update_meta(
+                    state.node.db(),
+                    &id,
+                    Some(&title),
+                    now,
+                );
+            }
+        } else {
+            return api_error(StatusCode::NOT_FOUND, "conversation not found");
+        }
+    } else {
+        return api_error(StatusCode::INTERNAL_SERVER_ERROR, "db read failed");
+    }
+
+    match runtime.handle_user_message(&cid, &id, message).await {
+        Ok(outcome) => {
+            let trace: Vec<Value> = outcome
+                .trace
+                .into_iter()
+                .map(|t| {
+                    json!({
+                        "peer_id": t.peer_id,
+                        "capability": t.capability,
+                        "args": t.args,
+                        "result": t.result,
+                        "error": t.error,
+                    })
+                })
+                .collect();
+            Json(json!({
+                "conversation_id": id,
+                "reply": outcome.reply,
+                "model": outcome.model,
+                "trace": trace,
+            }))
+            .into_response()
+        }
+        Err(e) => http_error(&e),
+    }
+}
+
+fn map_conv_load_error(e: n3ur0n_node::conversation::ConversationError) -> Response {
+    use n3ur0n_node::conversation::ConversationError;
+    match e {
+        ConversationError::NotFound(_) | ConversationError::OwnershipMismatch => {
+            api_error(StatusCode::NOT_FOUND, "conversation not found")
+        }
+        other => api_error(StatusCode::INTERNAL_SERVER_ERROR, &other.to_string()),
+    }
+}
+
+fn auto_title(message: &str, max_words: usize) -> String {
+    message
+        .split_whitespace()
+        .take(max_words)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ---------------------------------------------------------------------------

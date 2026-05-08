@@ -25,7 +25,10 @@ pub enum StorageError {
 
 pub type StorageResult<T> = Result<T, StorageError>;
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_conversations.sql"),
+];
 
 pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Db> {
     let manager = SqliteConnectionManager::file(path).with_init(|conn| {
@@ -70,6 +73,7 @@ fn migrate(pool: &Db) -> StorageResult<()> {
     Ok(())
 }
 
+pub mod conversations;
 pub mod peers;
 pub mod nonces;
 

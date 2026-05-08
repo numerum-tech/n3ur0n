@@ -12,12 +12,15 @@
 //! [`Node::handle`](crate::Node::handle), and re-emit the resulting reply.
 
 pub mod client;
+pub mod conversation;
 pub mod discovery;
 pub mod error;
 pub mod handler;
 pub mod identity_file;
 pub mod node;
+pub mod planner;
 pub mod registry;
+pub mod runtime;
 
 pub use error::{NodeError, NodeResult};
 pub use handler::handle_request;

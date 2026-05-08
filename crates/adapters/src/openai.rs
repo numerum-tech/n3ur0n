@@ -95,7 +95,12 @@ impl OpenAIBackend {
 #[derive(Debug, Deserialize, Serialize)]
 struct ChatMessage {
     role: String,
-    content: String,
+    /// `content` may be `null` when the assistant only emits tool_calls.
+    #[serde(default)]
+    content: Option<String>,
+    /// Native tool-calling output (OpenAI-compatible models / Ollama ≥ 0.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,12 +156,16 @@ impl Backend for OpenAIBackend {
         let first = parsed.choices.into_iter().next().ok_or_else(|| {
             AdapterError::Backend("upstream returned no choices".into())
         })?;
+        let mut message = json!({
+            "role": first.message.role,
+            "content": first.message.content,
+        });
+        if let Some(tc) = first.message.tool_calls {
+            message["tool_calls"] = tc;
+        }
         Ok(json!({
             "model": parsed.model,
-            "message": {
-                "role": first.message.role,
-                "content": first.message.content,
-            },
+            "message": message,
             "finish_reason": first.finish_reason,
         }))
     }
@@ -200,11 +209,15 @@ impl Backend for OpenAIBackend {
 fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
     // Convenience: a string `prompt` becomes a single user message.
     if let Some(prompt) = args.get("prompt").and_then(|v| v.as_str()) {
-        return Ok(json!({
+        let mut req = json!({
             "model": args.get("model").cloned().unwrap_or_else(|| Value::String(default_model.to_string())),
             "messages": [{"role": "user", "content": prompt}],
             "stream": false,
-        }));
+        });
+        if let Some(tools) = args.get("tools") {
+            req["tools"] = tools.clone();
+        }
+        return Ok(req);
     }
     if args.get("messages").is_none() {
         return Err(AdapterError::Backend(

@@ -128,4 +128,38 @@ print("  peer:", b["peer_id"][:24] + "...", "| reply:", content[:80])
 '
 green "Web-UI local API path OK."
 
+# --- 8. Capacity planner: /api/v0/converse via conversations -------------
+yellow "Capacity planner: create conversation + dispatch via planner"
+COOKIE_FILE=$(mktemp -t n3uron-smoke-cookies)
+# trap removed: keep cookie for any post-mortem inspection
+CONV_ID=$(curl -fsS -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+    -X POST http://localhost:4242/api/v0/conversations \
+    -H "content-type: application/json" -d '{}' \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+yellow "  conversation_id: $CONV_ID"
+
+# Seed node-a directory so the planner has chat available.
+"${COMPOSE[@]}" exec -T node-a \
+    n3ur0n peers refresh --endpoint http://node-c:4242 > /dev/null
+
+REPLY=$(curl -fsS --max-time 180 -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+    -X POST "http://localhost:4242/api/v0/conversations/$CONV_ID/messages" \
+    -H "content-type: application/json" \
+    -d '{"message":"Reply with the single word: ok"}')
+
+echo "$REPLY" | python3 -c '
+import sys, json
+b = json.load(sys.stdin)
+assert b.get("reply"), f"empty reply: {b}"
+trace = b.get("trace", [])
+# The LLM may pick any tool from the catalog, or none at all if confident.
+# Validate shape only: reply non-empty, trace is a list, model populated.
+assert isinstance(trace, list), f"trace not a list: {b}"
+assert b.get("model"), f"no model in outcome: {b}"
+print("  reply:", b["reply"][:80])
+print("  model:", b["model"])
+print("  trace:", [t.get("capability") for t in trace] or "(no tools — direct reply)")
+'
+green "Capacity planner OK."
+
 green "Cluster smoke test PASSED."

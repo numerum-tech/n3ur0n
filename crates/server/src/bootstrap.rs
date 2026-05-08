@@ -10,6 +10,8 @@ use n3ur0n_adapters::{
     openai::{OpenAIBackend, OpenAIConfig},
 };
 use n3ur0n_core::Keypair;
+use n3ur0n_node::planner::{LLMPlanner, Planner};
+use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_node::{CapabilityRegistry, IdentityFile, Node, NodeConfig, identity_file};
 
 pub fn default_config_dir() -> PathBuf {
@@ -81,6 +83,40 @@ fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {
             Ok(Arc::new(backend))
         }
     }
+}
+
+/// Planner selector. v0.1 only ships LLM-based planner.
+#[derive(Debug, Clone)]
+pub enum PlannerKind {
+    /// LLM-driven, native tool-calling.
+    Llm {
+        /// Backend used for the planning conversation (an OpenAI-compatible
+        /// endpoint).
+        backend: OpenAIConfig,
+        /// Optional default model for the planner; falls back to the
+        /// `OpenAIConfig.default_model` if `None`.
+        model_hint: Option<String>,
+    },
+}
+
+/// Build a `NodeRuntime` (Node + Planner + concurrency primitives) from a
+/// resolved `PlannerKind`.
+pub fn build_runtime(
+    node: Node,
+    kind: PlannerKind,
+    runtime_config: RuntimeConfig,
+) -> Result<NodeRuntime> {
+    let planner: Arc<dyn Planner> = match kind {
+        PlannerKind::Llm { backend, model_hint } => {
+            let llm: Arc<dyn Backend> = Arc::new(
+                OpenAIBackend::new(backend.clone())
+                    .map_err(|e| anyhow::anyhow!("planner llm init: {e}"))?,
+            );
+            let chosen_model = model_hint.unwrap_or(backend.default_model);
+            Arc::new(LLMPlanner::new(llm, Some(chosen_model)))
+        }
+    };
+    Ok(NodeRuntime::new(node, planner, runtime_config))
 }
 
 /// Generate a fresh identity, persist it, and return the underlying keypair.

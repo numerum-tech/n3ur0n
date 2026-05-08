@@ -74,6 +74,9 @@ clap = { version = "4", features = ["derive", "env"] }
 # Rate limiting
 governor = "0.6"
 
+# Caching
+lru = "0.12"
+
 # Internal
 n3ur0n-core = { path = "crates/core" }
 n3ur0n-storage = { path = "crates/storage" }

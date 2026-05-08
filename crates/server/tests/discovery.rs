@@ -32,7 +32,7 @@ async fn build_node() -> Node {
 async fn spawn_node(node: Node) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local = listener.local_addr().unwrap();
-    let app = http::app(node);
+    let app = http::app(node, None);
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });

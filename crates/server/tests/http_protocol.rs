@@ -54,7 +54,7 @@ async fn post_message(router: &axum::Router, msg: &SignedMessage) -> (StatusCode
 async fn signed_ping_round_trip() {
     let node = build_node().await;
     let recipient = node.instance_id();
-    let router = app(node);
+    let router = app(node, None);
 
     let client = Keypair::generate();
     let env = Envelope {
@@ -80,7 +80,7 @@ async fn signed_ping_round_trip() {
 async fn tampered_signature_returns_unauthorized() {
     let node = build_node().await;
     let recipient = node.instance_id();
-    let router = app(node);
+    let router = app(node, None);
 
     let client = Keypair::generate();
     let mut signed = Envelope {
@@ -109,7 +109,7 @@ async fn tampered_signature_returns_unauthorized() {
 async fn replay_returns_conflict() {
     let node = build_node().await;
     let recipient = node.instance_id();
-    let router = app(node);
+    let router = app(node, None);
 
     let client = Keypair::generate();
     let signed = Envelope {

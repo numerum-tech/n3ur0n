@@ -3,42 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>N3UR0N — chat</title>
+    <title>N3UR0N</title>
     <link rel="stylesheet" href="/ui/style.css">
 </head>
 <body>
-    <header>
-        <h1>N3UR0N</h1>
-        <div class="meta">
-            <span class="label">self:</span>
-            <code id="self-id">…</code>
-        </div>
-    </header>
+    <aside class="sidebar">
+        <header class="sidebar-header">
+            <h1>N3UR0N</h1>
+            <code id="self-id" class="self-id" title="local instance id">…</code>
+        </header>
+        <button id="new-chat" type="button" class="primary">+ New chat</button>
+        <ul id="conv-list" class="conv-list"></ul>
+    </aside>
 
-    <main>
-        <section class="controls">
-            <label>
-                Peer
-                <select id="peer-select">
-                    <option value="">(loading…)</option>
-                </select>
-            </label>
-            <label>
-                Capability
-                <select id="cap-select" disabled>
-                    <option value="">(no peer)</option>
-                </select>
-            </label>
-            <button id="refresh-peers" type="button" title="reload directory">refresh list</button>
-            <button id="discover-chat" type="button" title="cascade-discover peers offering `chat`">discover chat</button>
-            <button id="clear-conv" type="button" title="reset conversation history">clear</button>
-            <span id="peer-cap" class="hint"></span>
+    <main class="main-pane">
+        <header class="main-header">
+            <h2 id="conv-title">No conversation</h2>
+            <div class="actions">
+                <button id="rename" type="button" disabled>Rename</button>
+                <button id="delete" type="button" disabled>Delete</button>
+            </div>
+        </header>
+
+        <section id="conversation" class="conversation">
+            <p class="empty-hint">Pick a conversation in the sidebar or click <strong>+ New chat</strong>.</p>
         </section>
 
-        <section class="conversation" id="conversation"></section>
-
-        <section class="composer" id="composer">
-            <!-- Populated dynamically by app.js based on selected capability. -->
+        <section class="composer">
+            <textarea id="prompt" rows="3" placeholder="Type your message and press Enter (Shift+Enter = newline)…" disabled></textarea>
+            <button id="send" type="button" disabled>Send</button>
         </section>
     </main>
 

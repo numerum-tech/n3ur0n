@@ -170,11 +170,50 @@ docker compose -f docker/compose.yml down -v
 - `node-c` : backend Ollama via `host.docker.internal:11434` (host Ollama réutilisé via `extra_hosts: host-gateway`). Modèle override par env `OLLAMA_MODEL` (défaut `qwen2.5:0.5b`), base URL override par `OLLAMA_BASE_URL`.
 - `node-b` bootstrappe automatiquement depuis `node-a` (env `N3UR0N_BOOTSTRAP_PEERS`).
 
-### Web chat UI (browser → distant LLM)
+### Capacity planner v0.1 (Mode A — local LLM)
 
-`http://localhost:4242/ui/` (servi par node-a, peut être servi par n'importe quel nœud).
+Le user **dialogue uniquement avec son instance**. L'instance fait planner → tool_call → observe → reply. v0.1 livre une seule impl `LLMPlanner` (tool-calling natif OpenAI). Modèle recommandé : `llama3.1:8b` ou `qwen2.5:7b`.
 
-UI : peer dropdown (alimentée par `/api/v0/peers`), prompt textarea, send (⌘/Ctrl+Enter), conversation. Sélectionner un peer offrant la capacité `chat` (ex. node-c) puis envoyer un prompt → server signe `invoke chat` vers le peer choisi → LLM répond → bulle assistant.
+Cf `n3ur0n-planner-brainstorm.md` pour le brainstorm complet (3 modes, 4 niveaux, limites assumées).
+
+**Flow runtime** :
+```
+browser → /api/v0/conversations/:id/messages {message}
+       → middleware client_id (cookie)
+       → ownership check (404 sinon)
+       → conv_lock[id] mutex (sérialise même conv)
+       → planner_slots semaphore (limite parallèle LLM)
+       → load ConversationState (cache LRU OR SQLite)
+       → planner.dispatch (boucle plan → tool_call → observe)
+       → persist chaque turn (transaction atomique)
+       → return {reply, trace, model}
+```
+
+**Limites configurables** (env / CLI) :
+- `N3UR0N_PLANNER_MODE=llm|none`
+- `N3UR0N_PLANNER_LLM_BASE_URL`, `N3UR0N_PLANNER_LLM_MODEL`, `N3UR0N_PLANNER_LLM_API_KEY`
+- `N3UR0N_MAX_CONCURRENT_PLANNERS=4`
+- `N3UR0N_MAX_ACTIVE_CONVERSATIONS=50`
+- `MAX_TOOL_TURNS=6`, `MAX_CONTEXT_TURNS=16` (constantes code)
+
+**Conversations API** (cookie `n3ur0n_client_id` pour isolation, généré server-side) :
+| Route | Rôle |
+|---|---|
+| `POST /api/v0/conversations` | Créer (returns id) |
+| `GET /api/v0/conversations` | Liste filtrée par client_id |
+| `GET /api/v0/conversations/:id` | Détail + turns (404 si pas owner) |
+| `PATCH /api/v0/conversations/:id` | Rename |
+| `DELETE /api/v0/conversations/:id` | Cascade delete |
+| `POST /api/v0/conversations/:id/messages` | Dispatch via planner. Retourne `{reply, model, trace}`. 503 si pas de planner. |
+
+### Web chat UI (browser → planner → peers)
+
+`http://localhost:4242/ui/`. Layout : sidebar conversations + main pane composer. Pas de dropdown peer/cap par défaut — le planner décide. Tool calls/results sont visibles en bulles `tool` collapsibles.
+
+**Routes legacy / advanced** (manual mode) :
+- `POST /api/v0/chat {peer_endpoint, prompt|messages}` → signed invoke direct
+- `POST /api/v0/invoke {peer_endpoint, capability, args}` → signed invoke générique
+- `POST /api/v0/peers/refresh|discover` → directory ops
 
 Local API (non signée, loopback-only en prod) :
 
