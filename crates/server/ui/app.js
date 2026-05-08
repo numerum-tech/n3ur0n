@@ -42,14 +42,24 @@ async function loadPeers() {
             opt.textContent = "(no peers in directory — run `n3ur0n peers refresh` or wait for bootstrap)";
             peerSelect.appendChild(opt);
             peerCap.textContent = "";
+            sendBtn.disabled = true;
             return;
         }
-        for (const p of knownPeers) {
+        let firstChatIdx = -1;
+        knownPeers.forEach((p, idx) => {
             const opt = document.createElement("option");
             opt.value = p.endpoint;
-            opt.textContent = `${p.alias || p.instance_id.slice(0, 18) + "…"}  ${p.endpoint}`;
-            opt.dataset.caps = (p.capabilities || []).join(",");
+            const caps = p.capabilities || [];
+            const tag = caps.length ? ` [${caps.join(",")}]` : "";
+            opt.textContent = `${p.alias || p.instance_id.slice(0, 18) + "…"}  ${p.endpoint}${tag}`;
+            opt.dataset.caps = caps.join(",");
             peerSelect.appendChild(opt);
+            if (firstChatIdx === -1 && caps.includes("chat")) {
+                firstChatIdx = idx;
+            }
+        });
+        if (firstChatIdx >= 0) {
+            peerSelect.selectedIndex = firstChatIdx;
         }
         updateCapHint();
     } catch (e) {
@@ -61,18 +71,22 @@ function updateCapHint() {
     const opt = peerSelect.selectedOptions[0];
     if (!opt) {
         peerCap.textContent = "";
+        sendBtn.disabled = true;
         return;
     }
     const caps = (opt.dataset.caps || "").split(",").filter(Boolean);
     if (caps.includes("chat")) {
         peerCap.textContent = `caps: ${caps.join(", ")}`;
         peerCap.style.color = "";
+        sendBtn.disabled = false;
     } else if (caps.length > 0) {
-        peerCap.textContent = `caps: ${caps.join(", ")} (no \`chat\` — invoke will fail)`;
+        peerCap.textContent = `caps: ${caps.join(", ")} (no \`chat\` — pick another peer)`;
         peerCap.style.color = "var(--error)";
+        sendBtn.disabled = true;
     } else {
-        peerCap.textContent = "no cached capabilities";
+        peerCap.textContent = "no cached capabilities — try `n3ur0n peers refresh`";
         peerCap.style.color = "var(--muted)";
+        sendBtn.disabled = true;
     }
 }
 
@@ -103,10 +117,11 @@ async function send() {
             pending.querySelector("span:last-child").textContent = body.error || JSON.stringify(body);
             return;
         }
-        const reply = body.reply || {};
-        const message = reply.message?.content
-            ?? (typeof reply === "string" ? reply : JSON.stringify(reply, null, 2));
-        const model = reply.model ? ` · ${reply.model}` : "";
+        // invoke replies wrap the capability output in {result: ...}
+        const result = body.reply?.result ?? body.reply ?? {};
+        const message = result.message?.content
+            ?? (typeof result === "string" ? result : JSON.stringify(result, null, 2));
+        const model = result.model ? ` · ${result.model}` : "";
         pending.querySelector(".who").textContent = `${body.peer_id?.slice(0, 18) || peer}…${model}`;
         pending.querySelector("span:last-child").textContent = message;
     } catch (e) {
