@@ -166,7 +166,26 @@ docker compose -f docker/compose.yml down -v
 
 3 nodes (`node-a`/`node-b`/`node-c`) sur ports hôte 4242/4243/4244, réseau bridge interne `n3uronnet`. Volumes par nœud. Healthcheck via `/n3ur0n/v0/health` (renvoie `{status, instance_id, protocol_version}`).
 
-`node-b` est lancé avec `N3UR0N_BOOTSTRAP_PEERS=http://node-a:4242` → bootstrap au démarrage : signed `describe_self` vers a, upsert dans le directory de b. Smoke script teste aussi cascade depth-1 (a → b → c via `peers discover --capability echo`).
+- `node-a`, `node-b` : backend echo (default).
+- `node-c` : backend Ollama via `host.docker.internal:11434` (host Ollama réutilisé via `extra_hosts: host-gateway`). Modèle override par env `OLLAMA_MODEL` (défaut `qwen2.5:0.5b`), base URL override par `OLLAMA_BASE_URL`.
+- `node-b` bootstrappe automatiquement depuis `node-a` (env `N3UR0N_BOOTSTRAP_PEERS`).
+
+### Web chat UI (browser → distant LLM)
+
+`http://localhost:4242/ui/` (servi par node-a, peut être servi par n'importe quel nœud).
+
+UI : peer dropdown (alimentée par `/api/v0/peers`), prompt textarea, send (⌘/Ctrl+Enter), conversation. Sélectionner un peer offrant la capacité `chat` (ex. node-c) puis envoyer un prompt → server signe `invoke chat` vers le peer choisi → LLM répond → bulle assistant.
+
+Local API (non signée, loopback-only en prod) :
+
+| Route | Méthode | Rôle |
+|---|---|---|
+| `/api/v0/peers` | GET | Liste répertoire local + caps mises en cache |
+| `/api/v0/chat` | POST `{peer_endpoint, prompt, model?}` | Proxy signé `invoke chat` vers le peer |
+| `/api/v0/whoami` | GET | `{instance_id}` |
+| `/api/v0/health` | GET | `{status: ok}` |
+
+Smoke script (`bash docker/cluster-smoke.sh`) couvre : healthchecks, 6 pings croisés signés, describe_self, invoke chat signé a→c, bootstrap b←a, cascade depth-1 a→b→c sur capacité `chat`, **et le chemin browser** via POST `/api/v0/chat` sur node-a.
 
 ```bash
 # Workspace Rust

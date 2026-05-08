@@ -1,0 +1,120 @@
+:root {
+    color-scheme: dark;
+    --bg: #0b0d10;
+    --panel: #15191f;
+    --border: #2a2f38;
+    --text: #d8dde6;
+    --muted: #8b94a3;
+    --accent: #5eead4;
+    --user: #1a3a5f;
+    --assistant: #28323d;
+    --error: #ef4444;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.05rem;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+}
+
+.meta { font-size: 0.8rem; color: var(--muted); }
+.meta code { color: var(--text); }
+
+main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 24px;
+    gap: 16px;
+    overflow: hidden;
+}
+
+.controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.controls label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+select, button, textarea {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font: inherit;
+}
+
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: progress; }
+
+.hint { font-size: 0.78rem; color: var(--muted); }
+
+.conversation {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: 6px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.bubble {
+    padding: 10px 12px;
+    border-radius: 6px;
+    max-width: 90%;
+    white-space: pre-wrap;
+    font-size: 0.92rem;
+    line-height: 1.4;
+}
+
+.bubble.user { align-self: flex-end; background: var(--user); }
+.bubble.assistant { align-self: flex-start; background: var(--assistant); }
+.bubble.error { align-self: stretch; background: rgba(239, 68, 68, 0.12); color: var(--error); border: 1px solid var(--error); }
+.bubble .who { display: block; font-size: 0.7rem; color: var(--muted); margin-bottom: 4px; }
+
+.composer {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+}
+
+#prompt { flex: 1; resize: vertical; min-height: 60px; }
+#send { min-width: 80px; }

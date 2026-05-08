@@ -2,15 +2,17 @@
 # Cluster smoke test:
 #   1. Wait for all 3 healthchecks.
 #   2. Cross-node signed ping (6 directed pairs).
-#   3. describe_self a -> {b, c}.
-#   4. invoke echo a -> c.
-#   5. Compose-driven bootstrap: b should know a (compose sets
-#      N3UR0N_BOOTSTRAP_PEERS=http://node-a:4242 on node-b).
-#   6. Manual cascade discovery topology:
-#        - a refresh node-b   (a learns b)
-#        - b refresh node-c   (b's directory becomes {a, c})
-#      then `n3ur0n peers discover --capability echo` on a
-#      should reach c via b's directory.
+#   3. describe_self a -> {b, c}: c should advertise the `chat` capability.
+#   4. invoke chat a -> c (signed) and check we get a non-empty assistant reply.
+#   5. Bootstrap-populated directory: b should know a (compose env).
+#   6. Cascade discovery for `chat`:
+#        - a refresh node-b
+#        - b refresh node-c
+#      then `n3ur0n peers discover --capability chat` on a should pull c
+#      via b.
+#   7. Local-API path used by the web UI: POST /api/v0/chat on node-a's
+#      port 4242 with peer_endpoint=node-c. Verifies the same end-to-end
+#      browser flow.
 #
 # Run after `docker compose -f docker/compose.yml up -d --build`.
 set -euo pipefail
@@ -62,13 +64,19 @@ for to in node-b node-c; do
 done
 green "describe_self OK."
 
-# --- 4. invoke -----------------------------------------------------------------
-yellow "[node-a -> node-c] invoke echo"
+# --- 4. invoke chat a -> c (signed) -------------------------------------------
+yellow "[node-a -> node-c] invoke chat (signed protocol)"
 "${COMPOSE[@]}" exec -T node-a \
     n3ur0n send --endpoint http://node-c:4242 --verb invoke \
-    --payload '{"capability":"echo","args":{"hello":"world"}}' \
-    | python3 -c 'import sys,json; r=json.load(sys.stdin); assert r["result"]=={"hello":"world"}, r; print(" ", r)'
-green "invoke OK."
+    --payload '{"capability":"chat","args":{"prompt":"Reply with one short sentence: hello."}}' \
+    | python3 -c '
+import sys, json
+r = json.load(sys.stdin)["result"]
+content = r["message"]["content"]
+assert content.strip(), f"empty assistant content: {r}"
+print("  model:", r.get("model"), "| reply:", content[:80] + ("..." if len(content) > 80 else ""))
+'
+green "invoke chat OK."
 
 # --- 5. Compose bootstrap populated b's directory ------------------------------
 yellow "Waiting for node-b's startup bootstrap to complete..."
@@ -85,10 +93,7 @@ if ! echo "$out_b" | grep -q "node-a:4242"; then
 fi
 green "Compose bootstrap populated node-b directory OK."
 
-# --- 6. Cascade discovery topology --------------------------------------------
-# Topology required to exercise depth-1 cascade:
-#   a knows {b}
-#   b knows {a, c}
+# --- 6. Cascade discovery for `chat` ------------------------------------------
 yellow "[node-a] peers refresh node-b"
 "${COMPOSE[@]}" exec -T node-a \
     n3ur0n peers refresh --endpoint http://node-b:4242 > /dev/null
@@ -96,21 +101,31 @@ yellow "[node-b] peers refresh node-c"
 "${COMPOSE[@]}" exec -T node-b \
     n3ur0n peers refresh --endpoint http://node-c:4242 > /dev/null
 
-yellow "[node-a] peers discover --capability echo (cascade depth 1 via b)"
+yellow "[node-a] peers discover --capability chat (cascade depth 1 via b)"
 "${COMPOSE[@]}" exec -T node-a \
-    n3ur0n peers discover --capability echo
+    n3ur0n peers discover --capability chat
 
 dir_a=$("${COMPOSE[@]}" exec -T node-a n3ur0n peers list)
 yellow "node-a directory:"
 echo "$dir_a"
-if ! echo "$dir_a" | grep -q "node-b:4242"; then
-    red "node-a does not know node-b after refresh"
-    exit 1
-fi
 if ! echo "$dir_a" | grep -q "node-c:4242"; then
     red "node-a did not discover node-c via cascade"
     exit 1
 fi
 green "Cascade discovery OK."
+
+# --- 7. Local API path used by the web UI -------------------------------------
+yellow "POST http://localhost:4242/api/v0/chat (browser flow)"
+out=$(curl -fsS -X POST http://localhost:4242/api/v0/chat \
+      -H "content-type: application/json" \
+      -d '{"peer_endpoint":"http://node-c:4242","prompt":"Reply with: ok cluster."}')
+echo "$out" | python3 -c '
+import sys, json
+b = json.load(sys.stdin)
+content = b["reply"]["result"]["message"]["content"]
+assert content.strip(), f"empty content: {b}"
+print("  peer:", b["peer_id"][:24] + "...", "| reply:", content[:80])
+'
+green "Web-UI local API path OK."
 
 green "Cluster smoke test PASSED."

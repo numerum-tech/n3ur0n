@@ -1016,6 +1016,7 @@ dependencies = [
  "clap",
  "http-body-util",
  "hyper",
+ "mime_guess",
  "n3ur0n-adapters",
  "n3ur0n-core",
  "n3ur0n-node",
