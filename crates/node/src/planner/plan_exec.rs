@@ -70,10 +70,19 @@ Rules:\n\
     {\"id\": \"s3\", \"peer\": \"xyz\", \"capability\": \"chat\",\n\
      \"args\": {\"prompt\": \"Write one rhyming line about ${s2.reversed}\"}}\n\
 - A reference inside args creates an implicit dependency (omit from `depends_on`).\n\
+- NO arithmetic, conditionals, or function calls inside `${...}`. Only paths.\n\
+  WRONG: `${s2.value + s1.year}`, `${len(s1.text)}`, `${s1.value * 2}`.\n\
+  RIGHT: include the raw values as separate refs and let the downstream tool \
+  do the math. Example: `\"prompt\": \"Year ${s1.year} plus ${s2.value} — describe a bicycle from that year.\"`.\n\
+- Each `${...}` head must match a step id you defined earlier in the plan. \
+Do NOT invent step ids.\n\
 - For chat-like tools, set only fields the schema declares; never set `model`.\n\
 - Pick the SHORTEST useful plan. If the user asks something you can answer from \
 prior knowledge with no tool, return an empty plan: `{\"plan\": []}`.\n\
 - All `peer` values must come from the tools list verbatim.\n\
+- Do NOT add filler steps (e.g. an `echo` cap that just relays a previous \
+result). The reflection step at the end already turns the blackboard into the \
+user's reply.\n\
 \n\
 Available tools (peer::capability — description, schema_in):\n",
         );

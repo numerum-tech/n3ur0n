@@ -215,6 +215,26 @@ fn looks_like_step_id(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Walk a Value and return the first unresolved `${...}` template found in
+/// any string. Used post-substitution to fail fast instead of sending
+/// literal `${...}` to a downstream tool.
+pub(crate) fn first_unresolved_template(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => {
+            // Look for `${...}` substring
+            if let Some(start) = s.find("${") {
+                if let Some(end_rel) = s[start + 2..].find('}') {
+                    return Some(s[start..start + 2 + end_rel + 1].to_string());
+                }
+            }
+            None
+        }
+        Value::Array(arr) => arr.iter().find_map(first_unresolved_template),
+        Value::Object(o) => o.values().find_map(first_unresolved_template),
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Reference resolution
 // ---------------------------------------------------------------------------
@@ -348,6 +368,27 @@ pub async fn execute_plan(node: &Node, plan: &Plan, catalog: &Catalog) -> NodeRe
             NodeError::InvalidPayload(format!("topo order yielded unknown id `{step_id}`"))
         })?;
         let resolved_args = resolve_value(&step.args, &blackboard);
+
+        // Detect unresolved templates left in args. These indicate the LLM
+        // emitted an unsupported expression (e.g. `${s1.value + s2.value}`)
+        // or referenced a step id that didn't exist. Fail this step rather
+        // than send literal text to the tool.
+        if let Some(unresolved) = first_unresolved_template(&resolved_args) {
+            let err = format!(
+                "step `{}`: unresolved template `{}` (no expressions allowed in ${{...}}; \
+use raw refs only, let the downstream tool combine values)",
+                step.id, unresolved
+            );
+            blackboard.insert(step.id.clone(), json!({"error": err.clone()}));
+            trace.push(TraceEntry {
+                peer_id: step.peer.clone(),
+                capability: step.capability.clone(),
+                args: resolved_args,
+                result: None,
+                error: Some(err),
+            });
+            continue;
+        }
 
         // Find the tool in catalog
         let tool_name = format!("{}::{}", step.peer, step.capability);
@@ -497,6 +538,17 @@ mod tests {
         };
         let order = topological_order(&plan).unwrap();
         assert_eq!(order, vec!["s1".to_string(), "s2".to_string()]);
+    }
+
+    #[test]
+    fn detects_unresolved_template() {
+        let bb = bb(&[("s1", json!({"value": 42}))]);
+        let resolved = resolve_value(&json!("year ${s1.value + s2.year}"), &bb);
+        // The expression form doesn't match any path key, falls through to
+        // inline substitute, which leaves it literal because the inner is
+        // not a clean dotted path.
+        let leftover = first_unresolved_template(&resolved);
+        assert!(leftover.is_some(), "unresolved template should be flagged");
     }
 
     #[test]
