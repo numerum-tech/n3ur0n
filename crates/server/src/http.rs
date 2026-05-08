@@ -128,27 +128,31 @@ async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
             let body: Vec<Value> = rows
                 .into_iter()
                 .map(|p| {
-                    let caps: Vec<String> = p
+                    let caps: Vec<Value> = p
                         .describe_self_cached
                         .as_deref()
                         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
                         .and_then(|d| {
                             d.get("capabilities")
                                 .and_then(|c| c.as_array())
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|c| {
-                                            c.get("name").and_then(|n| n.as_str()).map(String::from)
-                                        })
-                                        .collect()
-                                })
+                                .cloned()
                         })
                         .unwrap_or_default();
+                    let summarised: Vec<Value> = caps
+                        .into_iter()
+                        .map(|c| {
+                            json!({
+                                "name": c.get("name").cloned().unwrap_or(Value::Null),
+                                "description": c.get("description").cloned().unwrap_or(Value::Null),
+                                "schema_in": c.get("schema_in").cloned().unwrap_or(Value::Null),
+                            })
+                        })
+                        .collect();
                     json!({
                         "instance_id": p.id,
                         "endpoint": p.endpoint,
                         "alias": p.alias,
-                        "capabilities": caps,
+                        "capabilities": summarised,
                     })
                 })
                 .collect();

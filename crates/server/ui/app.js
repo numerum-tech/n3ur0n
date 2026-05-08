@@ -71,12 +71,14 @@ async function loadPeers() {
         knownPeers.forEach((p, idx) => {
             const opt = document.createElement("option");
             opt.value = p.endpoint;
-            const caps = p.capabilities || [];
-            const tag = caps.length ? ` [${caps.join(",")}]` : "";
+            const caps = (p.capabilities || []).map(c => typeof c === "string" ? { name: c } : c);
+            p._caps = caps; // cache for capability dropdown
+            const names = caps.map(c => c.name).filter(Boolean);
+            const tag = names.length ? ` [${names.join(",")}]` : "";
             opt.textContent = `${p.alias || p.instance_id.slice(0, 18) + "…"}  ${p.endpoint}${tag}`;
-            opt.dataset.caps = caps.join(",");
+            opt.dataset.idx = idx;
             peerSelect.appendChild(opt);
-            if (firstChatIdx === -1 && caps.includes("chat")) {
+            if (firstChatIdx === -1 && names.includes("chat")) {
                 firstChatIdx = idx;
             }
         });
@@ -87,17 +89,30 @@ async function loadPeers() {
     }
 }
 
-function updateCapabilities() {
+function selectedPeer() {
     const opt = peerSelect.selectedOptions[0];
+    if (!opt || !opt.value) return null;
+    const idx = parseInt(opt.dataset.idx, 10);
+    return Number.isFinite(idx) ? knownPeers[idx] : null;
+}
+
+function selectedCapability() {
+    const peer = selectedPeer();
+    if (!peer) return null;
+    return (peer._caps || []).find(c => c.name === capSelect.value) || null;
+}
+
+function updateCapabilities() {
     capSelect.innerHTML = "";
-    if (!opt || !opt.value) {
+    const peer = selectedPeer();
+    if (!peer) {
         capSelect.disabled = true;
         capSelect.appendChild(new Option("(no peer)", ""));
         peerCap.textContent = "";
         sendBtn.disabled = true;
         return;
     }
-    const caps = (opt.dataset.caps || "").split(",").filter(Boolean);
+    const caps = peer._caps || [];
     if (caps.length === 0) {
         capSelect.disabled = true;
         capSelect.appendChild(new Option("(no cached caps — refresh)", ""));
@@ -107,28 +122,83 @@ function updateCapabilities() {
         return;
     }
     capSelect.disabled = false;
-    for (const c of caps) capSelect.appendChild(new Option(c, c));
-    if (caps.includes("chat")) capSelect.value = "chat";
+    for (const c of caps) capSelect.appendChild(new Option(c.name, c.name));
+    if (caps.find(c => c.name === "chat")) capSelect.value = "chat";
     onCapabilityChange();
 }
 
+// Last JSON skeleton we auto-prefilled — used to detect "user hasn't edited
+// it" so we can safely overwrite on cap change.
+let lastAutoPrefill = "";
+
 function onCapabilityChange() {
     const cap = capSelect.value;
+    const decl = selectedCapability();
+
+    // If the textarea still holds the previous auto-prefill, clear it before
+    // the cap-specific branches run.
+    if (lastAutoPrefill && promptEl.value === lastAutoPrefill) {
+        promptEl.value = "";
+        lastAutoPrefill = "";
+    }
+
     if (cap === "chat") {
-        peerCap.textContent = "multi-turn chat (history kept per peer+cap)";
+        peerCap.textContent = decl?.description
+            ? `${decl.description.slice(0, 80)}${decl.description.length > 80 ? "…" : ""}`
+            : "multi-turn chat (history kept per peer+cap)";
         peerCap.style.color = "";
         promptEl.placeholder = "Type a prompt and press Enter (Shift+Enter = newline)…";
         sendBtn.disabled = false;
     } else if (cap) {
-        peerCap.textContent = `invoke ${cap} — payload below treated as JSON args`;
+        const desc = decl?.description ? ` · ${decl.description.slice(0, 60)}` : "";
+        peerCap.textContent = `invoke "${cap}" — JSON args required${desc}`;
         peerCap.style.color = "";
-        promptEl.placeholder = `JSON args for capability "${cap}", e.g. {"x":1}`;
+        const skel = jsonSkeleton(decl?.schema_in);
+        promptEl.placeholder = `JSON args, e.g. ${skel}`;
+        if (promptEl.value.trim() === "") {
+            promptEl.value = skel;
+            lastAutoPrefill = skel;
+        }
         sendBtn.disabled = false;
     } else {
         peerCap.textContent = "";
         sendBtn.disabled = true;
     }
     renderConversation();
+}
+
+// Best-effort JSON skeleton from a JSON Schema fragment. Always returns valid
+// JSON (`{}` as fallback). Handles top-level `oneOf` by picking the first
+// branch's required props.
+function jsonSkeleton(schema) {
+    if (!schema || typeof schema !== "object") return "{}";
+    const branch = Array.isArray(schema.oneOf) && schema.oneOf.length > 0
+        ? schema.oneOf[0]
+        : schema;
+    const props = branch.properties || {};
+    const required = branch.required || Object.keys(props).slice(0, 1);
+    const out = {};
+    for (const k of required) {
+        const p = props[k] || {};
+        out[k] = exampleFor(p);
+    }
+    return JSON.stringify(out);
+}
+
+function exampleFor(prop) {
+    if (!prop || typeof prop !== "object") return null;
+    if (prop.example !== undefined) return prop.example;
+    const t = Array.isArray(prop.type) ? prop.type[0] : prop.type;
+    if (Array.isArray(prop.enum) && prop.enum.length > 0) return prop.enum[0];
+    switch (t) {
+        case "string": return "";
+        case "integer":
+        case "number": return 0;
+        case "boolean": return false;
+        case "array": return [];
+        case "object": return {};
+        default: return null;
+    }
 }
 
 async function sendChat(prompt) {
