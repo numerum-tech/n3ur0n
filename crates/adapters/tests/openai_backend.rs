@@ -110,6 +110,48 @@ async fn invoke_with_messages_array_locks_model_to_default() {
 }
 
 #[tokio::test]
+async fn drops_caller_supplied_tools_and_tool_call_history() {
+    let (base, state) = spawn_mock().await;
+    let backend = OpenAIBackend::new(OpenAIConfig {
+        base_url: base,
+        default_model: "default".into(),
+        api_key: None,
+        description: None,
+    })
+    .unwrap();
+
+    // Caller — typically a planner LLM forwarding args verbatim — leaks
+    // `tools` and `tool_calls` into the chat cap. Both must be dropped.
+    let payload = json!({
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{"id": "c1", "function": {"name": "x", "arguments": "{}"}}]
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "{}"}
+        ],
+        "tools": [{"type": "function", "function": {"name": "ghost"}}],
+        "tool_choice": "auto",
+        "model": "evil"
+    });
+    let _ = backend.invoke("chat", payload).await.unwrap();
+
+    let req = state.last_request.lock().await.clone().unwrap();
+    assert_eq!(req["model"], "default");
+    assert!(req.get("tools").is_none(), "tools must be stripped");
+    assert!(req.get("tool_choice").is_none(), "tool_choice must be stripped");
+    let msgs = req["messages"].as_array().unwrap();
+    for m in msgs {
+        assert!(m.get("tool_calls").is_none(), "tool_calls in history stripped");
+        assert!(m.get("tool_call_id").is_none(), "tool_call_id stripped");
+        // `role: tool` demoted to system.
+        assert_ne!(m["role"].as_str().unwrap(), "tool");
+    }
+}
+
+#[tokio::test]
 async fn unknown_capability_rejected() {
     let backend = OpenAIBackend::new(OpenAIConfig::ollama_local("nope")).unwrap();
     let err = backend.invoke("not-chat", json!({})).await.unwrap_err();

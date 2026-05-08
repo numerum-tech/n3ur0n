@@ -206,10 +206,31 @@ impl Backend for OpenAIBackend {
     }
 }
 
+/// Allowlist of fields a `chat` cap caller may set in args. Anything else
+/// is dropped to keep the upstream Ollama / OpenAI request safe.
+///
+/// Why: callers (planner LLMs, mostly) sometimes dump their own context —
+/// notably a `tools: [...]` array intended for their planner step — into
+/// the args of a downstream `chat` cap whose model (qwen2.5:0.5b) does not
+/// support tool-calling. The upstream then 500s. This sanitiser keeps only
+/// the fields the chat cap actually advertises.
+const CHAT_ARG_ALLOWLIST: &[&str] = &[
+    "prompt",
+    "messages",
+    "temperature",
+    "max_tokens",
+    "top_p",
+    "stop",
+];
+
 fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
+    // Apply allowlist first — drop tools / tool_choice / model overrides /
+    // anything else exotic.
+    let sanitised = sanitise_chat_args(args);
+
     // Convenience: a string `prompt` becomes a single user message.
-    if let Some(prompt) = args.get("prompt").and_then(|v| v.as_str()) {
-        let mut req = json!({
+    if let Some(prompt) = sanitised.get("prompt").and_then(|v| v.as_str()) {
+        return Ok(json!({
             // Lock the model to the operator-configured default. Callers
             // cannot override — they may hallucinate a model name (seen
             // with llama3.1:8b emitting "text-davinci-003"), which would
@@ -218,25 +239,51 @@ fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
             "model": default_model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": false,
-        });
-        if let Some(tools) = args.get("tools") {
-            req["tools"] = tools.clone();
-        }
-        return Ok(req);
+        }));
     }
-    if args.get("messages").is_none() {
+    if sanitised.get("messages").is_none() {
         return Err(AdapterError::Backend(
             "invoke args must contain either `prompt` (string) or `messages` (array)".into(),
         ));
     }
-    let mut obj = args.clone();
+    let mut obj = sanitised;
     if let Value::Object(map) = &mut obj {
         // Lock model regardless of what the client sent.
         map.insert("model".into(), Value::String(default_model.to_string()));
         // We don't support streaming over the protocol envelope yet — force false.
         map.insert("stream".into(), Value::Bool(false));
+        // Strip tool_calls from history messages — qwen2.5:0.5b and other
+        // small models can't parse them and 500.
+        if let Some(Value::Array(msgs)) = map.get_mut("messages") {
+            for m in msgs {
+                if let Value::Object(o) = m {
+                    o.remove("tool_calls");
+                    o.remove("tool_call_id");
+                    // `role: "tool"` messages also confuse non-tool models;
+                    // demote them to system content.
+                    if matches!(o.get("role"), Some(Value::String(r)) if r == "tool") {
+                        o.insert("role".into(), Value::String("system".into()));
+                    }
+                }
+            }
+        }
     }
     Ok(obj)
+}
+
+fn sanitise_chat_args(args: &Value) -> Value {
+    match args {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for k in CHAT_ARG_ALLOWLIST {
+                if let Some(v) = map.get(*k) {
+                    out.insert((*k).to_string(), v.clone());
+                }
+            }
+            Value::Object(out)
+        }
+        other => other.clone(),
+    }
 }
 
 fn chat_schema_in() -> Value {
