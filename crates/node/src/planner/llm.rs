@@ -48,10 +48,18 @@ impl LLMPlanner {
 
     fn build_system_prompt(&self, catalog: &Catalog) -> String {
         let mut s = String::from(
-            "You are an n3ur0n local planner. The user talks to you in natural \
-language. You may call tools (peer capabilities) to fulfil the request. \
-Pick at most one tool per turn; or, when the result is sufficient, reply \
-to the user directly. Always answer in the user's language.\n\n\
+            "You are an n3ur0n local planner.\n\
+\n\
+Behaviour rules — non-negotiable:\n\
+1. If you can answer directly using your own knowledge, REPLY IN PLAIN TEXT to the user. \
+Do not call any tool unless an external capability is required.\n\
+2. When you DO need a tool, emit it through the structured `tool_calls` field of your \
+response. Never produce JSON-shaped text in `content` — that goes to the user verbatim \
+and looks broken.\n\
+3. Tool names use the exact form `<short_peer>::<capability>` listed below. Do not \
+prefix `n3:` or use any other shape.\n\
+4. Always answer in the user's language.\n\
+\n\
 Available tools:\n",
         );
         if catalog.is_empty() {

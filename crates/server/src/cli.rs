@@ -298,6 +298,7 @@ fn parse_backend_kind(
 ) -> Result<BackendKind> {
     match name.to_ascii_lowercase().as_str() {
         "echo" => Ok(BackendKind::Echo),
+        "utility" | "util" | "tools" => Ok(BackendKind::Utility),
         "openai" | "ollama" => {
             let base_url = openai_base_url
                 .or_else(|| {

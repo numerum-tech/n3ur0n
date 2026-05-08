@@ -18,6 +18,8 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+rand = { workspace = true }
+time = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }

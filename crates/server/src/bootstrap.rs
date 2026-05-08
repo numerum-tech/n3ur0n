@@ -8,6 +8,7 @@ use n3ur0n_adapters::{
     Backend,
     echo::EchoBackend,
     openai::{OpenAIBackend, OpenAIConfig},
+    utility::UtilityBackend,
 };
 use n3ur0n_core::Keypair;
 use n3ur0n_node::planner::{LLMPlanner, Planner};
@@ -64,6 +65,8 @@ pub async fn load_node(
 pub enum BackendKind {
     /// Identity-style adapter; useful for cluster smoke and tests.
     Echo,
+    /// Multi-cap utility backend: time, random_int, reverse, string_length.
+    Utility,
     /// OpenAI-compatible chat endpoint (Ollama, llama.cpp, vLLM, OpenAI...).
     OpenAI(OpenAIConfig),
 }
@@ -77,6 +80,7 @@ impl Default for BackendKind {
 fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {
     match kind {
         BackendKind::Echo => Ok(Arc::new(EchoBackend)),
+        BackendKind::Utility => Ok(Arc::new(UtilityBackend)),
         BackendKind::OpenAI(cfg) => {
             let backend = OpenAIBackend::new(cfg)
                 .map_err(|e| anyhow::anyhow!("openai backend init: {e}"))?;

@@ -187,11 +187,19 @@ impl ConversationState {
         self.push(Turn::System { content, ts });
     }
 
-    /// Convert turns to OpenAI-style chat messages, applying the context
-    /// window pruning policy (keep last `max_turns`, never split a
-    /// ToolCall/ToolResult pair).
+    /// Convert turns to OpenAI-style chat messages, applying:
+    /// 1. Visibility filter: hide ToolCall/ToolResult turns that belong to a
+    ///    completed dispatch (i.e. happened before the most recent Assistant
+    ///    turn). The planner sees a clean User/Assistant trail for past
+    ///    rounds; tool turns from the **current** dispatch (after the most
+    ///    recent Assistant) stay visible so the planner can iterate.
+    ///    Without this, llama3.1:8b and similar imitate past tool_call
+    ///    formats inside their content output, producing JSON garbage.
+    /// 2. Context window pruning: keep at most `max_turns`, never split a
+    ///    ToolCall/ToolResult pair.
     pub fn to_chat_messages(&self, max_turns: usize) -> Vec<Value> {
-        let pruned = prune_context(&self.turns, max_turns);
+        let visible = filter_visible_for_llm(&self.turns);
+        let pruned = prune_context_refs(&visible, max_turns);
         pruned.into_iter().map(turn_to_message).collect()
     }
 
@@ -229,6 +237,10 @@ impl ConversationState {
 }
 
 /// Convert a Turn to an OpenAI-shaped chat message.
+///
+/// Tool names use the **short peer prefix** (12 chars after `n3:`) to match
+/// what the planner advertises in its `tools` array. Mixing full and short
+/// peer ids inside the same conversation confuses LLMs.
 fn turn_to_message(turn: &Turn) -> Value {
     match turn {
         Turn::User { content, .. } => json!({"role": "user", "content": content}),
@@ -247,7 +259,7 @@ fn turn_to_message(turn: &Turn) -> Value {
                 "id": id,
                 "type": "function",
                 "function": {
-                    "name": format!("{}::{}", peer_id, capability),
+                    "name": tool_name(peer_id.as_str(), capability),
                     "arguments": serde_json::to_string(args).unwrap_or_else(|_| "{}".into())
                 }
             }]
@@ -273,24 +285,68 @@ fn turn_to_message(turn: &Turn) -> Value {
     }
 }
 
+/// Tool name advertised to the LLM. Must match `Catalog::tool_name`.
+pub(crate) fn tool_name(peer_id: &str, capability: &str) -> String {
+    let trimmed = peer_id.strip_prefix("n3:").unwrap_or(peer_id);
+    let short: String = trimmed.chars().take(12).collect();
+    format!("{short}::{capability}")
+}
+
 /// Prune context: keep at most `max_turns` from the tail, never splitting a
 /// ToolCall / ToolResult pair. v0.1: doesn't preserve leading systems
 /// separately — system prompts are injected fresh by the planner at each
 /// dispatch, so only persisted Turns matter here.
 pub(crate) fn prune_context(turns: &[Turn], max_turns: usize) -> Vec<&Turn> {
-    if turns.len() <= max_turns {
-        return turns.iter().collect();
+    let refs: Vec<&Turn> = turns.iter().collect();
+    prune_context_refs(&refs, max_turns)
+}
+
+pub(crate) fn prune_context_refs<'a>(refs: &[&'a Turn], max_turns: usize) -> Vec<&'a Turn> {
+    if refs.len() <= max_turns {
+        return refs.to_vec();
     }
-    let mut start = turns.len() - max_turns;
+    let mut start = refs.len() - max_turns;
     // If we'd start at a ToolResult whose ToolCall is just outside, rewind.
     if start > 0 {
-        if let Some(Turn::ToolResult { call_id, .. }) = turns.get(start) {
-            if matches!(turns.get(start - 1), Some(Turn::ToolCall { id, .. }) if id == call_id) {
+        if let Some(Turn::ToolResult { call_id, .. }) = refs.get(start).copied() {
+            if matches!(refs.get(start - 1).copied(), Some(Turn::ToolCall { id, .. }) if id == call_id) {
                 start -= 1;
             }
         }
     }
-    turns[start..].iter().collect()
+    refs[start..].to_vec()
+}
+
+/// Hide ToolCall/ToolResult turns that belong to a **completed** dispatch.
+/// A dispatch is "completed" when an Assistant turn closes it.
+///
+/// Why: when the LLM sees prior tool_calls in its history, it tends to
+/// imitate them in raw text content on subsequent turns (observed with
+/// llama3.1:8b after a chat tool exchange). Hiding them yields a clean
+/// User/Assistant trail for past rounds while keeping the tool turns of
+/// the **current** dispatch (those after the most recent Assistant)
+/// visible so the planner can iterate.
+pub(crate) fn filter_visible_for_llm(turns: &[Turn]) -> Vec<&Turn> {
+    let last_assistant_idx = turns
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, t)| matches!(t, Turn::Assistant { .. }))
+        .map(|(i, _)| i);
+
+    turns
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let is_tool = matches!(t, Turn::ToolCall { .. } | Turn::ToolResult { .. });
+            let is_past = last_assistant_idx.map(|li| i <= li).unwrap_or(false);
+            if is_tool && is_past {
+                None
+            } else {
+                Some(t)
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -433,18 +489,61 @@ mod tests {
     }
 
     #[test]
-    fn to_chat_messages_emits_tool_messages() {
+    fn to_chat_messages_emits_tool_messages_during_current_dispatch() {
+        // Mid-dispatch: User just pushed, ToolCall + ToolResult appended,
+        // no Assistant yet. The LLM must still see the tool_call/result it
+        // just executed.
         let peer = id();
         let mut state = ConversationState::new("c".into(), "alice".into(), None);
         state.push_user("u1".into());
         let cid = state.push_tool_call(peer.clone(), "echo".into(), json!({"x": 1}));
         state.push_tool_result(cid, peer, "echo".into(), Some(json!({"x": 1})), None);
-        state.push_assistant("ok".into(), None);
         let msgs = state.to_chat_messages(10);
         let roles: Vec<&str> = msgs
             .iter()
             .map(|m| m["role"].as_str().unwrap())
             .collect();
-        assert_eq!(roles, ["user", "assistant", "tool", "assistant"]);
+        assert_eq!(roles, ["user", "assistant", "tool"]); // tool_call as assistant + tool_result as tool
+    }
+
+    #[test]
+    fn past_dispatch_tool_turns_filtered_out() {
+        // After Assistant closes a dispatch, its tool_call/tool_result
+        // become invisible to subsequent LLM iterations.
+        let peer = id();
+        let mut state = ConversationState::new("c".into(), "alice".into(), None);
+        state.push_user("u1".into());
+        let cid = state.push_tool_call(peer.clone(), "echo".into(), json!({"x": 1}));
+        state.push_tool_result(cid, peer, "echo".into(), Some(json!({"x": 1})), None);
+        state.push_assistant("first reply".into(), None);
+        state.push_user("u2".into());
+        // Mid-second-dispatch: no new tool_call yet.
+        let msgs = state.to_chat_messages(10);
+        let roles: Vec<&str> = msgs
+            .iter()
+            .map(|m| m["role"].as_str().unwrap())
+            .collect();
+        // Past dispatch's tool_call+tool_result hidden. Past User+Assistant
+        // kept. Current dispatch's User kept.
+        assert_eq!(roles, ["user", "assistant", "user"]);
+    }
+
+    #[test]
+    fn tool_name_uses_short_peer_format() {
+        let peer = InstanceId::parse("n3:abcdef1234567890longerthantwelvechars")
+            .unwrap_or_else(|_| Keypair::generate().instance_id());
+        let mut state = ConversationState::new("c".into(), "alice".into(), None);
+        state.push_user("u1".into());
+        let cid = state.push_tool_call(peer.clone(), "chat".into(), json!({}));
+        state.push_tool_result(cid, peer, "chat".into(), Some(json!("ok")), None);
+        let msgs = state.to_chat_messages(10);
+        // The middle message is the tool_call rendered as assistant + tool_calls.
+        let tc = &msgs[1]["tool_calls"][0]["function"]["name"];
+        let name = tc.as_str().unwrap();
+        assert!(!name.starts_with("n3:"));
+        assert!(name.ends_with("::chat"));
+        // Short part = 12 chars max.
+        let prefix = name.split("::").next().unwrap();
+        assert!(prefix.len() <= 12);
     }
 }
