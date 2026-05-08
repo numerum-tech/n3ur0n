@@ -333,15 +333,25 @@ through the structured `tool_calls` field. Try again."
 
 /// Heuristic: does this assistant `content` text look like an attempt at a
 /// tool call rather than an answer to the user?
+///
+/// Two failure modes seen in the wild with 8B-class models:
+/// 1. Inline JSON shape — content begins with `{"name":` or
+///    `/tool_calls:` etc. The model tries to emit a tool call but
+///    forgets to use the structured `tool_calls` field.
+/// 2. Chain-of-thought "execution trace" — content is multi-line text
+///    mixing `tool_calls:`, `parameters:`, `result of step N:`, etc.
+///    The model imagines having executed the tools instead of actually
+///    calling them.
 fn looks_like_malformed_tool_call(content: &str) -> bool {
     let trimmed = content.trim_start();
     if trimmed.is_empty() {
         return false;
     }
+
+    // ─── failure mode 1: structured-shape leak at start ──────────────────
     if trimmed.starts_with("/tool_calls:") {
         return true;
     }
-    // JSON-ish prefixes that LLMs emit when imitating tool-call shape.
     let json_signals = [
         "{\"name\":",
         "{\"function\":",
@@ -349,6 +359,29 @@ fn looks_like_malformed_tool_call(content: &str) -> bool {
         "{\"tool\":",
     ];
     if json_signals.iter().any(|p| trimmed.starts_with(p)) {
+        return true;
+    }
+
+    // ─── failure mode 2: simulated execution trace ───────────────────────
+    // Combinations of these markers strongly suggest the model is
+    // narrating tool execution rather than answering. Two or more
+    // co-occurring markers ⇒ flag.
+    let trace_signals = [
+        "tool_calls:",
+        "tool_call:",
+        "tool:",
+        "parameters:",
+        "result of step",
+        "step 1:",
+        "step 2:",
+        "function call",
+    ];
+    let lower = content.to_ascii_lowercase();
+    let hits = trace_signals
+        .iter()
+        .filter(|m| lower.contains(*m))
+        .count();
+    if hits >= 2 {
         return true;
     }
     false
@@ -378,6 +411,30 @@ mod tests {
         assert!(!looks_like_malformed_tool_call(""));
         assert!(!looks_like_malformed_tool_call(
             "Here is a JSON example: {\"key\": \"value\"}"
+        ));
+    }
+
+    #[test]
+    fn detects_chain_of_thought_execution_trace() {
+        let leaked = r#"Here is what I'll do.
+
+tool_calls:
+- tool: x::random_int
+  parameters: {"min": 1, "max": 1000}
+- tool: y::chat
+  parameters: {"prompt": "..."}
+
+result of step 1: {"value": 632}
+reversed number: 4632"#;
+        assert!(looks_like_malformed_tool_call(leaked));
+    }
+
+    #[test]
+    fn allows_natural_mention_of_one_marker() {
+        // A reply that simply mentions "tool:" once in passing should
+        // still be considered legitimate.
+        assert!(!looks_like_malformed_tool_call(
+            "I used the random tool: it returned 42 — pretty random!"
         ));
     }
 }
