@@ -210,7 +210,12 @@ fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
     // Convenience: a string `prompt` becomes a single user message.
     if let Some(prompt) = args.get("prompt").and_then(|v| v.as_str()) {
         let mut req = json!({
-            "model": args.get("model").cloned().unwrap_or_else(|| Value::String(default_model.to_string())),
+            // Lock the model to the operator-configured default. Callers
+            // cannot override — they may hallucinate a model name (seen
+            // with llama3.1:8b emitting "text-davinci-003"), which would
+            // 500 against an Ollama upstream that has not pulled that
+            // model. The operator picked what to serve; honour that.
+            "model": default_model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": false,
         });
@@ -226,6 +231,8 @@ fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
     }
     let mut obj = args.clone();
     if let Value::Object(map) = &mut obj {
+        // Lock model regardless of what the client sent.
+        map.insert("model".into(), Value::String(default_model.to_string()));
         // We don't support streaming over the protocol envelope yet — force false.
         map.insert("stream".into(), Value::Bool(false));
     }

@@ -54,11 +54,16 @@ Behaviour rules — non-negotiable:\n\
 1. If you can answer directly using your own knowledge, REPLY IN PLAIN TEXT to the user. \
 Do not call any tool unless an external capability is required.\n\
 2. When you DO need a tool, emit it through the structured `tool_calls` field of your \
-response. Never produce JSON-shaped text in `content` — that goes to the user verbatim \
-and looks broken.\n\
+response. Never produce JSON-shaped text or `/tool_calls:` syntax in `content` — that goes \
+to the user verbatim and looks broken.\n\
 3. Tool names use the exact form `<short_peer>::<capability>` listed below. Do not \
-prefix `n3:` or use any other shape.\n\
-4. Always answer in the user's language.\n\
+prefix `n3:`, do not invent peer ids, do not use any other shape.\n\
+4. For chat-like tools, only set the fields the schema declares. Do NOT add a `model` \
+field or invent model names — the peer chooses its own model.\n\
+5. When a task needs several steps (e.g. fetch X then transform X), call the tools in \
+sequence — each `tool_calls` round produces a `tool` result that you observe before \
+deciding the next step. Never compute the result yourself when a tool exists for it.\n\
+6. Always answer in the user's language.\n\
 \n\
 Available tools:\n",
         );
@@ -124,12 +129,33 @@ impl Planner for LLMPlanner {
             let tool_calls = extract_tool_calls(&message);
 
             if tool_calls.is_empty() {
-                // Final reply.
                 let content = message
                     .get("content")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+
+                // Detect a malformed tool-call leak in content and retry once
+                // with a corrective system nudge. Common shapes from 8B-class
+                // models: `/tool_calls:`, leading `{"name":`, `{"function":`.
+                if looks_like_malformed_tool_call(&content) {
+                    tracing::warn!(
+                        leak = %content.chars().take(120).collect::<String>(),
+                        "planner emitted malformed tool call in content; nudging"
+                    );
+                    state.push_system(
+                        "Your previous response contained a tool call expressed as plain text. \
+That format is ignored. Either reply to the user in plain text, or emit the tool call \
+through the structured `tool_calls` field. Try again."
+                            .into(),
+                    );
+                    persist_last(node.db(), state).map_err(|e| {
+                        NodeError::InvalidPayload(format!("persist nudge: {e}"))
+                    })?;
+                    continue;
+                }
+
+                // Final reply.
                 let model_used = response
                     .get("model")
                     .and_then(|v| v.as_str())
@@ -302,5 +328,56 @@ impl Planner for LLMPlanner {
             model: self.model_hint.clone(),
             trace,
         })
+    }
+}
+
+/// Heuristic: does this assistant `content` text look like an attempt at a
+/// tool call rather than an answer to the user?
+fn looks_like_malformed_tool_call(content: &str) -> bool {
+    let trimmed = content.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with("/tool_calls:") {
+        return true;
+    }
+    // JSON-ish prefixes that LLMs emit when imitating tool-call shape.
+    let json_signals = [
+        "{\"name\":",
+        "{\"function\":",
+        "{\"tool_calls\":",
+        "{\"tool\":",
+    ];
+    if json_signals.iter().any(|p| trimmed.starts_with(p)) {
+        return true;
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_slash_tool_calls() {
+        assert!(looks_like_malformed_tool_call(
+            "/tool_calls: 5vdniyve6lxg::chat, model=\"text-davinci-003\""
+        ));
+    }
+
+    #[test]
+    fn detects_json_name_prefix() {
+        assert!(looks_like_malformed_tool_call(
+            "{\"name\": \"x::y\", \"parameters\": {}}"
+        ));
+    }
+
+    #[test]
+    fn allows_normal_text() {
+        assert!(!looks_like_malformed_tool_call("Hello! How can I help?"));
+        assert!(!looks_like_malformed_tool_call(""));
+        assert!(!looks_like_malformed_tool_call(
+            "Here is a JSON example: {\"key\": \"value\"}"
+        ));
     }
 }

@@ -80,7 +80,7 @@ async fn invoke_with_prompt_string() {
 }
 
 #[tokio::test]
-async fn invoke_with_messages_array_passes_through() {
+async fn invoke_with_messages_array_locks_model_to_default() {
     let (base, state) = spawn_mock().await;
     let backend = OpenAIBackend::new(OpenAIConfig {
         base_url: base,
@@ -91,6 +91,7 @@ async fn invoke_with_messages_array_passes_through() {
     .unwrap();
 
     let payload = json!({
+        // Client tries to override — we ignore and pin to default.
         "model": "explicit-model",
         "messages": [
             {"role": "system", "content": "you are short"},
@@ -101,7 +102,8 @@ async fn invoke_with_messages_array_passes_through() {
     let _ = backend.invoke("chat", payload).await.unwrap();
 
     let req = state.last_request.lock().await.clone().unwrap();
-    assert_eq!(req["model"], "explicit-model");
+    // The operator-configured default wins.
+    assert_eq!(req["model"], "default");
     assert_eq!(req["temperature"], 0.1);
     assert_eq!(req["messages"][0]["role"], "system");
     assert_eq!(req["stream"], false);
