@@ -280,6 +280,29 @@ fn sanitise_chat_args(args: &Value) -> Value {
                     out.insert((*k).to_string(), v.clone());
                 }
             }
+            // Coerce `messages` into an array if a caller passed it as a
+            // JSON-encoded string (observed: llama3.1:8b emitting
+            // "messages": "[{...}]"). If the string isn't valid JSON or
+            // doesn't decode to an array, drop it — the caller can fall
+            // back to `prompt`.
+            if let Some(v) = out.get("messages").cloned() {
+                if let Value::String(raw) = &v {
+                    let coerced = serde_json::from_str::<Value>(raw)
+                        .ok()
+                        .filter(|d| d.is_array());
+                    match coerced {
+                        Some(arr) => {
+                            out.insert("messages".into(), arr);
+                        }
+                        None => {
+                            // Not a valid JSON array — fall back to a
+                            // single-user-message prompt and drop messages.
+                            out.insert("prompt".into(), Value::String(raw.clone()));
+                            out.remove("messages");
+                        }
+                    }
+                }
+            }
             Value::Object(out)
         }
         other => other.clone(),

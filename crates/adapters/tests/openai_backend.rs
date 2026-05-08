@@ -152,6 +152,48 @@ async fn drops_caller_supplied_tools_and_tool_call_history() {
 }
 
 #[tokio::test]
+async fn messages_as_json_string_is_coerced_to_array() {
+    let (base, state) = spawn_mock().await;
+    let backend = OpenAIBackend::new(OpenAIConfig {
+        base_url: base,
+        default_model: "default".into(),
+        api_key: None,
+        description: None,
+    })
+    .unwrap();
+
+    // Some 8B models emit `messages` as a stringified JSON array.
+    let payload = json!({
+        "messages": "[{\"role\":\"user\",\"content\":\"hi\"}]"
+    });
+    let _ = backend.invoke("chat", payload).await.unwrap();
+    let req = state.last_request.lock().await.clone().unwrap();
+    assert!(req["messages"].is_array(), "messages must be coerced to array");
+    assert_eq!(req["messages"][0]["content"], "hi");
+}
+
+#[tokio::test]
+async fn messages_as_plain_string_falls_back_to_prompt() {
+    let (base, state) = spawn_mock().await;
+    let backend = OpenAIBackend::new(OpenAIConfig {
+        base_url: base,
+        default_model: "default".into(),
+        api_key: None,
+        description: None,
+    })
+    .unwrap();
+
+    let payload = json!({
+        "messages": "this is not JSON"
+    });
+    let _ = backend.invoke("chat", payload).await.unwrap();
+    let req = state.last_request.lock().await.clone().unwrap();
+    assert!(req["messages"].is_array());
+    assert_eq!(req["messages"][0]["role"], "user");
+    assert_eq!(req["messages"][0]["content"], "this is not JSON");
+}
+
+#[tokio::test]
 async fn unknown_capability_rejected() {
     let backend = OpenAIBackend::new(OpenAIConfig::ollama_local("nope")).unwrap();
     let err = backend.invoke("not-chat", json!({})).await.unwrap_err();
