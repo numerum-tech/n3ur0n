@@ -31,7 +31,7 @@ async fn build_node() -> Node {
         NodeConfig {
             endpoint: Some("https://srv.example".into()),
             alias: None,
-            verify: Default::default(),
+            ..Default::default()
         },
     )
 }

@@ -37,7 +37,7 @@ async fn make_node() -> (Node, Keypair) {
         NodeConfig {
             endpoint: Some("https://srv.example".into()),
             alias: Some("@srv".into()),
-            verify: Default::default(),
+            ..Default::default()
         },
     )
     .with_clock(Arc::new(FixedClock(Mutex::new(

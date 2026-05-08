@@ -9,7 +9,7 @@ use n3ur0n_storage::Db;
 use crate::registry::CapabilityRegistry;
 
 /// Static configuration of a [`Node`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeConfig {
     /// Public endpoint advertised in `describe_self`. `None` for consumers.
     pub endpoint: Option<String>,
@@ -17,16 +17,8 @@ pub struct NodeConfig {
     pub alias: Option<String>,
     /// Verification policy for incoming messages.
     pub verify: VerifyConfig,
-}
-
-impl Default for NodeConfig {
-    fn default() -> Self {
-        Self {
-            endpoint: None,
-            alias: None,
-            verify: VerifyConfig::default(),
-        }
-    }
+    /// Initial peers to bootstrap from at startup.
+    pub bootstrap_peers: Vec<String>,
 }
 
 /// Live node state. Cloning a [`Node`] is cheap: the heavy state sits behind

@@ -28,7 +28,11 @@ pub fn keys_path(dir: &Path) -> PathBuf {
 
 /// Build a fully-wired [`Node`] from a config directory: load identity, open
 /// db, construct the default backend (echo for v0.1), build registry.
-pub async fn load_node(config_dir: &Path, endpoint: Option<String>) -> Result<Node> {
+pub async fn load_node(
+    config_dir: &Path,
+    endpoint: Option<String>,
+    bootstrap_peers: Vec<String>,
+) -> Result<Node> {
     let kp = IdentityFile::load(&keys_path(config_dir))
         .with_context(|| format!("loading identity from {}", keys_path(config_dir).display()))?;
     let db = n3ur0n_storage::open(db_path(config_dir))
@@ -41,7 +45,8 @@ pub async fn load_node(config_dir: &Path, endpoint: Option<String>) -> Result<No
     let cfg = NodeConfig {
         endpoint,
         alias: None,
-        verify: Default::default(),
+        bootstrap_peers,
+        ..Default::default()
     };
 
     Ok(Node::new(kp, db, backend, registry, cfg))

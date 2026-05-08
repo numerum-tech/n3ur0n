@@ -26,6 +26,9 @@ enum Command {
 
     /// Sign a message and POST it to a remote peer's /n3ur0n/v0/messages.
     Send(cli::SendArgs),
+
+    /// Inspect / refresh / cascade-discover the local peer directory.
+    Peers(cli::PeersArgs),
 }
 
 #[tokio::main]
@@ -40,5 +43,6 @@ async fn main() -> Result<()> {
         Command::Serve(args) => cli::serve(args).await,
         Command::Keys(args) => cli::keys(args).await,
         Command::Send(args) => cli::send(args).await,
+        Command::Peers(args) => cli::peers(args).await,
     }
 }

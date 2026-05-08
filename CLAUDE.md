@@ -129,14 +129,19 @@ Workspace Rust opérationnel : `cargo check --workspace`, `cargo test --workspac
 
 ```bash
 n3ur0n init                            # genère keys.json (0600) + sqlite
-n3ur0n serve --port 4242 --endpoint http://...
+n3ur0n serve --port 4242 --endpoint http://... [--bootstrap http://peer1:4242 --bootstrap http://peer2:4242]
 n3ur0n keys                            # affiche instance_id
 n3ur0n send --endpoint http://node-b:4242 --verb ping
 n3ur0n send --endpoint http://node-b:4242 --verb invoke \
    --payload '{"capability":"echo","args":{"x":1}}'
+
+# Peer directory
+n3ur0n peers list
+n3ur0n peers refresh --endpoint http://node-b:4242    # signed describe_self → upsert
+n3ur0n peers discover --capability echo               # cascade depth-1, random fan-out 5
 ```
 
-`--config-dir` lu via flag OU env `N3UR0N_CONFIG_DIR`.
+`--config-dir` lu via flag OU env `N3UR0N_CONFIG_DIR`. `--bootstrap` lu via flag répété OU env `N3UR0N_BOOTSTRAP_PEERS` (CSV).
 
 ### Cluster Docker (test)
 
@@ -147,6 +152,8 @@ docker compose -f docker/compose.yml down -v
 ```
 
 3 nodes (`node-a`/`node-b`/`node-c`) sur ports hôte 4242/4243/4244, réseau bridge interne `n3uronnet`. Volumes par nœud. Healthcheck via `/n3ur0n/v0/health` (renvoie `{status, instance_id, protocol_version}`).
+
+`node-b` est lancé avec `N3UR0N_BOOTSTRAP_PEERS=http://node-a:4242` → bootstrap au démarrage : signed `describe_self` vers a, upsert dans le directory de b. Smoke script teste aussi cascade depth-1 (a → b → c via `peers discover --capability echo`).
 
 ```bash
 # Workspace Rust
