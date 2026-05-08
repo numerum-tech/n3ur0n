@@ -50,9 +50,15 @@ pub fn app(node: Node) -> Router {
         .route("/health", get(health))
         .route("/whoami", get(whoami))
         .route("/peers", get(api_peers))
+        .route("/peers/refresh", post(api_peers_refresh))
+        .route("/peers/discover", post(api_peers_discover))
         .route(
             "/chat",
             post(api_chat).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
+        )
+        .route(
+            "/invoke",
+            post(api_invoke).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
         .layer(DefaultBodyLimit::max(META_LIMIT))
         .with_state(state.clone());
@@ -153,11 +159,21 @@ async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ChatRequest {
     /// Endpoint URL of the peer to query.
     peer_endpoint: String,
-    /// User prompt (becomes a single user message).
-    prompt: String,
+    /// Single-shot prompt; mutually exclusive with `messages`.
+    #[serde(default)]
+    prompt: Option<String>,
+    /// Multi-turn conversation history.
+    #[serde(default)]
+    messages: Option<Vec<ChatMessage>>,
     /// Optional override of the default model on the remote peer.
     #[serde(default)]
     model: Option<String>,
@@ -167,7 +183,22 @@ async fn api_chat(
     State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
 ) -> impl IntoResponse {
-    let mut args = json!({"prompt": req.prompt});
+    let mut args = match (req.prompt, req.messages) {
+        (Some(p), None) => json!({"prompt": p}),
+        (None, Some(msgs)) if !msgs.is_empty() => {
+            let arr: Vec<Value> = msgs
+                .into_iter()
+                .map(|m| json!({"role": m.role, "content": m.content}))
+                .collect();
+            json!({"messages": arr})
+        }
+        _ => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "either `prompt` or non-empty `messages` is required",
+            );
+        }
+    };
     if let Some(model) = req.model {
         args["model"] = Value::String(model);
     }
@@ -190,6 +221,83 @@ async fn api_chat(
         Err(e) => return api_error(StatusCode::BAD_GATEWAY, &e.to_string()),
     };
 
+    Json(json!({
+        "peer_id": reply.envelope.sender_id.as_str(),
+        "reply": reply.envelope.payload,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct PeersDiscoverRequest {
+    /// Capability name to cascade-search for.
+    capability: String,
+}
+
+async fn api_peers_discover(
+    State(state): State<AppState>,
+    Json(req): Json<PeersDiscoverRequest>,
+) -> impl IntoResponse {
+    match n3ur0n_node::discovery::discover_capability(&state.node, &req.capability).await {
+        Ok(added) => Json(json!({"added": added, "capability": req.capability})).into_response(),
+        Err(e) => api_error(StatusCode::BAD_GATEWAY, &e.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PeersRefreshRequest {
+    endpoint: String,
+}
+
+async fn api_peers_refresh(
+    State(state): State<AppState>,
+    Json(req): Json<PeersRefreshRequest>,
+) -> impl IntoResponse {
+    let client = peer_client::http_client();
+    match n3ur0n_node::discovery::refresh_peer(&state.node, &client, &req.endpoint).await {
+        Ok(desc) => Json(json!({
+            "instance_id": desc.instance_id.as_str(),
+            "endpoint": desc.endpoint,
+            "alias": desc.alias,
+            "capabilities": desc.capabilities.iter().map(|c| &c.name).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => api_error(StatusCode::BAD_GATEWAY, &e.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct InvokeRequest {
+    peer_endpoint: String,
+    capability: String,
+    #[serde(default)]
+    args: Value,
+}
+
+/// Generic capability invoker — feeds whatever JSON `args` to the named
+/// capability on the remote peer. Used by the UI's capability picker for
+/// non-chat capabilities.
+async fn api_invoke(
+    State(state): State<AppState>,
+    Json(req): Json<InvokeRequest>,
+) -> impl IntoResponse {
+    let payload = json!({
+        "capability": req.capability,
+        "args": req.args,
+    });
+    let client = peer_client::http_client();
+    let reply = match peer_client::send_signed(
+        &client,
+        state.node.keypair(),
+        &req.peer_endpoint,
+        ProtocolVerb::Invoke,
+        payload,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return api_error(StatusCode::BAD_GATEWAY, &e.to_string()),
+    };
     Json(json!({
         "peer_id": reply.envelope.sender_id.as_str(),
         "reply": reply.envelope.payload,

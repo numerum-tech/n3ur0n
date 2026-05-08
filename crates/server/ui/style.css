@@ -107,6 +107,7 @@ button:disabled { opacity: 0.5; cursor: progress; }
 
 .bubble.user { align-self: flex-end; background: var(--user); }
 .bubble.assistant { align-self: flex-start; background: var(--assistant); }
+.bubble.system { align-self: center; background: transparent; color: var(--muted); font-size: 0.78rem; padding: 2px 8px; }
 .bubble.error { align-self: stretch; background: rgba(239, 68, 68, 0.12); color: var(--error); border: 1px solid var(--error); }
 .bubble .who { display: block; font-size: 0.7rem; color: var(--muted); margin-bottom: 4px; }
 

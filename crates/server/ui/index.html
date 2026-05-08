@@ -23,7 +23,15 @@
                     <option value="">(loading…)</option>
                 </select>
             </label>
-            <button id="refresh-peers" type="button">refresh</button>
+            <label>
+                Capability
+                <select id="cap-select" disabled>
+                    <option value="">(no peer)</option>
+                </select>
+            </label>
+            <button id="refresh-peers" type="button" title="reload directory">refresh list</button>
+            <button id="discover-chat" type="button" title="cascade-discover peers offering `chat`">discover chat</button>
+            <button id="clear-conv" type="button" title="reset conversation history">clear</button>
             <span id="peer-cap" class="hint"></span>
         </section>
 

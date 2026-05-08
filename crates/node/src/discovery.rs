@@ -104,10 +104,14 @@ pub async fn discover_capability(node: &Node, capability: &str) -> NodeResult<us
         return Ok(0);
     }
 
-    let mut rng = rand::thread_rng();
-    let mut sample: Vec<&PeerRecord> = local_peers.iter().collect();
-    sample.shuffle(&mut rng);
-    sample.truncate(CASCADE_FAN_OUT);
+    // ThreadRng is !Send; scope it so the future stays Send across awaits.
+    let sample: Vec<&PeerRecord> = {
+        let mut rng = rand::thread_rng();
+        let mut s: Vec<&PeerRecord> = local_peers.iter().collect();
+        s.shuffle(&mut rng);
+        s.truncate(CASCADE_FAN_OUT);
+        s
+    };
 
     let client = client::http_client();
     let req = GetKnownPeersRequest {
