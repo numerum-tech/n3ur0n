@@ -138,7 +138,9 @@ peerSelect.addEventListener("change", updateCapHint);
 sendBtn.addEventListener("click", send);
 refreshBtn.addEventListener("click", loadPeers);
 promptEl.addEventListener("keydown", (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    // Enter sends; Shift+Enter inserts a newline (default behavior).
+    // Cmd/Ctrl+Enter also sends, kept for parity with other chat UIs.
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         send();
     }
