@@ -2,6 +2,8 @@
 
 *Statut : draft de travail. Reflète l'état des réflexions au 7 mai 2026. À affiner.*
 
+**Amendement 2026-05-08** : §5.2 — la structure du message inclut désormais explicitement le champ `sender_public_key` à côté de `signature`. Le hash du `sender_public_key` doit correspondre à `sender_id` (auto-vérification). Sans ce champ sur le fil, le destinataire ne peut pas matérialiser la clé publique pour vérifier la signature en l'absence de registre id→pk. Le reste de §5.2 reste valide.
+
 ---
 
 ## 1. Préambule

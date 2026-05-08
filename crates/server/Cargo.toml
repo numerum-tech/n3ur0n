@@ -6,6 +6,13 @@ license.workspace = true
 repository.workspace = true
 description = "N3UR0N publisher binary: axum + rust-embed UI + clap CLI."
 
+[lints]
+workspace = true
+
+[lib]
+name = "n3ur0n_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "n3ur0n"
 path = "src/main.rs"
@@ -14,6 +21,7 @@ path = "src/main.rs"
 n3ur0n-core = { workspace = true }
 n3ur0n-storage = { workspace = true }
 n3ur0n-adapters = { workspace = true }
+n3ur0n-node = { workspace = true }
 
 axum = { workspace = true }
 tower = { workspace = true }
@@ -27,4 +35,11 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 rust-embed = { workspace = true }
 time = { workspace = true }
-data-encoding = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }
+http-body-util = "0.1"
+hyper = "1"
+uuid = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"

@@ -4,6 +4,7 @@ members = [
     "crates/core",
     "crates/storage",
     "crates/adapters",
+    "crates/node",
     "crates/server",
 ]
 # crates/desktop will join once Tauri 2 is initialised via `pnpm tauri init`
@@ -16,6 +17,16 @@ edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/n3ur0n/n3ur0n"
 rust-version = "1.85"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
 
 [workspace.dependencies]
 # Async + serde
@@ -67,6 +78,7 @@ governor = "0.6"
 n3ur0n-core = { path = "crates/core" }
 n3ur0n-storage = { path = "crates/storage" }
 n3ur0n-adapters = { path = "crates/adapters" }
+n3ur0n-node = { path = "crates/node" }
 
 [profile.release]
 lto = "thin"

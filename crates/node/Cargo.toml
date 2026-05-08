@@ -1,27 +1,28 @@
 [package]
-name = "n3ur0n-core"
+name = "n3ur0n-node"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "N3UR0N core: protocol types, crypto identity, message signing/verification."
+description = "N3UR0N runtime orchestration: identity loader, capability registry, protocol handlers. Reused by server and desktop shells."
 
 [lints]
 workspace = true
 
 [dependencies]
+n3ur0n-core = { workspace = true }
+n3ur0n-storage = { workspace = true }
+n3ur0n-adapters = { workspace = true }
+
+async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_jcs = { workspace = true }
-ed25519-dalek = { workspace = true }
-sha2 = { workspace = true }
 data-encoding = { workspace = true }
-rand = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
-async-trait = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tempfile = "3"

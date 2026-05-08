@@ -1,7 +1,8 @@
 //! Cryptographic identity for an n3ur0n instance.
 //!
-//! Identifier: `n3:` + Base32(SHA-256(Ed25519 public key)) RFC4648 no padding.
-//! Auto-verifiable; no registry required.
+//! The canonical instance id is `n3:` + Base32(SHA-256(Ed25519 public key))
+//! using RFC 4648 alphabet without padding. Any holder of the public key can
+//! recompute it; no registry is required.
 
 use data_encoding::BASE32_NOPAD;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -11,13 +12,16 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{CoreError, CoreResult};
 
-const ID_PREFIX: &str = "n3:";
+/// Canonical identifier prefix.
+pub const ID_PREFIX: &str = "n3:";
 
+/// A canonical instance identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct InstanceId(String);
 
 impl InstanceId {
+    /// Derive an instance id from an Ed25519 public key.
     pub fn from_public_key(pk: &VerifyingKey) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(pk.as_bytes());
@@ -26,10 +30,13 @@ impl InstanceId {
         Self(format!("{ID_PREFIX}{encoded}"))
     }
 
+    /// String view of the identifier.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    /// Parse a string into an `InstanceId`. Validates prefix and charset only;
+    /// does not verify that a public key with this hash exists on the network.
     pub fn parse(s: &str) -> CoreResult<Self> {
         if !s.starts_with(ID_PREFIX) {
             return Err(CoreError::InvalidIdentifier(s.to_string()));
@@ -48,14 +55,21 @@ impl std::fmt::Display for InstanceId {
     }
 }
 
+/// Wrapper around an Ed25519 verifying key with serde support.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct PublicKey(#[serde(with = "verifying_key_bytes")] pub VerifyingKey);
 
 impl PublicKey {
+    /// Derive the canonical instance id of this key.
     pub fn instance_id(&self) -> InstanceId {
         InstanceId::from_public_key(&self.0)
     }
 
+    /// Verify a signature over `message`.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::SignatureInvalid`] when verification fails.
     pub fn verify(&self, message: &[u8], signature: &Signature) -> CoreResult<()> {
         self.0
             .verify(message, signature)
@@ -63,34 +77,42 @@ impl PublicKey {
     }
 }
 
+/// Owned signing key + derived public key.
+#[derive(Debug)]
 pub struct Keypair {
     signing: SigningKey,
 }
 
 impl Keypair {
+    /// Generate a fresh random keypair using the operating system RNG.
     pub fn generate() -> Self {
         let signing = SigningKey::generate(&mut OsRng);
         Self { signing }
     }
 
+    /// Reconstruct a keypair from its 32-byte secret seed.
     pub fn from_secret_bytes(bytes: &[u8; 32]) -> Self {
         Self {
             signing: SigningKey::from_bytes(bytes),
         }
     }
 
+    /// Raw secret bytes. Treat as sensitive material.
     pub fn secret_bytes(&self) -> [u8; 32] {
         self.signing.to_bytes()
     }
 
+    /// Derived public key.
     pub fn public_key(&self) -> PublicKey {
         PublicKey(self.signing.verifying_key())
     }
 
+    /// Canonical instance id of this keypair.
     pub fn instance_id(&self) -> InstanceId {
         self.public_key().instance_id()
     }
 
+    /// Sign an arbitrary byte slice.
     pub fn sign(&self, message: &[u8]) -> Signature {
         self.signing.sign(message)
     }
@@ -101,12 +123,12 @@ mod verifying_key_bytes {
     use data_encoding::BASE32_NOPAD;
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(key: &VerifyingKey, s: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(key: &VerifyingKey, s: S) -> Result<S::Ok, S::Error> {
         let encoded = BASE32_NOPAD.encode(key.as_bytes()).to_lowercase();
         s.serialize_str(&encoded)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<VerifyingKey, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<VerifyingKey, D::Error> {
         let encoded = String::deserialize(d)?;
         let bytes = BASE32_NOPAD
             .decode(encoded.to_uppercase().as_bytes())
@@ -144,5 +166,14 @@ mod tests {
         let sig = kp.sign(b"hello");
         assert!(pk.verify(b"hello", &sig).is_ok());
         assert!(pk.verify(b"world", &sig).is_err());
+    }
+
+    #[test]
+    fn public_key_serde_round_trip() {
+        let kp = Keypair::generate();
+        let pk = kp.public_key();
+        let json = serde_json::to_string(&pk).unwrap();
+        let decoded: PublicKey = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.0.as_bytes(), pk.0.as_bytes());
     }
 }

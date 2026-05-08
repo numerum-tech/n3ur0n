@@ -32,9 +32,13 @@ pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Db> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        conn.pragma_update(None, "busy_timeout", 5000)?;
         Ok(())
     });
-    let pool = Pool::builder().max_size(8).build(manager)?;
+    // r2d2 default min_idle/max_size of 8 races during first-time WAL setup.
+    // Build a single-connection pool first so migrations run cleanly, then
+    // resize.
+    let pool = Pool::builder().max_size(8).min_idle(Some(1)).build(manager)?;
     migrate(&pool)?;
     Ok(pool)
 }

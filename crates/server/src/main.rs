@@ -1,8 +1,9 @@
+//! N3UR0N publisher binary entry point.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod cli;
-mod http;
 
 #[derive(Debug, Parser)]
 #[command(name = "n3ur0n", version, about = "N3UR0N publisher node")]

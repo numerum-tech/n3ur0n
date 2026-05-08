@@ -43,8 +43,9 @@ Système distribué pair-à-pair pour publier et invoquer des **capacités d'IA*
 ## Invariants protocolaires non négociables
 
 - Identifiant canonique = `n3:` + Base32(SHA-256(clé publique Ed25519)). Auto-vérifiable, pas de registre requis.
-- Tout message porte `sender_id, recipient_id, timestamp, nonce, payload, signature`. La signature couvre le **JCS** (RFC 8785, `serde_jcs`) de la concaténation des cinq premiers champs. **Sans canonicalisation, les signatures divergent silencieusement** — ne jamais sérialiser à la main pour signer.
-- Vérifications obligatoires côté destinataire : signature, `recipient_id`, fenêtre timestamp ±5 min, anti-replay nonce sur 1h.
+- Tout message porte `sender_id, recipient_id, timestamp, nonce, verb, payload, sender_public_key, signature`. La **signature** couvre le **JCS** (RFC 8785, `serde_jcs`) de l'envelope (tout sauf `signature`). Le champ `sender_public_key` accompagne le message sur le fil ; le destinataire vérifie `hash(sender_public_key) == sender_id` puis utilise cette clé pour vérifier la signature. (Voir amendement 2026-05-08 dans `n3ur0n-architecture-v0.md`.)
+- **Sans canonicalisation, les signatures divergent silencieusement** — ne jamais sérialiser à la main pour signer.
+- Vérifications obligatoires côté destinataire : binding pk↔id, signature, `recipient_id`, fenêtre timestamp ±5 min, anti-replay nonce sur 1h.
 - Trois verbes méta (`describe_self`, `get_known_peers`, `ping`) sont **toujours en mode libre**. Ne jamais restreindre.
 - Quatrième verbe : `invoke`. **Aucun autre verbe v0.1**. Pas de session, pas de streaming protocolaire, pas de pipeline orchestré côté protocole.
 - Mode d'accès (`free` / `restricted`) déclaré **par capacité**, pas par instance.
@@ -56,22 +57,52 @@ Système distribué pair-à-pair pour publier et invoquer des **capacités d'IA*
 - Même core Rust pour les deux modes ; ils diffèrent par le **shell** (Tauri vs axum + rust-embed) et la **config par défaut** du listener.
 - Un consumer peut basculer en publisher hybride via toggle UI ("Publish to network") qui démarre le listener axum dans le même process Tauri.
 
-## Layout cible (planifié, à créer au fur et à mesure)
+## Layout actuel (workspace cargo)
 
 ```
 n3ur0n/
-├── Cargo.toml                 # workspace
+├── Cargo.toml                 # workspace + lints workspace-wide
 ├── crates/
 │   ├── core/                  # lib : protocole, crypto, types — AUCUNE dép HTTP/SQL
-│   ├── adapters/              # lib : MCP, OpenAI, HTTP, Process — dépend de core
-│   ├── storage/               # lib : SQLite (rusqlite bundled) — dépend de core
-│   ├── server/                # bin : axum + rust-embed + clap (publisher)
-│   └── desktop/               # bin : Tauri 2 shell (consumer/hybride)
-├── frontend/                  # SvelteKit static — UNIQUE codebase UI
-└── .github/workflows/
+│   │   ├── identity.rs        # InstanceId, Keypair, PublicKey
+│   │   ├── message.rs         # Envelope, SignedMessage (avec sender_public_key)
+│   │   ├── verify.rs          # verify_envelope (pure, Clock injectable)
+│   │   ├── protocol.rs        # payloads typés des 4 verbes
+│   │   ├── capability.rs      # CapabilityDecl, AccessMode
+│   │   └── error.rs
+│   ├── adapters/              # lib : trait Backend + EchoBackend (MCP/OpenAI/HTTP/Process à venir)
+│   ├── storage/               # lib : SQLite + r2d2, repos peers + nonces
+│   │   └── migrations/        # SQL versionné via schema_version table
+│   ├── node/                  # lib : orchestration runtime
+│   │   ├── identity_file.rs   # load/save keys.json (0600)
+│   │   ├── registry.rs        # CapabilityRegistry
+│   │   ├── node.rs            # Node (keypair + db + backend + registry + clock)
+│   │   └── handler.rs         # handle_request : verify → anti-replay → dispatch
+│   ├── server/                # lib + bin : axum + clap (publisher)
+│   │   ├── lib.rs             # http::app(node), bootstrap
+│   │   ├── http.rs            # /n3ur0n/v0/messages + /api/v0
+│   │   ├── bootstrap.rs       # config dirs, load_node, create_identity
+│   │   ├── cli.rs             # init / serve / keys
+│   │   └── main.rs
+│   └── desktop/               # placeholder Tauri (excluded jusqu'à init Tauri CLI)
+├── frontend/                  # SvelteKit + adapter-static + Tailwind
+└── .gitignore                 # ignore /target, frontend build artifacts, runtime files
 ```
 
-**Discipline de dépendances** : `core` ne touche ni HTTP ni SQLite. Tout changement de shell ne doit pas toucher la logique métier. Si tu te retrouves à importer `axum` ou `rusqlite` depuis `core`, tu te trompes de crate.
+**Discipline de dépendances (à respecter strictement)** :
+
+| Crate | Peut dépendre de | Ne doit JAMAIS dépendre de |
+|---|---|---|
+| `core` | serde, crypto, time | HTTP, SQL, IO du système |
+| `storage` | core, rusqlite, r2d2 | HTTP, axum |
+| `adapters` | core, reqwest | SQL, axum |
+| `node` | core, storage, adapters, tokio | axum, clap, tauri |
+| `server` | tout ce qui précède + axum, clap | tauri |
+| `desktop` (à venir) | tout ce qui précède + tauri | axum |
+
+Si `core` veut importer `axum` ou `rusqlite`, c'est une erreur de couche.
+
+**Lints workspace** : `unsafe_code = "forbid"`, `unreachable_pub = "warn"`, `missing_debug_implementations = "warn"`, `clippy::all = "warn"`. Hérités via `[lints]\nworkspace = true` dans chaque `Cargo.toml` de crate.
 
 ## Choix de stack à respecter
 
@@ -90,9 +121,9 @@ n3ur0n/
 | CLI | `clap` v4 derive | structopt, argh |
 | Logs | `tracing` + `tracing-subscriber` | `log` direct, `slog` |
 
-## Commandes (planifiées — à valider une fois le scaffold créé)
+## Commandes (validées sur scaffold actuel)
 
-Ces commandes sont issues du doc de stack §12. À l'heure actuelle aucune n'est exécutable car le code n'existe pas. Quand le scaffold sera posé, les valider et corriger ce fichier.
+Workspace Rust opérationnel : `cargo check --workspace`, `cargo test --workspace` passent.
 
 ```bash
 # Workspace Rust

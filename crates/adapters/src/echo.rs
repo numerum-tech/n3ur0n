@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 
 use crate::{AdapterResult, Backend, HealthStatus};
 
+#[derive(Debug, Default, Clone, Copy)]
 pub struct EchoBackend;
 
 #[async_trait]

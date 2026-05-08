@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 description = "N3UR0N backend adapters: MCP, OpenAI-compatible, generic HTTP, local process."
 
+[lints]
+workspace = true
+
 [dependencies]
 n3ur0n-core = { workspace = true }
 async-trait = { workspace = true }

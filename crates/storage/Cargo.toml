@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 description = "N3UR0N local storage: SQLite repos for peers, nonces, subscriptions, capabilities, audit log."
 
+[lints]
+workspace = true
+
 [dependencies]
 n3ur0n-core = { workspace = true }
 serde = { workspace = true }
