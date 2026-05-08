@@ -129,7 +129,8 @@ Workspace Rust opérationnel : `cargo check --workspace`, `cargo test --workspac
 
 ```bash
 n3ur0n init                            # genère keys.json (0600) + sqlite
-n3ur0n serve --port 4242 --endpoint http://... [--bootstrap http://peer1:4242 --bootstrap http://peer2:4242]
+n3ur0n serve --port 4242 --endpoint http://... [--bootstrap http://peer1:4242 --bootstrap http://peer2:4242] \
+   [--backend echo|openai|ollama] [--openai-base-url URL] [--openai-model NAME] [--openai-api-key TOKEN]
 n3ur0n keys                            # affiche instance_id
 n3ur0n send --endpoint http://node-b:4242 --verb ping
 n3ur0n send --endpoint http://node-b:4242 --verb invoke \
@@ -141,7 +142,19 @@ n3ur0n peers refresh --endpoint http://node-b:4242    # signed describe_self →
 n3ur0n peers discover --capability echo               # cascade depth-1, random fan-out 5
 ```
 
-`--config-dir` lu via flag OU env `N3UR0N_CONFIG_DIR`. `--bootstrap` lu via flag répété OU env `N3UR0N_BOOTSTRAP_PEERS` (CSV).
+`--config-dir` lu via flag OU env `N3UR0N_CONFIG_DIR`. `--bootstrap` lu via flag répété OU env `N3UR0N_BOOTSTRAP_PEERS` (CSV). Backend args lus aussi via env `N3UR0N_BACKEND`, `N3UR0N_OPENAI_BASE_URL`, `N3UR0N_OPENAI_MODEL`, `N3UR0N_OPENAI_API_KEY`.
+
+### Backends
+
+- `echo` (défaut) : retour identité de `args`. Tests + smoke.
+- `openai` / `ollama` : `OpenAIBackend` (crates/adapters/src/openai.rs). Couvre OpenAI, Ollama, llama.cpp server, vLLM. Capability unique `chat` :
+  - input : soit `{prompt: "..."}`, soit `{messages: [{role, content}, ...], temperature?, max_tokens?, model?}`
+  - output : `{model, message: {role, content}, finish_reason}`
+  - alias `--backend ollama` = `--backend openai` + base_url default `http://localhost:11434`
+  - bearer token optionnel via `--openai-api-key` / env `N3UR0N_OPENAI_API_KEY`
+  - streaming pas supporté v0.1 (force `stream:false` côté upstream)
+
+Smoke validé : `n3ur0n serve --backend ollama --openai-model qwen2.5:0.5b` puis `n3ur0n send --verb invoke --payload '{"capability":"chat","args":{"prompt":"..."}}'` → réponse LLM signée bout-en-bout.
 
 ### Cluster Docker (test)
 

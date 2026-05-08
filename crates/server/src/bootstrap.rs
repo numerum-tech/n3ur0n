@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use n3ur0n_adapters::{Backend, echo::EchoBackend};
+use n3ur0n_adapters::{
+    Backend,
+    echo::EchoBackend,
+    openai::{OpenAIBackend, OpenAIConfig},
+};
 use n3ur0n_core::Keypair;
 use n3ur0n_node::{CapabilityRegistry, IdentityFile, Node, NodeConfig, identity_file};
 
@@ -27,18 +31,19 @@ pub fn keys_path(dir: &Path) -> PathBuf {
 }
 
 /// Build a fully-wired [`Node`] from a config directory: load identity, open
-/// db, construct the default backend (echo for v0.1), build registry.
+/// db, build a backend from the runtime selector, populate registry.
 pub async fn load_node(
     config_dir: &Path,
     endpoint: Option<String>,
     bootstrap_peers: Vec<String>,
+    backend_kind: BackendKind,
 ) -> Result<Node> {
     let kp = IdentityFile::load(&keys_path(config_dir))
         .with_context(|| format!("loading identity from {}", keys_path(config_dir).display()))?;
     let db = n3ur0n_storage::open(db_path(config_dir))
         .with_context(|| format!("opening db at {}", db_path(config_dir).display()))?;
 
-    let backend: Arc<dyn Backend> = Arc::new(EchoBackend);
+    let backend: Arc<dyn Backend> = build_backend(backend_kind)?;
     let decls = backend.describe().await?;
     let registry = CapabilityRegistry::from_decls(decls);
 
@@ -50,6 +55,32 @@ pub async fn load_node(
     };
 
     Ok(Node::new(kp, db, backend, registry, cfg))
+}
+
+/// Backend selector resolved from CLI flags / env at startup.
+#[derive(Debug, Clone)]
+pub enum BackendKind {
+    /// Identity-style adapter; useful for cluster smoke and tests.
+    Echo,
+    /// OpenAI-compatible chat endpoint (Ollama, llama.cpp, vLLM, OpenAI...).
+    OpenAI(OpenAIConfig),
+}
+
+impl Default for BackendKind {
+    fn default() -> Self {
+        Self::Echo
+    }
+}
+
+fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {
+    match kind {
+        BackendKind::Echo => Ok(Arc::new(EchoBackend)),
+        BackendKind::OpenAI(cfg) => {
+            let backend = OpenAIBackend::new(cfg)
+                .map_err(|e| anyhow::anyhow!("openai backend init: {e}"))?;
+            Ok(Arc::new(backend))
+        }
+    }
 }
 
 /// Generate a fresh identity, persist it, and return the underlying keypair.

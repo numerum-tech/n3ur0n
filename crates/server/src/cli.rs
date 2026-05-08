@@ -4,10 +4,12 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Args;
+use n3ur0n_adapters::openai::OpenAIConfig;
 use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_node::IdentityFile;
 use n3ur0n_node::client as peer_client;
 use n3ur0n_node::discovery;
+use n3ur0n_server::bootstrap::BackendKind;
 use n3ur0n_server::{bootstrap, http};
 use n3ur0n_storage::peers as peers_repo;
 use serde_json::Value;
@@ -37,6 +39,24 @@ pub(crate) struct ServeArgs {
     /// also accepted via the `N3UR0N_BOOTSTRAP_PEERS` env variable.
     #[arg(long = "bootstrap", env = "N3UR0N_BOOTSTRAP_PEERS", value_delimiter = ',', num_args = 0..)]
     pub(crate) bootstrap: Vec<String>,
+
+    /// Backend adapter: `echo` (default) or `openai` (also covers Ollama,
+    /// llama.cpp, vLLM, etc.).
+    #[arg(long, env = "N3UR0N_BACKEND", default_value = "echo")]
+    pub(crate) backend: String,
+
+    /// Base URL of the OpenAI-compatible endpoint when `--backend openai`.
+    /// e.g. http://host.docker.internal:11434 (Ollama from a container).
+    #[arg(long, env = "N3UR0N_OPENAI_BASE_URL")]
+    pub(crate) openai_base_url: Option<String>,
+
+    /// Model name to send by default when `--backend openai`.
+    #[arg(long, env = "N3UR0N_OPENAI_MODEL")]
+    pub(crate) openai_model: Option<String>,
+
+    /// Bearer token for the OpenAI-compatible endpoint (optional).
+    #[arg(long, env = "N3UR0N_OPENAI_API_KEY", hide_env_values = true)]
+    pub(crate) openai_api_key: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -118,7 +138,14 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    let node = bootstrap::load_node(&dir, args.endpoint, bootstrap_peers.clone()).await?;
+
+    let backend_kind = parse_backend_kind(
+        &args.backend,
+        args.openai_base_url,
+        args.openai_model,
+        args.openai_api_key,
+    )?;
+    let node = bootstrap::load_node(&dir, args.endpoint, bootstrap_peers.clone(), backend_kind).await?;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], args.port));
     tracing::info!(instance_id = %node.instance_id(), port = args.port, "starting n3ur0n server");
 
@@ -196,7 +223,7 @@ async fn peers_list(config_dir: Option<PathBuf>, limit: i64) -> Result<()> {
 
 async fn peers_refresh(config_dir: Option<PathBuf>, endpoint: String) -> Result<()> {
     let dir = config_dir.unwrap_or_else(bootstrap::default_config_dir);
-    let node = bootstrap::load_node(&dir, None, vec![]).await?;
+    let node = bootstrap::load_node(&dir, None, vec![], BackendKind::Echo).await?;
     let client = peer_client::http_client();
     let desc = discovery::refresh_peer(&node, &client, &endpoint).await?;
     println!(
@@ -210,10 +237,48 @@ async fn peers_refresh(config_dir: Option<PathBuf>, endpoint: String) -> Result<
 
 async fn peers_discover(config_dir: Option<PathBuf>, capability: String) -> Result<()> {
     let dir = config_dir.unwrap_or_else(bootstrap::default_config_dir);
-    let node = bootstrap::load_node(&dir, None, vec![]).await?;
+    let node = bootstrap::load_node(&dir, None, vec![], BackendKind::Echo).await?;
     let added = discovery::discover_capability(&node, &capability).await?;
     println!("discovered {added} new peer(s) for capability \"{capability}\"");
     Ok(())
+}
+
+fn parse_backend_kind(
+    name: &str,
+    openai_base_url: Option<String>,
+    openai_model: Option<String>,
+    openai_api_key: Option<String>,
+) -> Result<BackendKind> {
+    match name.to_ascii_lowercase().as_str() {
+        "echo" => Ok(BackendKind::Echo),
+        "openai" | "ollama" => {
+            let base_url = openai_base_url
+                .or_else(|| {
+                    if name.eq_ignore_ascii_case("ollama") {
+                        Some("http://localhost:11434".into())
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "--openai-base-url (or env N3UR0N_OPENAI_BASE_URL) required when --backend openai"
+                    )
+                })?;
+            let default_model = openai_model.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--openai-model (or env N3UR0N_OPENAI_MODEL) required when --backend openai"
+                )
+            })?;
+            Ok(BackendKind::OpenAI(OpenAIConfig {
+                base_url,
+                default_model,
+                api_key: openai_api_key,
+                description: None,
+            }))
+        }
+        other => anyhow::bail!("unknown backend: {other}"),
+    }
 }
 
 fn parse_verb(s: &str) -> Result<ProtocolVerb> {
