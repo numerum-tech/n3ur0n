@@ -11,7 +11,7 @@ use n3ur0n_adapters::{
     utility::UtilityBackend,
 };
 use n3ur0n_core::Keypair;
-use n3ur0n_node::planner::{LLMPlanner, Planner};
+use n3ur0n_node::planner::{LLMPlanner, PlanExecPlanner, Planner};
 use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_node::{CapabilityRegistry, IdentityFile, Node, NodeConfig, identity_file};
 
@@ -89,16 +89,25 @@ fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {
     }
 }
 
-/// Planner selector. v0.1 only ships LLM-based planner.
+/// Planner selector.
 #[derive(Debug, Clone)]
 pub enum PlannerKind {
-    /// LLM-driven, native tool-calling.
+    /// LLM-driven ReAct loop with native tool-calling. Each LLM tour decides
+    /// the next action based on observed tool results.
     Llm {
         /// Backend used for the planning conversation (an OpenAI-compatible
         /// endpoint).
         backend: OpenAIConfig,
         /// Optional default model for the planner; falls back to the
         /// `OpenAIConfig.default_model` if `None`.
+        model_hint: Option<String>,
+    },
+    /// Plan-then-execute: one LLM call compiles a typed plan, a deterministic
+    /// executor walks it, a final LLM call composes the user-facing reply.
+    /// More robust on small (≤8B) models that struggle with multi-turn
+    /// ReAct iteration.
+    PlanExec {
+        backend: OpenAIConfig,
         model_hint: Option<String>,
     },
 }
@@ -118,6 +127,14 @@ pub fn build_runtime(
             );
             let chosen_model = model_hint.unwrap_or(backend.default_model);
             Arc::new(LLMPlanner::new(llm, Some(chosen_model)))
+        }
+        PlannerKind::PlanExec { backend, model_hint } => {
+            let llm: Arc<dyn Backend> = Arc::new(
+                OpenAIBackend::new(backend.clone())
+                    .map_err(|e| anyhow::anyhow!("planner llm init: {e}"))?,
+            );
+            let chosen_model = model_hint.unwrap_or(backend.default_model);
+            Arc::new(PlanExecPlanner::new(llm, Some(chosen_model)))
         }
     };
     Ok(NodeRuntime::new(node, planner, runtime_config))

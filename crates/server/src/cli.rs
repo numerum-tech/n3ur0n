@@ -337,30 +337,45 @@ fn parse_planner_kind(
 ) -> Result<Option<PlannerKind>> {
     match name.to_ascii_lowercase().as_str() {
         "none" | "" | "off" => Ok(None),
-        "llm" | "ollama" => {
-            let base_url = base_url.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "--planner-llm-base-url (or env N3UR0N_PLANNER_LLM_BASE_URL) required when --planner-mode llm"
-                )
-            })?;
-            let model = model.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "--planner-llm-model (or env N3UR0N_PLANNER_LLM_MODEL) required when --planner-mode llm"
-                )
-            })?;
-            let backend = OpenAIConfig {
-                base_url,
-                default_model: model.clone(),
-                api_key,
-                description: None,
-            };
+        "llm" | "ollama" | "react" => {
+            let backend = build_openai_config(base_url, model.clone(), api_key)?;
             Ok(Some(PlannerKind::Llm {
                 backend,
-                model_hint: Some(model),
+                model_hint: model,
+            }))
+        }
+        "plan_exec" | "plan-exec" | "plan" | "ptx" => {
+            let backend = build_openai_config(base_url, model.clone(), api_key)?;
+            Ok(Some(PlannerKind::PlanExec {
+                backend,
+                model_hint: model,
             }))
         }
         other => anyhow::bail!("unknown planner mode: {other}"),
     }
+}
+
+fn build_openai_config(
+    base_url: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+) -> Result<OpenAIConfig> {
+    let base_url = base_url.ok_or_else(|| {
+        anyhow::anyhow!(
+            "--planner-llm-base-url (or env N3UR0N_PLANNER_LLM_BASE_URL) required for LLM-backed planner"
+        )
+    })?;
+    let model = model.ok_or_else(|| {
+        anyhow::anyhow!(
+            "--planner-llm-model (or env N3UR0N_PLANNER_LLM_MODEL) required for LLM-backed planner"
+        )
+    })?;
+    Ok(OpenAIConfig {
+        base_url,
+        default_model: model,
+        api_key,
+        description: None,
+    })
 }
 
 fn parse_verb(s: &str) -> Result<ProtocolVerb> {

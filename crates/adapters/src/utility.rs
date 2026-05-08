@@ -42,18 +42,14 @@ impl Backend for UtilityBackend {
                 Ok(json!({ "value": n, "min": min, "max": max }))
             }
             "reverse" => {
-                let text = args
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AdapterError::Backend("`text` (string) required".into()))?;
+                let text = coerce_to_string(args.get("text"))
+                    .ok_or_else(|| AdapterError::Backend("`text` required".into()))?;
                 let reversed: String = text.chars().rev().collect();
                 Ok(json!({ "reversed": reversed }))
             }
             "string_length" => {
-                let text = args
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AdapterError::Backend("`text` (string) required".into()))?;
+                let text = coerce_to_string(args.get("text"))
+                    .ok_or_else(|| AdapterError::Backend("`text` required".into()))?;
                 Ok(json!({
                     "chars": text.chars().count(),
                     "bytes": text.len()
@@ -153,6 +149,18 @@ impl Backend for UtilityBackend {
     }
 }
 
+/// Coerce a JSON value to its string representation. Strings pass through;
+/// numbers and booleans render via Display; null and missing values fail.
+fn coerce_to_string(v: Option<&Value>) -> Option<String> {
+    match v {
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        Some(Value::Bool(b)) => Some(b.to_string()),
+        Some(Value::Null) | None => None,
+        Some(other) => Some(other.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +206,12 @@ mod tests {
         let decls = UtilityBackend.describe().await.unwrap();
         let names: Vec<&str> = decls.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, ["time", "random_int", "reverse", "string_length"]);
+    }
+
+    #[tokio::test]
+    async fn reverse_coerces_number_to_string() {
+        let b = UtilityBackend;
+        let v = b.invoke("reverse", json!({"text": 740})).await.unwrap();
+        assert_eq!(v["reversed"], "047");
     }
 }

@@ -2,6 +2,8 @@
 
 pub mod catalog;
 pub mod llm;
+pub mod plan;
+pub mod plan_exec;
 pub mod tool_call;
 
 use async_trait::async_trait;
@@ -12,6 +14,7 @@ use crate::node::Node;
 
 pub use catalog::{Catalog, ToolDef};
 pub use llm::LLMPlanner;
+pub use plan_exec::PlanExecPlanner;
 
 /// Outcome of one user message → planner exchange. The state has already
 /// been mutated and persisted (one row per turn) by the time this returns.
