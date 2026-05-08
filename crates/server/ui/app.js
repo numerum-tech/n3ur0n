@@ -3,25 +3,26 @@ const conv = $("conversation");
 const peerSelect = $("peer-select");
 const capSelect = $("cap-select");
 const peerCap = $("peer-cap");
-const promptEl = $("prompt");
-const sendBtn = $("send");
+const composer = $("composer");
 const refreshBtn = $("refresh-peers");
 const discoverBtn = $("discover-chat");
 const clearBtn = $("clear-conv");
 const selfId = $("self-id");
 
 let knownPeers = [];
-// Conversation history — per (peer_endpoint, capability) pair.
-const history = new Map();
+const history = new Map(); // key = peer_endpoint::capability -> [{role, content}]
 
 function key() {
     return `${peerSelect.value}::${capSelect.value}`;
 }
-
 function getHistory() {
     if (!history.has(key())) history.set(key(), []);
     return history.get(key());
 }
+
+// ---------------------------------------------------------------------------
+// Conversation rendering
+// ---------------------------------------------------------------------------
 
 function bubble(kind, who, text) {
     const div = document.createElement("div");
@@ -48,46 +49,9 @@ function renderConversation() {
     }
 }
 
-async function loadPeers() {
-    peerSelect.innerHTML = "<option value=''>(loading…)</option>";
-    try {
-        const res = await fetch("/api/v0/peers");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = await res.json();
-        selfId.textContent = body.self || "?";
-        knownPeers = body.peers || [];
-
-        peerSelect.innerHTML = "";
-        if (knownPeers.length === 0) {
-            const opt = document.createElement("option");
-            opt.value = "";
-            opt.textContent = "(no peers — click `discover chat`)";
-            peerSelect.appendChild(opt);
-            sendBtn.disabled = true;
-            updateCapabilities();
-            return;
-        }
-        let firstChatIdx = -1;
-        knownPeers.forEach((p, idx) => {
-            const opt = document.createElement("option");
-            opt.value = p.endpoint;
-            const caps = (p.capabilities || []).map(c => typeof c === "string" ? { name: c } : c);
-            p._caps = caps; // cache for capability dropdown
-            const names = caps.map(c => c.name).filter(Boolean);
-            const tag = names.length ? ` [${names.join(",")}]` : "";
-            opt.textContent = `${p.alias || p.instance_id.slice(0, 18) + "…"}  ${p.endpoint}${tag}`;
-            opt.dataset.idx = idx;
-            peerSelect.appendChild(opt);
-            if (firstChatIdx === -1 && names.includes("chat")) {
-                firstChatIdx = idx;
-            }
-        });
-        if (firstChatIdx >= 0) peerSelect.selectedIndex = firstChatIdx;
-        updateCapabilities();
-    } catch (e) {
-        bubble("error", null, `Failed to load peers: ${e.message}`);
-    }
-}
+// ---------------------------------------------------------------------------
+// Peer + capability selection
+// ---------------------------------------------------------------------------
 
 function selectedPeer() {
     const opt = peerSelect.selectedOptions[0];
@@ -102,6 +66,41 @@ function selectedCapability() {
     return (peer._caps || []).find(c => c.name === capSelect.value) || null;
 }
 
+async function loadPeers() {
+    peerSelect.innerHTML = "<option value=''>(loading…)</option>";
+    try {
+        const res = await fetch("/api/v0/peers");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        selfId.textContent = body.self || "?";
+        knownPeers = body.peers || [];
+
+        peerSelect.innerHTML = "";
+        if (knownPeers.length === 0) {
+            peerSelect.appendChild(new Option("(no peers — click `discover chat`)", ""));
+            updateCapabilities();
+            return;
+        }
+        let firstChatIdx = -1;
+        knownPeers.forEach((p, idx) => {
+            const opt = document.createElement("option");
+            opt.value = p.endpoint;
+            const caps = (p.capabilities || []).map(c => typeof c === "string" ? { name: c } : c);
+            p._caps = caps;
+            const names = caps.map(c => c.name).filter(Boolean);
+            const tag = names.length ? ` [${names.join(",")}]` : "";
+            opt.textContent = `${p.alias || p.instance_id.slice(0, 18) + "…"}  ${p.endpoint}${tag}`;
+            opt.dataset.idx = idx;
+            peerSelect.appendChild(opt);
+            if (firstChatIdx === -1 && names.includes("chat")) firstChatIdx = idx;
+        });
+        if (firstChatIdx >= 0) peerSelect.selectedIndex = firstChatIdx;
+        updateCapabilities();
+    } catch (e) {
+        bubble("error", null, `Failed to load peers: ${e.message}`);
+    }
+}
+
 function updateCapabilities() {
     capSelect.innerHTML = "";
     const peer = selectedPeer();
@@ -109,16 +108,16 @@ function updateCapabilities() {
         capSelect.disabled = true;
         capSelect.appendChild(new Option("(no peer)", ""));
         peerCap.textContent = "";
-        sendBtn.disabled = true;
+        renderComposer(null);
         return;
     }
     const caps = peer._caps || [];
     if (caps.length === 0) {
         capSelect.disabled = true;
-        capSelect.appendChild(new Option("(no cached caps — refresh)", ""));
+        capSelect.appendChild(new Option("(no cached caps)", ""));
         peerCap.textContent = "no cached capabilities — try `refresh list`";
         peerCap.style.color = "var(--muted)";
-        sendBtn.disabled = true;
+        renderComposer(null);
         return;
     }
     capSelect.disabled = false;
@@ -127,77 +126,263 @@ function updateCapabilities() {
     onCapabilityChange();
 }
 
-// Last JSON skeleton we auto-prefilled — used to detect "user hasn't edited
-// it" so we can safely overwrite on cap change.
-let lastAutoPrefill = "";
-
 function onCapabilityChange() {
-    const cap = capSelect.value;
     const decl = selectedCapability();
-
-    // If the textarea still holds the previous auto-prefill, clear it before
-    // the cap-specific branches run.
-    if (lastAutoPrefill && promptEl.value === lastAutoPrefill) {
-        promptEl.value = "";
-        lastAutoPrefill = "";
+    if (!decl) {
+        peerCap.textContent = "";
+        renderComposer(null);
+        return;
     }
-
-    if (cap === "chat") {
-        peerCap.textContent = decl?.description
-            ? `${decl.description.slice(0, 80)}${decl.description.length > 80 ? "…" : ""}`
-            : "multi-turn chat (history kept per peer+cap)";
-        peerCap.style.color = "";
-        promptEl.placeholder = "Type a prompt and press Enter (Shift+Enter = newline)…";
-        sendBtn.disabled = false;
-    } else if (cap) {
-        const desc = decl?.description ? ` · ${decl.description.slice(0, 60)}` : "";
-        peerCap.textContent = `invoke "${cap}" — JSON args required${desc}`;
-        peerCap.style.color = "";
-        const skel = jsonSkeleton(decl?.schema_in);
-        promptEl.placeholder = `JSON args, e.g. ${skel}`;
-        if (promptEl.value.trim() === "") {
-            promptEl.value = skel;
-            lastAutoPrefill = skel;
-        }
-        sendBtn.disabled = false;
+    if (decl.description) {
+        peerCap.textContent = decl.description.length > 140
+            ? decl.description.slice(0, 140) + "…"
+            : decl.description;
     } else {
         peerCap.textContent = "";
-        sendBtn.disabled = true;
     }
+    peerCap.style.color = "";
+    renderComposer(decl);
     renderConversation();
 }
 
-// Best-effort JSON skeleton from a JSON Schema fragment. Always returns valid
-// JSON (`{}` as fallback). Handles top-level `oneOf` by picking the first
-// branch's required props.
-function jsonSkeleton(schema) {
-    if (!schema || typeof schema !== "object") return "{}";
-    const branch = Array.isArray(schema.oneOf) && schema.oneOf.length > 0
-        ? schema.oneOf[0]
-        : schema;
-    const props = branch.properties || {};
-    const required = branch.required || Object.keys(props).slice(0, 1);
-    const out = {};
-    for (const k of required) {
-        const p = props[k] || {};
-        out[k] = exampleFor(p);
+// ---------------------------------------------------------------------------
+// Composer: form generated from capability schema_in
+// ---------------------------------------------------------------------------
+
+let collectArgs = () => ({}); // overwritten by renderComposer
+
+function renderComposer(decl) {
+    composer.innerHTML = "";
+    if (!decl) {
+        collectArgs = () => null;
+        return;
     }
-    return JSON.stringify(out);
+
+    if (decl.name === "chat") {
+        renderChatComposer();
+        return;
+    }
+
+    // Generic capability — try to render form from schema_in.
+    const fields = document.createElement("div");
+    fields.className = "composer-fields";
+
+    const ctx = pickSchemaBranch(decl.schema_in);
+    if (!ctx) {
+        // Schema unusable — fall back to raw JSON textarea.
+        const ta = document.createElement("textarea");
+        ta.rows = 4;
+        ta.className = "json-fallback";
+        ta.placeholder = 'JSON args, e.g. {"x":1}';
+        ta.value = "{}";
+        fields.appendChild(ta);
+        collectArgs = () => parseJsonOrThrow(ta.value);
+    } else {
+        const inputs = renderObjectFields(ctx);
+        fields.appendChild(inputs.root);
+        collectArgs = () => inputs.collect();
+    }
+
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.id = "send";
+    sendBtn.textContent = `Send`;
+    sendBtn.addEventListener("click", send);
+
+    composer.appendChild(fields);
+    composer.appendChild(sendBtn);
 }
 
-function exampleFor(prop) {
-    if (!prop || typeof prop !== "object") return null;
-    if (prop.example !== undefined) return prop.example;
+function renderChatComposer() {
+    const ta = document.createElement("textarea");
+    ta.id = "prompt";
+    ta.rows = 3;
+    ta.placeholder = "Type a prompt and press Enter (Shift+Enter = newline)…";
+    ta.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
+            send();
+        }
+    });
+
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.id = "send";
+    sendBtn.textContent = "Send";
+    sendBtn.addEventListener("click", send);
+
+    composer.appendChild(ta);
+    composer.appendChild(sendBtn);
+
+    collectArgs = () => {
+        const text = ta.value.trim();
+        if (!text) return null;
+        ta.value = "";
+        return { prompt: text };
+    };
+}
+
+// Pick a usable schema branch. Handles {oneOf:[...]} and plain objects.
+function pickSchemaBranch(schema) {
+    if (!schema || typeof schema !== "object") return null;
+    if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
+        return schema.oneOf[0];
+    }
+    if (schema.type === "object" || schema.properties) return schema;
+    if (!schema.type) return schema; // permissive
+    return null;
+}
+
+function renderObjectFields(schema) {
+    const root = document.createElement("div");
+    root.className = "composer-fields";
+
+    const props = schema.properties || {};
+    const required = new Set(schema.required || []);
+    const entries = Object.entries(props);
+
+    if (entries.length === 0) {
+        const note = document.createElement("div");
+        note.className = "field";
+        note.innerHTML = `<span class="desc">No declared fields. Click Send to invoke with empty args.</span>`;
+        root.appendChild(note);
+        return { root, collect: () => ({}) };
+    }
+
+    const widgets = [];
+    for (const [name, prop] of entries) {
+        const w = renderField(name, prop, required.has(name));
+        widgets.push(w);
+        root.appendChild(w.el);
+    }
+    return {
+        root,
+        collect() {
+            const out = {};
+            for (const w of widgets) {
+                const v = w.read();
+                if (v !== undefined) out[w.name] = v;
+            }
+            return out;
+        }
+    };
+}
+
+function renderField(name, prop, isRequired) {
+    const el = document.createElement("div");
+    el.className = "field";
+    const lbl = document.createElement("label");
+    lbl.innerHTML = `<span>${name}</span>${isRequired ? '<span class="req">*</span>' : ""}<span class="desc">${typeLabel(prop)}</span>`;
+    el.appendChild(lbl);
+
     const t = Array.isArray(prop.type) ? prop.type[0] : prop.type;
-    if (Array.isArray(prop.enum) && prop.enum.length > 0) return prop.enum[0];
-    switch (t) {
-        case "string": return "";
-        case "integer":
-        case "number": return 0;
-        case "boolean": return false;
-        case "array": return [];
-        case "object": return {};
-        default: return null;
+
+    if (Array.isArray(prop.enum) && prop.enum.length > 0) {
+        const sel = document.createElement("select");
+        if (!isRequired) sel.appendChild(new Option("(unset)", ""));
+        for (const v of prop.enum) sel.appendChild(new Option(String(v), String(v)));
+        el.appendChild(sel);
+        return { name, el, read: () => sel.value === "" ? undefined : sel.value };
+    }
+
+    if (t === "boolean") {
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        el.appendChild(cb);
+        return { name, el, read: () => cb.checked };
+    }
+
+    if (t === "integer" || t === "number") {
+        const inp = document.createElement("input");
+        inp.type = "number";
+        if (t === "integer") inp.step = "1";
+        if (prop.example !== undefined) inp.placeholder = String(prop.example);
+        el.appendChild(inp);
+        return {
+            name, el,
+            read() {
+                if (inp.value === "") return undefined;
+                const n = t === "integer" ? parseInt(inp.value, 10) : parseFloat(inp.value);
+                return Number.isFinite(n) ? n : undefined;
+            }
+        };
+    }
+
+    if (t === "array" || t === "object") {
+        const ta = document.createElement("textarea");
+        ta.rows = 2;
+        ta.className = "json-fallback";
+        ta.placeholder = t === "array" ? "JSON array, e.g. [1,2,3]" : 'JSON object, e.g. {"k":"v"}';
+        el.appendChild(ta);
+        return {
+            name, el,
+            read() {
+                const txt = ta.value.trim();
+                if (txt === "") return undefined;
+                try { return JSON.parse(txt); }
+                catch (e) { throw new Error(`field "${name}" is not valid JSON: ${e.message}`); }
+            }
+        };
+    }
+
+    // Default: string. Use textarea if name suggests long content.
+    const long = /prompt|message|content|text|body/i.test(name);
+    const inp = long ? document.createElement("textarea") : document.createElement("input");
+    if (long) inp.rows = 3;
+    else inp.type = "text";
+    if (prop.example !== undefined) inp.placeholder = String(prop.example);
+    el.appendChild(inp);
+    return {
+        name, el,
+        read() {
+            const v = inp.value;
+            return v === "" ? undefined : v;
+        }
+    };
+}
+
+function typeLabel(prop) {
+    if (Array.isArray(prop.enum)) return `enum`;
+    const t = Array.isArray(prop.type) ? prop.type.join("|") : prop.type;
+    return t || "any";
+}
+
+function parseJsonOrThrow(s) {
+    if (s.trim() === "") return {};
+    try { return JSON.parse(s); }
+    catch (e) { throw new Error(`Invalid JSON: ${e.message}`); }
+}
+
+// ---------------------------------------------------------------------------
+// Send
+// ---------------------------------------------------------------------------
+
+async function send() {
+    const peer = peerSelect.value;
+    const cap = capSelect.value;
+    if (!peer || !cap) {
+        bubble("error", null, "Pick a peer and a capability first.");
+        return;
+    }
+    let args;
+    try {
+        args = collectArgs();
+    } catch (e) {
+        bubble("error", null, e.message);
+        return;
+    }
+    if (args === null) return; // empty chat prompt
+
+    const sendBtn = composer.querySelector("button");
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+        if (cap === "chat") {
+            await sendChat(args.prompt);
+        } else {
+            await sendInvoke(args);
+        }
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
     }
 }
 
@@ -234,32 +419,20 @@ async function sendChat(prompt) {
     }
 }
 
-async function sendInvoke(rawArgs) {
+async function sendInvoke(args) {
     const peer = peerSelect.value;
     const cap = capSelect.value;
     const hist = getHistory();
-
-    let args;
-    try {
-        args = rawArgs.trim() === "" ? {} : JSON.parse(rawArgs);
-    } catch (e) {
-        bubble("error", null, `Invalid JSON: ${e.message}`);
-        return;
-    }
-
-    hist.push({ role: "user", content: rawArgs });
-    bubble("user", "you", rawArgs);
+    const pretty = JSON.stringify(args);
+    hist.push({ role: "user", content: pretty });
+    bubble("user", "you", pretty);
 
     const pending = bubble("assistant", `${peer} · ${cap}`, "…invoking…");
     try {
         const res = await fetch("/api/v0/invoke", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                peer_endpoint: peer,
-                capability: cap,
-                args,
-            }),
+            body: JSON.stringify({ peer_endpoint: peer, capability: cap, args }),
         });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || JSON.stringify(body));
@@ -275,30 +448,9 @@ async function sendInvoke(rawArgs) {
     }
 }
 
-async function send() {
-    if (!peerSelect.value) {
-        bubble("error", null, "Pick a peer first.");
-        return;
-    }
-    if (!capSelect.value) {
-        bubble("error", null, "Pick a capability first.");
-        return;
-    }
-    const text = promptEl.value.trim();
-    if (!text) return;
-    promptEl.value = "";
-    sendBtn.disabled = true;
-    try {
-        if (capSelect.value === "chat") {
-            await sendChat(text);
-        } else {
-            await sendInvoke(text);
-        }
-    } finally {
-        sendBtn.disabled = false;
-        promptEl.focus();
-    }
-}
+// ---------------------------------------------------------------------------
+// Discovery / clear
+// ---------------------------------------------------------------------------
 
 async function discoverChat() {
     discoverBtn.disabled = true;
@@ -327,15 +479,8 @@ function clearConversation() {
 
 peerSelect.addEventListener("change", updateCapabilities);
 capSelect.addEventListener("change", onCapabilityChange);
-sendBtn.addEventListener("click", send);
 refreshBtn.addEventListener("click", loadPeers);
 discoverBtn.addEventListener("click", discoverChat);
 clearBtn.addEventListener("click", clearConversation);
-promptEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        send();
-    }
-});
 
 loadPeers();

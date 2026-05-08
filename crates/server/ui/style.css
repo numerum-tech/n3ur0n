@@ -115,7 +115,65 @@ button:disabled { opacity: 0.5; cursor: progress; }
     display: flex;
     gap: 12px;
     align-items: stretch;
+    flex-wrap: wrap;
 }
 
-#prompt { flex: 1; resize: vertical; min-height: 60px; }
-#send { min-width: 80px; }
+.composer-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.composer-row {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+}
+
+.field > label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.field > label .req { color: var(--error); }
+.field .desc { color: var(--muted); font-size: 0.72rem; }
+
+.field input, .field textarea, .field select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font: inherit;
+}
+
+.field input[type=checkbox] { width: auto; }
+
+#prompt, .composer textarea.json-fallback {
+    flex: 1;
+    resize: vertical;
+    min-height: 60px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font: inherit;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#send { min-width: 80px; align-self: flex-end; }
