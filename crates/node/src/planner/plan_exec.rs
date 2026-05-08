@@ -117,7 +117,19 @@ Available tools (peer::capability — description, schema_in):\n",
 was executed; you now have the executor's blackboard (all step results). Write the \
 final reply for the user in plain text. Use the user's language. Do NOT emit JSON, \
 do NOT call any tool, do NOT re-explain the plan unless the user asked for it. Be \
-concise and use the actual values from the blackboard.",
+concise and use the actual values from the blackboard.\n\
+\n\
+Honesty rules — non-negotiable:\n\
+- If the user asked for a side-effect action (sending email, posting, \
+payments, modifying files, calling an external service) and no tool capable \
+of performing it ran successfully, say plainly that you cannot perform it. \
+Do NOT pretend the action was done.\n\
+- If a tool step failed but the user gave the data directly (a literal \
+string in the prompt, a number, etc.), compute the answer yourself from \
+that data when you can. Tool failures on simple known data don't excuse you \
+from answering.\n\
+- Acknowledge step errors when they prevented you from gathering data the \
+user genuinely needed.",
         )
     }
 }
