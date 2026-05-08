@@ -1,0 +1,8 @@
+# OpenWolf runtime artifacts
+.wolf/daemon.log
+.wolf/token-ledger.json
+.wolf/cron-state.json
+.wolf/suggestions.json
+.wolf/designqc-report.json
+.wolf/designqc-captures/
+.wolf/hooks/_session.json
