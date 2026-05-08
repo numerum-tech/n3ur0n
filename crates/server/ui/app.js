@@ -151,7 +151,9 @@ function renderTurn(turn) {
         return appendBubble("assistant", who, turn.content || "");
     }
     if (role === "system") {
-        return appendBubble("system", null, turn.content);
+        // Internal nudges (e.g. malformed-tool-call recovery). Not user-facing.
+        // Available in raw GET /api/v0/conversations/:id payload for debug.
+        return null;
     }
     if (role === "tool_call") {
         const div = document.createElement("div");
