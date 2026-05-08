@@ -78,7 +78,16 @@ Rules:\n\
 Do NOT invent step ids.\n\
 - For chat-like tools, set only fields the schema declares; never set `model`.\n\
 - Pick the SHORTEST useful plan. If the user asks something you can answer from \
-prior knowledge with no tool, return an empty plan: `{\"plan\": []}`.\n\
+prior knowledge with no tool, return an empty plan: `{\"plan\": []}`. The \
+reflection step that runs after execution will compose the answer using your \
+own knowledge.\n\
+- Tasks that need NO tool and should return `{\"plan\": []}` include: \
+translation between human languages, definitions, well-known facts, simple \
+arithmetic, code explanations, summaries of text the user already provided. \
+Do not invent a chain of caps just because they are listed.\n\
+- A capability is RELEVANT only when its declared description matches the \
+user's intent. `reverse` is for reversing strings, NOT for translating. `echo` \
+just passes args through, so it adds no value in a plan.\n\
 - All `peer` values must come from the tools list verbatim.\n\
 - Do NOT add filler steps (e.g. an `echo` cap that just relays a previous \
 result). The reflection step at the end already turns the blackboard into the \
