@@ -1,0 +1,30 @@
+[package]
+name = "n3ur0n-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "N3UR0N publisher binary: axum + rust-embed UI + clap CLI."
+
+[[bin]]
+name = "n3ur0n"
+path = "src/main.rs"
+
+[dependencies]
+n3ur0n-core = { workspace = true }
+n3ur0n-storage = { workspace = true }
+n3ur0n-adapters = { workspace = true }
+
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+rust-embed = { workspace = true }
+time = { workspace = true }
+data-encoding = { workspace = true }

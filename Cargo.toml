@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/storage",
+    "crates/adapters",
+    "crates/server",
+]
+# crates/desktop will join once Tauri 2 is initialised via `pnpm tauri init`
+# (requires a built frontend/ first).
+exclude = ["crates/desktop"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/n3ur0n/n3ur0n"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Async + serde
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_jcs = "0.1"
+
+# Crypto / identity
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+sha2 = "0.10"
+data-encoding = "2"
+rand = "0.8"
+
+# Time / ids
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Errors / logs
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# HTTP
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "trace", "limit"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = "0.23"
+rustls-pemfile = "2"
+
+# Storage
+rusqlite = { version = "0.31", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+
+# Embed assets
+rust-embed = { version = "8", features = ["mime-guess"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Rate limiting
+governor = "0.6"
+
+# Internal
+n3ur0n-core = { path = "crates/core" }
+n3ur0n-storage = { path = "crates/storage" }
+n3ur0n-adapters = { path = "crates/adapters" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true

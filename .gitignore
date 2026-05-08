@@ -1,3 +1,20 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Frontend
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.vite/
+.DS_Store
+
+# Local config
+*.sqlite
+*.sqlite-journal
+keys.json
+
 # OpenWolf runtime artifacts
 .wolf/daemon.log
 .wolf/token-ledger.json

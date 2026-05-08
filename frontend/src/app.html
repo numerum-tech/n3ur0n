@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self' tauri: https://tauri.localhost;
+                   script-src 'self' tauri: https://tauri.localhost;
+                   style-src 'self' tauri: https://tauri.localhost 'unsafe-inline';
+                   connect-src 'self' tauri: ipc: http://127.0.0.1:4242 ws://127.0.0.1:4242" />
+    <title>N3UR0N</title>
+    %sveltekit.head%
+  </head>
+  <body>
+    <div id="app">%sveltekit.body%</div>
+  </body>
+</html>

@@ -1,0 +1,27 @@
+[package]
+name = "n3ur0n-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "N3UR0N core: protocol types, crypto identity, message signing/verification."
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_jcs = { workspace = true }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+data-encoding = { workspace = true }
+rand = { workspace = true }
+time = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
