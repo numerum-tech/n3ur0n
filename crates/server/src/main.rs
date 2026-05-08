@@ -23,6 +23,9 @@ enum Command {
     /// Show the canonical instance id.
     #[command(name = "keys")]
     Keys(cli::KeysArgs),
+
+    /// Sign a message and POST it to a remote peer's /n3ur0n/v0/messages.
+    Send(cli::SendArgs),
 }
 
 #[tokio::main]
@@ -36,5 +39,6 @@ async fn main() -> Result<()> {
         Command::Init(args) => cli::init(args).await,
         Command::Serve(args) => cli::serve(args).await,
         Command::Keys(args) => cli::keys(args).await,
+        Command::Send(args) => cli::send(args).await,
     }
 }

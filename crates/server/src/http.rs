@@ -44,7 +44,7 @@ pub fn app(node: Node) -> Router {
         .with_state(state.clone());
 
     let proto_v0 = Router::new()
-        .route("/health", get(health))
+        .route("/health", get(public_health))
         .route(
             "/messages",
             post(post_message).layer(DefaultBodyLimit::max(INVOKE_LIMIT)),
@@ -66,6 +66,17 @@ pub async fn serve(addr: SocketAddr, node: Node) -> Result<()> {
 
 async fn health() -> Json<serde_json::Value> {
     Json(json!({"status": "ok"}))
+}
+
+/// Public liveness probe. Includes the canonical instance id so callers can
+/// build signed envelopes without prior key exchange. The id is public by
+/// construction (it is the hash of the public key).
+async fn public_health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "instance_id": state.node.instance_id().as_str(),
+        "protocol_version": n3ur0n_core::protocol::PROTOCOL_VERSION,
+    }))
 }
 
 async fn whoami(State(state): State<AppState>) -> Json<serde_json::Value> {

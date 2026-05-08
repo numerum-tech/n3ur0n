@@ -2,4 +2,5 @@
 //! the same router that the binary serves.
 
 pub mod bootstrap;
+pub mod client;
 pub mod http;

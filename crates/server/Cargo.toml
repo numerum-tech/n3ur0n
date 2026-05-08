@@ -35,6 +35,8 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 rust-embed = { workspace = true }
 time = { workspace = true }
+reqwest = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

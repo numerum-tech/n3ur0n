@@ -1017,6 +1017,7 @@ dependencies = [
  "n3ur0n-core",
  "n3ur0n-node",
  "n3ur0n-storage",
+ "reqwest",
  "rust-embed",
  "serde",
  "serde_json",

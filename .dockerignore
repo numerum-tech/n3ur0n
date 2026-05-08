@@ -1,0 +1,13 @@
+target/
+**/target/
+.git/
+.wolf/
+.claude/
+tmp/
+docker/data/
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+*.sqlite
+*.sqlite-journal
+keys.json

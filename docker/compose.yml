@@ -1,0 +1,73 @@
+# 3-node N3UR0N test cluster.
+#
+# Usage:
+#   docker compose -f docker/compose.yml up --build
+#   docker compose -f docker/compose.yml exec node-a \
+#       n3ur0n send --endpoint http://node-b:4242 --verb ping
+#
+# Each node has its own persistent volume so its identity survives restarts.
+
+name: n3ur0n-cluster
+
+x-node: &node
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: n3ur0n:dev
+  restart: unless-stopped
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - "curl -fsS http://localhost:4242/n3ur0n/v0/health >/dev/null"
+    interval: 5s
+    timeout: 3s
+    retries: 6
+    start_period: 5s
+  networks:
+    - n3uronnet
+
+services:
+  node-a:
+    <<: *node
+    container_name: n3uron-node-a
+    hostname: node-a
+    environment:
+      N3UR0N_ENDPOINT: http://node-a:4242
+      RUST_LOG: info,n3ur0n=debug
+    ports:
+      - "4242:4242"
+    volumes:
+      - node-a-data:/var/lib/n3ur0n
+
+  node-b:
+    <<: *node
+    container_name: n3uron-node-b
+    hostname: node-b
+    environment:
+      N3UR0N_ENDPOINT: http://node-b:4242
+      RUST_LOG: info,n3ur0n=debug
+    ports:
+      - "4243:4242"
+    volumes:
+      - node-b-data:/var/lib/n3ur0n
+
+  node-c:
+    <<: *node
+    container_name: n3uron-node-c
+    hostname: node-c
+    environment:
+      N3UR0N_ENDPOINT: http://node-c:4242
+      RUST_LOG: info,n3ur0n=debug
+    ports:
+      - "4244:4242"
+    volumes:
+      - node-c-data:/var/lib/n3ur0n
+
+networks:
+  n3uronnet:
+    driver: bridge
+
+volumes:
+  node-a-data:
+  node-b-data:
+  node-c-data:

@@ -125,6 +125,29 @@ Si `core` veut importer `axum` ou `rusqlite`, c'est une erreur de couche.
 
 Workspace Rust opérationnel : `cargo check --workspace`, `cargo test --workspace` passent.
 
+### CLI publisher
+
+```bash
+n3ur0n init                            # genère keys.json (0600) + sqlite
+n3ur0n serve --port 4242 --endpoint http://...
+n3ur0n keys                            # affiche instance_id
+n3ur0n send --endpoint http://node-b:4242 --verb ping
+n3ur0n send --endpoint http://node-b:4242 --verb invoke \
+   --payload '{"capability":"echo","args":{"x":1}}'
+```
+
+`--config-dir` lu via flag OU env `N3UR0N_CONFIG_DIR`.
+
+### Cluster Docker (test)
+
+```bash
+docker compose -f docker/compose.yml up -d --build
+bash docker/cluster-smoke.sh        # 6 pings + describe_self + invoke
+docker compose -f docker/compose.yml down -v
+```
+
+3 nodes (`node-a`/`node-b`/`node-c`) sur ports hôte 4242/4243/4244, réseau bridge interne `n3uronnet`. Volumes par nœud. Healthcheck via `/n3ur0n/v0/health` (renvoie `{status, instance_id, protocol_version}`).
+
 ```bash
 # Workspace Rust
 cargo build --release -p n3ur0n-server
