@@ -221,6 +221,13 @@ const CHAT_ARG_ALLOWLIST: &[&str] = &[
     "max_tokens",
     "top_p",
     "stop",
+    // Tool-calling fields are explicitly allowed — the planner uses
+    // OpenAIBackend for its own LLM calls and needs to pass `tools`
+    // through. If the operator exposes `chat` backed by a non-tool-aware
+    // model, the upstream is expected to ignore unknown fields (Ollama
+    // does); a strict gateway can be added later.
+    "tools",
+    "tool_choice",
 ];
 
 fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
@@ -252,21 +259,12 @@ fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
         map.insert("model".into(), Value::String(default_model.to_string()));
         // We don't support streaming over the protocol envelope yet — force false.
         map.insert("stream".into(), Value::Bool(false));
-        // Strip tool_calls from history messages — qwen2.5:0.5b and other
-        // small models can't parse them and 500.
-        if let Some(Value::Array(msgs)) = map.get_mut("messages") {
-            for m in msgs {
-                if let Value::Object(o) = m {
-                    o.remove("tool_calls");
-                    o.remove("tool_call_id");
-                    // `role: "tool"` messages also confuse non-tool models;
-                    // demote them to system content.
-                    if matches!(o.get("role"), Some(Value::String(r)) if r == "tool") {
-                        o.insert("role".into(), Value::String("system".into()));
-                    }
-                }
-            }
-        }
+        // NOTE: messages content is forwarded as-is. `tool_calls` and
+        // `role: tool` entries inside `messages` are intentionally
+        // preserved so the planner's own iterative loop can show the LLM
+        // its prior tool exchanges. Operators exposing the `chat` cap with
+        // a non-tool-aware model (qwen2.5:0.5b, etc.) should pick a model
+        // that can ignore these fields gracefully — Ollama 0.4+ does so.
     }
     Ok(obj)
 }

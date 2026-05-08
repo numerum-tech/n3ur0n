@@ -110,7 +110,7 @@ async fn invoke_with_messages_array_locks_model_to_default() {
 }
 
 #[tokio::test]
-async fn drops_caller_supplied_tools_and_tool_call_history() {
+async fn passes_tool_fields_through_for_planner_iteration() {
     let (base, state) = spawn_mock().await;
     let backend = OpenAIBackend::new(OpenAIConfig {
         base_url: base,
@@ -120,8 +120,11 @@ async fn drops_caller_supplied_tools_and_tool_call_history() {
     })
     .unwrap();
 
-    // Caller — typically a planner LLM forwarding args verbatim — leaks
-    // `tools` and `tool_calls` into the chat cap. Both must be dropped.
+    // The planner uses OpenAIBackend for its own LLM call. It needs:
+    //   - top-level `tools` to advertise capabilities to the model
+    //   - prior `tool_calls` / `role: tool` history inside `messages` so
+    //     the model can resume plan→call→observe across iterations
+    // Top-level `model` override is still rejected (operator-locked).
     let payload = json!({
         "messages": [
             {"role": "user", "content": "hi"},
@@ -139,16 +142,13 @@ async fn drops_caller_supplied_tools_and_tool_call_history() {
     let _ = backend.invoke("chat", payload).await.unwrap();
 
     let req = state.last_request.lock().await.clone().unwrap();
-    assert_eq!(req["model"], "default");
-    assert!(req.get("tools").is_none(), "tools must be stripped");
-    assert!(req.get("tool_choice").is_none(), "tool_choice must be stripped");
+    assert_eq!(req["model"], "default", "model must be locked");
+    assert!(req.get("tools").is_some(), "tools forwarded");
+    assert!(req.get("tool_choice").is_some(), "tool_choice forwarded");
     let msgs = req["messages"].as_array().unwrap();
-    for m in msgs {
-        assert!(m.get("tool_calls").is_none(), "tool_calls in history stripped");
-        assert!(m.get("tool_call_id").is_none(), "tool_call_id stripped");
-        // `role: tool` demoted to system.
-        assert_ne!(m["role"].as_str().unwrap(), "tool");
-    }
+    // History is preserved verbatim.
+    assert!(msgs.iter().any(|m| m.get("tool_calls").is_some()));
+    assert!(msgs.iter().any(|m| m["role"] == "tool"));
 }
 
 #[tokio::test]
