@@ -19,7 +19,7 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use crate::conversation::{self, ConversationError, ConversationState};
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
-use crate::planner::{DispatchOutcome, Planner};
+use crate::planner::{DispatchOutcome, EventSender, Planner};
 
 /// Configurable bounds for the runtime.
 #[derive(Debug, Clone)]
@@ -147,6 +147,30 @@ impl NodeRuntime {
         let outcome = self
             .planner
             .dispatch(&self.node, &mut state, message)
+            .await?;
+        self.store_in_cache(state).await;
+        Ok(outcome)
+    }
+
+    /// Same as `handle_user_message` but emits `DispatchEvent`s on the
+    /// provided sender as the planner progresses. Caller owns the receiver
+    /// half (typically streamed back to the HTTP client as SSE).
+    pub async fn handle_user_message_streaming(
+        &self,
+        client_id: &str,
+        conv_id: &str,
+        message: String,
+        events: EventSender,
+    ) -> NodeResult<DispatchOutcome> {
+        let conv_lock = self.lock_for(conv_id);
+        let _guard = conv_lock.lock().await;
+
+        let _slot = self.acquire_planner_slot().await;
+
+        let mut state = self.load_state(conv_id, client_id).await?;
+        let outcome = self
+            .planner
+            .dispatch_streaming(&self.node, &mut state, message, events)
             .await?;
         self.store_in_cache(state).await;
         Ok(outcome)

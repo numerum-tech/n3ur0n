@@ -19,7 +19,10 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+// Long timeout: peer invocations may proxy to a slow LLM upstream (Ollama
+// queues per-model). 30s was insufficient under modest fan-out; 180s gives
+// the upstream room to drain its queue before the client gives up.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Error)]
 pub enum ClientError {

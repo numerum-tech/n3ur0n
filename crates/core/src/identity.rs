@@ -78,7 +78,7 @@ impl PublicKey {
 }
 
 /// Owned signing key + derived public key.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Keypair {
     signing: SigningKey,
 }

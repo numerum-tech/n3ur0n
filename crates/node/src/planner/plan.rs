@@ -5,18 +5,26 @@
 //! reference resolution from a per-conversation blackboard, sequential
 //! execution v0.1 (parallelism for independent steps = v0.2).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use n3ur0n_core::message::ProtocolVerb;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
+use tokio::sync::Semaphore;
+
+/// Hard cap on concurrent step invocations within a single plan dispatch.
+/// Independent steps still run in parallel up to this bound; beyond it they
+/// queue. Protects slow upstreams (single-GPU Ollama, rate-limited APIs)
+/// from saturating when a plan fans out widely.
+const MAX_CONCURRENT_STEPS: usize = 4;
 
 use crate::client as peer_client;
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
-use crate::planner::catalog::{Catalog, ToolDef};
-use crate::planner::TraceEntry;
+use crate::planner::catalog::Catalog;
+use crate::planner::{DispatchEvent, EventSender, TraceEntry};
 
 /// One step in a plan.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -115,8 +123,20 @@ pub fn validate_plan(plan: &Plan, catalog: &Catalog) -> Result<(), PlanError> {
 }
 
 /// Return step ids in a valid execution order (Kahn's algorithm).
+///
+/// Stable: independent steps preserve their plan declaration order. Steps
+/// freed by a parent's completion enter the queue in plan order too. The UI
+/// numbers chips left-to-right in plan order, so this keeps execution and
+/// display aligned.
 pub fn topological_order(plan: &Plan) -> Result<Vec<String>, PlanError> {
-    // Build edges: declared depends_on + references inferred from args.
+    // Plan-index per id for stable enqueue order.
+    let plan_idx: HashMap<&str, usize> = plan
+        .plan
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+
     let mut indeg: HashMap<String, usize> = HashMap::new();
     let mut edges: HashMap<String, Vec<String>> = HashMap::new();
     for s in &plan.plan {
@@ -125,33 +145,41 @@ pub fn topological_order(plan: &Plan) -> Result<Vec<String>, PlanError> {
     }
     for s in &plan.plan {
         let mut deps: HashSet<String> = s.depends_on.iter().cloned().collect();
-        // Walk args, look for ${id...} patterns and add as deps.
         collect_refs(&s.args, &mut deps);
         for dep in &deps {
             if dep == &s.id {
                 continue;
             }
             if !indeg.contains_key(dep) {
-                continue; // unknown id, validation will catch elsewhere
+                continue;
             }
             edges.entry(dep.clone()).or_default().push(s.id.clone());
             *indeg.entry(s.id.clone()).or_insert(0) += 1;
         }
     }
-    let mut queue: Vec<String> = indeg
-        .iter()
-        .filter(|&(_, d)| *d == 0)
-        .map(|(k, _)| k.clone())
-        .collect();
+    // Sort each adjacency list by plan index so freed steps enqueue in
+    // declaration order.
+    for outs in edges.values_mut() {
+        outs.sort_by_key(|id| plan_idx.get(id.as_str()).copied().unwrap_or(usize::MAX));
+        outs.dedup();
+    }
+
+    // Seed queue in plan order (FIFO).
+    let mut queue: VecDeque<String> = VecDeque::new();
+    for s in &plan.plan {
+        if indeg.get(&s.id).copied() == Some(0) {
+            queue.push_back(s.id.clone());
+        }
+    }
     let mut order = Vec::new();
-    while let Some(id) = queue.pop() {
+    while let Some(id) = queue.pop_front() {
         order.push(id.clone());
         if let Some(outs) = edges.get(&id).cloned() {
             for o in outs {
                 if let Some(d) = indeg.get_mut(&o) {
                     *d = d.saturating_sub(1);
                     if *d == 0 {
-                        queue.push(o);
+                        queue.push_back(o);
                     }
                 }
             }
@@ -355,113 +383,276 @@ fn value_to_text(v: Value) -> String {
 
 /// Execute the plan sequentially in topological order.
 pub async fn execute_plan(node: &Node, plan: &Plan, catalog: &Catalog) -> NodeResult<PlanRun> {
-    let order = topological_order(plan).map_err(|e| NodeError::InvalidPayload(e.to_string()))?;
-    let by_id: HashMap<&str, &PlanStep> = plan.plan.iter().map(|s| (s.id.as_str(), s)).collect();
+    execute_plan_streaming(node, plan, catalog, None).await
+}
+
+/// Execute the plan with maximum safe parallelism: every step whose
+/// dependencies are satisfied runs concurrently. Independent steps therefore
+/// finish in roughly the time of the slowest step instead of summing up.
+///
+/// Optional `events` channel emits `StepStart` / `StepDone` as work begins
+/// and completes (so the UI can light chips up live). Send failures are
+/// silently ignored — the executor never blocks on a dropped subscriber.
+///
+/// The returned `PlanRun.trace` is sorted in plan declaration order so that
+/// persisted tool turns + UI history stay deterministic regardless of
+/// completion timing.
+pub async fn execute_plan_streaming(
+    node: &Node,
+    plan: &Plan,
+    catalog: &Catalog,
+    events: Option<&EventSender>,
+) -> NodeResult<PlanRun> {
+    use futures::stream::{FuturesUnordered, StreamExt};
+    use futures::FutureExt;
+
+    // Validate the plan can be ordered (cycle detection); the actual order
+    // is irrelevant here — we drive execution off the dependency graph.
+    topological_order(plan).map_err(|e| NodeError::InvalidPayload(e.to_string()))?;
+
+    let by_id: HashMap<&str, &PlanStep> =
+        plan.plan.iter().map(|s| (s.id.as_str(), s)).collect();
+    let plan_idx: HashMap<String, usize> = plan
+        .plan
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.clone(), i))
+        .collect();
+
+    // Build dependency edges (declared + ref-inferred) and indegrees.
+    let mut indeg: HashMap<String, usize> = HashMap::new();
+    let mut edges: HashMap<String, Vec<String>> = HashMap::new();
+    for s in &plan.plan {
+        indeg.entry(s.id.clone()).or_insert(0);
+        edges.entry(s.id.clone()).or_default();
+    }
+    for s in &plan.plan {
+        let mut deps: HashSet<String> = s.depends_on.iter().cloned().collect();
+        collect_refs(&s.args, &mut deps);
+        for dep in &deps {
+            if dep == &s.id || !indeg.contains_key(dep) {
+                continue;
+            }
+            edges.entry(dep.clone()).or_default().push(s.id.clone());
+            *indeg.entry(s.id.clone()).or_insert(0) += 1;
+        }
+    }
+    for outs in edges.values_mut() {
+        outs.sort_by_key(|id| plan_idx.get(id).copied().unwrap_or(usize::MAX));
+        outs.dedup();
+    }
 
     let http = peer_client::http_client();
+    let step_sem = Arc::new(Semaphore::new(MAX_CONCURRENT_STEPS));
     let mut blackboard: HashMap<String, Value> = HashMap::new();
-    let mut trace: Vec<TraceEntry> = Vec::new();
+    let mut trace_by_id: HashMap<String, TraceEntry> = HashMap::new();
     let mut last_id: Option<String> = None;
 
-    for step_id in order {
-        let step = by_id.get(step_id.as_str()).copied().ok_or_else(|| {
-            NodeError::InvalidPayload(format!("topo order yielded unknown id `{step_id}`"))
-        })?;
-        let resolved_args = resolve_value(&step.args, &blackboard);
+    // Steps that have indeg 0 and are queued / in-flight / done.
+    let mut ready: VecDeque<String> = plan
+        .plan
+        .iter()
+        .filter(|s| indeg.get(&s.id).copied() == Some(0))
+        .map(|s| s.id.clone())
+        .collect();
 
-        // Detect unresolved templates left in args. These indicate the LLM
-        // emitted an unsupported expression (e.g. `${s1.value + s2.value}`)
-        // or referenced a step id that didn't exist. Fail this step rather
-        // than send literal text to the tool.
+    let mut in_flight: FuturesUnordered<_> = FuturesUnordered::new();
+
+    // Helper: schedule one step (run synchronously up to the await point so
+    // resolve_value reads the latest blackboard, then push the future).
+    let spawn_step = |step_id: String,
+                          blackboard: &HashMap<String, Value>,
+                          trace_by_id: &mut HashMap<String, TraceEntry>,
+                          in_flight: &mut FuturesUnordered<_>| {
+        let step = match by_id.get(step_id.as_str()).copied() {
+            Some(s) => s,
+            None => return,
+        };
+        let resolved_args = resolve_value(&step.args, blackboard);
+
+        // Fail-fast: leftover `${...}` after resolution.
         if let Some(unresolved) = first_unresolved_template(&resolved_args) {
             let err = format!(
                 "step `{}`: unresolved template `{}` (no expressions allowed in ${{...}}; \
 use raw refs only, let the downstream tool combine values)",
                 step.id, unresolved
             );
-            blackboard.insert(step.id.clone(), json!({"error": err.clone()}));
-            trace.push(TraceEntry {
-                peer_id: step.peer.clone(),
-                capability: step.capability.clone(),
-                args: resolved_args,
-                result: None,
-                error: Some(err),
-            });
-            continue;
-        }
-
-        // Find the tool in catalog
-        let tool_name = format!("{}::{}", step.peer, step.capability);
-        let tool: ToolDef = match catalog.find(&tool_name) {
-            Some(t) => t.clone(),
-            None => {
-                let err = format!("tool `{tool_name}` not in catalog");
-                blackboard.insert(step.id.clone(), json!({"error": err}));
-                trace.push(TraceEntry {
+            trace_by_id.insert(
+                step.id.clone(),
+                TraceEntry {
                     peer_id: step.peer.clone(),
                     capability: step.capability.clone(),
                     args: resolved_args,
                     result: None,
-                    error: Some(err),
-                });
-                continue;
-            }
-        };
-
-        // Execute: local or remote.
-        let outcome: Result<Value, String> = if tool.peer_endpoint.is_none() {
-            node.backend()
-                .invoke(&tool.cap.name, resolved_args.clone())
-                .await
-                .map_err(|e| e.to_string())
-        } else {
-            let endpoint = tool.peer_endpoint.clone().unwrap();
-            let payload = json!({
-                "capability": tool.cap.name,
-                "args": resolved_args,
-            });
-            match peer_client::send_signed(
-                &http,
-                node.keypair(),
-                &endpoint,
-                ProtocolVerb::Invoke,
-                payload,
-            )
-            .await
-            {
-                Ok(reply) => {
-                    let payload = reply.envelope.payload;
-                    Ok(payload.get("result").cloned().unwrap_or(payload))
+                    error: Some(err.clone()),
+                },
+            );
+            // Synthesise an instant-complete future so the main loop sees it.
+            let id = step.id.clone();
+            in_flight.push(
+                async move {
+                    StepCompletion {
+                        id,
+                        result: Err(err),
+                    }
                 }
-                Err(e) => Err(e.to_string()),
+                .boxed(),
+            );
+            return;
+        }
+
+        let tool_name = format!("{}::{}", step.peer, step.capability);
+        let tool = catalog.find(&tool_name).cloned();
+        let tool = match tool {
+            Some(t) => t,
+            None => {
+                let err = format!("tool `{tool_name}` not in catalog");
+                trace_by_id.insert(
+                    step.id.clone(),
+                    TraceEntry {
+                        peer_id: step.peer.clone(),
+                        capability: step.capability.clone(),
+                        args: resolved_args,
+                        result: None,
+                        error: Some(err.clone()),
+                    },
+                );
+                let id = step.id.clone();
+                in_flight.push(
+                    async move {
+                        StepCompletion {
+                            id,
+                            result: Err(err),
+                        }
+                    }
+                    .boxed(),
+                );
+                return;
             }
         };
 
-        match outcome {
-            Ok(result) => {
-                blackboard.insert(step.id.clone(), result.clone());
-                trace.push(TraceEntry {
-                    peer_id: tool.peer_id.clone(),
-                    capability: step.capability.clone(),
-                    args: resolved_args,
-                    result: Some(result),
-                    error: None,
-                });
-                last_id = Some(step.id.clone());
+        // Stash the trace entry now (peer_id resolved, args captured).
+        trace_by_id.insert(
+            step.id.clone(),
+            TraceEntry {
+                peer_id: tool.peer_id.clone(),
+                capability: step.capability.clone(),
+                args: resolved_args.clone(),
+                result: None,
+                error: None,
+            },
+        );
+
+        // Build the actual invocation future. It captures clones so it can
+        // outlive the borrow on `blackboard`. A semaphore permit (acquired
+        // inside the future) caps concurrent in-flight invocations.
+        let id = step.id.clone();
+        let backend = node.backend().clone();
+        let keypair = node.keypair().clone();
+        let http_client = http.clone();
+        let cap_name = tool.cap.name.clone();
+        let endpoint = tool.peer_endpoint.clone();
+        let sem = step_sem.clone();
+        let evt_tx = events.cloned();
+
+        in_flight.push(
+            async move {
+                let _permit = sem
+                    .acquire_owned()
+                    .await
+                    .expect("step semaphore never closed");
+                if let Some(tx) = &evt_tx {
+                    let _ = tx.send(DispatchEvent::StepStart { id: id.clone() });
+                }
+                let result: Result<Value, String> = if endpoint.is_none() {
+                    backend
+                        .invoke(&cap_name, resolved_args.clone())
+                        .await
+                        .map_err(|e| e.to_string())
+                } else {
+                    let payload = json!({
+                        "capability": cap_name,
+                        "args": resolved_args,
+                    });
+                    match peer_client::send_signed(
+                        &http_client,
+                        &keypair,
+                        endpoint.as_deref().unwrap(),
+                        ProtocolVerb::Invoke,
+                        payload,
+                    )
+                    .await
+                    {
+                        Ok(reply) => {
+                            let p = reply.envelope.payload;
+                            Ok(p.get("result").cloned().unwrap_or(p))
+                        }
+                        Err(e) => Err(e.to_string()),
+                    }
+                };
+                StepCompletion { id, result }
+            }
+            .boxed(),
+        );
+    };
+
+    // Initial seed.
+    while let Some(step_id) = ready.pop_front() {
+        spawn_step(step_id, &blackboard, &mut trace_by_id, &mut in_flight);
+    }
+
+    // Drain completions, free dependents, schedule them.
+    while let Some(completion) = in_flight.next().await {
+        let StepCompletion { id, result } = completion;
+
+        match result {
+            Ok(value) => {
+                blackboard.insert(id.clone(), value.clone());
+                if let Some(entry) = trace_by_id.get_mut(&id) {
+                    entry.result = Some(value.clone());
+                }
+                if let Some(tx) = events {
+                    let _ = tx.send(DispatchEvent::StepDone {
+                        id: id.clone(),
+                        result: Some(value),
+                        error: None,
+                    });
+                }
+                last_id = Some(id.clone());
             }
             Err(err) => {
-                blackboard.insert(step.id.clone(), json!({"error": err}));
-                trace.push(TraceEntry {
-                    peer_id: tool.peer_id.clone(),
-                    capability: step.capability.clone(),
-                    args: resolved_args,
-                    result: None,
-                    error: Some(err),
-                });
-                // Continue executing remaining steps — downstream may still
-                // produce a useful partial result. Tools that depend on a
-                // failed step receive the `{"error": ...}` blob via refs.
+                blackboard.insert(id.clone(), json!({"error": err.clone()}));
+                if let Some(entry) = trace_by_id.get_mut(&id) {
+                    entry.error = Some(err.clone());
+                }
+                if let Some(tx) = events {
+                    let _ = tx.send(DispatchEvent::StepDone {
+                        id: id.clone(),
+                        result: None,
+                        error: Some(err),
+                    });
+                }
             }
+        }
+
+        // Free downstream steps.
+        if let Some(outs) = edges.get(&id).cloned() {
+            for o in outs {
+                if let Some(d) = indeg.get_mut(&o) {
+                    *d = d.saturating_sub(1);
+                    if *d == 0 {
+                        spawn_step(o, &blackboard, &mut trace_by_id, &mut in_flight);
+                    }
+                }
+            }
+        }
+    }
+
+    // Reassemble trace in plan declaration order for stable persistence.
+    let mut trace: Vec<TraceEntry> = Vec::with_capacity(trace_by_id.len());
+    for s in &plan.plan {
+        if let Some(entry) = trace_by_id.remove(&s.id) {
+            trace.push(entry);
         }
     }
 
@@ -470,6 +661,11 @@ use raw refs only, let the downstream tool combine values)",
         last_step_id: last_id,
         trace,
     })
+}
+
+struct StepCompletion {
+    id: String,
+    result: Result<Value, String>,
 }
 
 #[cfg(test)]
@@ -549,6 +745,25 @@ mod tests {
         // not a clean dotted path.
         let leftover = first_unresolved_template(&resolved);
         assert!(leftover.is_some(), "unresolved template should be flagged");
+    }
+
+    #[test]
+    fn topo_order_independent_steps_preserve_plan_order() {
+        // 12 independent steps — no deps. Must come out in declaration order.
+        let plan = Plan {
+            plan: (1..=12)
+                .map(|i| PlanStep {
+                    id: format!("s{i}"),
+                    peer: "p".into(),
+                    capability: "c".into(),
+                    args: json!({}),
+                    depends_on: vec![],
+                })
+                .collect(),
+        };
+        let order = topological_order(&plan).unwrap();
+        let expected: Vec<String> = (1..=12).map(|i| format!("s{i}")).collect();
+        assert_eq!(order, expected);
     }
 
     #[test]

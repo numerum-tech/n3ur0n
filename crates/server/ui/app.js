@@ -133,69 +133,139 @@ async function renderActive() {
 
 function renderTurns(turns) {
     conv.innerHTML = "";
-    let pendingTrace = null; // gather tool_call+result pairs into one bubble
+    let pending = []; // accumulated tool_call/tool_result turns since last user
+    const flushPending = () => {
+        if (pending.length === 0) return;
+        renderHistoricalStepper(pending);
+        pending = [];
+    };
     for (const t of turns) {
-        renderTurn(t, /*append=*/true);
+        if (!t || !t.role) continue;
+        if (t.role === "user") {
+            flushPending();
+            appendBubble("user", "you", t.content);
+        } else if (t.role === "assistant") {
+            flushPending();
+            const who = t.model ? `assistant · ${t.model}` : "assistant";
+            appendBubble("assistant", who, t.content || "");
+        } else if (t.role === "tool_call" || t.role === "tool_result") {
+            pending.push(t);
+        }
+        // system turns hidden
     }
+    flushPending();
     conv.scrollTop = conv.scrollHeight;
 }
 
-function renderTurn(turn) {
-    if (!turn || !turn.role) return null;
-    const role = turn.role;
-    if (role === "user") {
-        return appendBubble("user", "you", turn.content);
+/// Render a finished dispatch as a static chip row matching the live stepper.
+function renderHistoricalStepper(toolTurns) {
+    const wrap = document.createElement("div");
+    wrap.className = "stepper complete";
+    const status = document.createElement("div");
+    status.className = "stepper-status";
+    wrap.appendChild(status);
+    const row = document.createElement("div");
+    row.className = "stepper-row";
+    wrap.appendChild(row);
+
+    // Pair tool_call + tool_result by call_id (or fallback by index).
+    const calls = toolTurns.filter(t => t.role === "tool_call");
+    const resultsById = new Map();
+    const resultsByIdx = [];
+    for (const t of toolTurns) {
+        if (t.role === "tool_result") {
+            if (t.call_id) resultsById.set(t.call_id, t);
+            resultsByIdx.push(t);
+        }
     }
-    if (role === "assistant") {
-        const who = turn.model ? `assistant · ${turn.model}` : "assistant";
-        return appendBubble("assistant", who, turn.content || "");
+
+    let n = 0;
+    let errors = 0;
+    for (let i = 0; i < calls.length; i++) {
+        const call = calls[i];
+        const result = (call.id && resultsById.get(call.id)) || resultsByIdx[i] || null;
+        const hasError = result && !!result.error;
+        const chip = document.createElement("div");
+        chip.className = `chip ${hasError ? "error" : "done"}`;
+        const num = document.createElement("span");
+        num.className = "chip-num";
+        num.textContent = ++n;
+        const label = document.createElement("span");
+        label.className = "chip-label";
+        label.textContent = `${shortPeer(call.peer_id).slice(0, 6)}::${call.capability}`;
+        chip.appendChild(num);
+        chip.appendChild(label);
+        chip.dataset.idx = String(i);
+        chip.style.cursor = "pointer";
+        chip.addEventListener("click", () => toggleStepDetails(wrap, call, result, chip));
+        row.appendChild(chip);
+        if (hasError) errors++;
     }
-    if (role === "system") {
-        // Internal nudges (e.g. malformed-tool-call recovery). Not user-facing.
-        // Available in raw GET /api/v0/conversations/:id payload for debug.
-        return null;
+    status.textContent = errors
+        ? `dispatch · ${calls.length} step${calls.length > 1 ? "s" : ""} · ${errors} error${errors > 1 ? "s" : ""}`
+        : `dispatch · ${calls.length} step${calls.length > 1 ? "s" : ""}`;
+
+    conv.appendChild(wrap);
+}
+
+function toggleStepDetails(wrap, call, result, chipEl) {
+    const stepKey = call.id || `${call.peer_id}::${call.capability}::${chipEl?.dataset.idx ?? ""}`;
+    const existing = wrap.querySelector(".stepper-details");
+    const wasSame = existing && existing.dataset.stepKey === stepKey;
+    if (existing) existing.remove();
+    wrap.querySelectorAll(".chip.active").forEach(c => c.classList.remove("active"));
+    if (wasSame) return;
+
+    const panel = document.createElement("div");
+    panel.className = "stepper-details";
+    panel.dataset.stepKey = stepKey;
+    const cap = `${shortPeer(call.peer_id)}::${call.capability}`;
+    const stepNum = chipEl?.querySelector(".chip-num")?.textContent
+        ?? (chipEl?.dataset.idx ? String(parseInt(chipEl.dataset.idx, 10) + 1) : "?");
+    const hdr = document.createElement("div");
+    hdr.className = "stepper-details-header";
+    const title = document.createElement("span");
+    title.textContent = `step ${stepNum} · ${cap}`;
+    hdr.appendChild(title);
+    const close = document.createElement("button");
+    close.className = "stepper-details-close";
+    close.type = "button";
+    close.textContent = "×";
+    close.title = "close";
+    close.addEventListener("click", (e) => {
+        e.stopPropagation();
+        panel.remove();
+        wrap.querySelectorAll(".chip.active").forEach(c => c.classList.remove("active"));
+    });
+    hdr.appendChild(close);
+    panel.appendChild(hdr);
+    if (chipEl) chipEl.classList.add("active");
+
+    const argsBlock = document.createElement("details");
+    argsBlock.open = true;
+    const argsSum = document.createElement("summary");
+    argsSum.textContent = "args";
+    argsBlock.appendChild(argsSum);
+    const argsPre = document.createElement("pre");
+    argsPre.textContent = JSON.stringify(call.args, null, 2);
+    argsBlock.appendChild(argsPre);
+    panel.appendChild(argsBlock);
+
+    if (result) {
+        const resBlock = document.createElement("details");
+        resBlock.open = true;
+        const resSum = document.createElement("summary");
+        resSum.textContent = result.error ? "error" : "result";
+        resBlock.appendChild(resSum);
+        const resPre = document.createElement("pre");
+        resPre.textContent = result.error
+            ? result.error
+            : JSON.stringify(result.result, null, 2);
+        resBlock.appendChild(resPre);
+        panel.appendChild(resBlock);
     }
-    if (role === "tool_call") {
-        const div = document.createElement("div");
-        div.className = "bubble tool";
-        const who = document.createElement("span");
-        who.className = "who";
-        who.textContent = `→ ${shortPeer(turn.peer_id)}::${turn.capability}`;
-        div.appendChild(who);
-        const det = document.createElement("details");
-        const sum = document.createElement("summary");
-        sum.textContent = "args";
-        det.appendChild(sum);
-        const pre = document.createElement("pre");
-        pre.textContent = JSON.stringify(turn.args, null, 2);
-        det.appendChild(pre);
-        div.appendChild(det);
-        conv.appendChild(div);
-        return div;
-    }
-    if (role === "tool_result") {
-        const div = document.createElement("div");
-        div.className = "bubble tool";
-        const who = document.createElement("span");
-        who.className = "who";
-        const cap = `${shortPeer(turn.peer_id)}::${turn.capability}`;
-        who.textContent = turn.error ? `← ${cap} (error)` : `← ${cap}`;
-        if (turn.error) div.classList.add("warn");
-        div.appendChild(who);
-        const det = document.createElement("details");
-        const sum = document.createElement("summary");
-        sum.textContent = turn.error ? "error" : "result";
-        det.appendChild(sum);
-        const pre = document.createElement("pre");
-        pre.textContent = turn.error
-            ? turn.error
-            : JSON.stringify(turn.result, null, 2);
-        det.appendChild(pre);
-        div.appendChild(det);
-        conv.appendChild(div);
-        return div;
-    }
-    return null;
+
+    wrap.appendChild(panel);
 }
 
 function appendBubble(kind, who, text) {
@@ -248,23 +318,183 @@ async function send() {
     sendBtn.disabled = true;
 
     appendBubble("user", "you", text);
-    const pending = appendBubble("assistant", "thinking…", "");
+    const stepper = appendStepper();
 
     try {
-        const r = await api("POST", `/api/v0/conversations/${encodeURIComponent(activeId)}/messages`, { message: text });
-        // Re-render the conversation from server (canonical order including tool turns).
-        await renderActive();
-        // Refresh sidebar order.
+        await streamDispatch(activeId, text, stepper);
+        // Refresh sidebar (updated_at + auto-title). Skip conv re-render —
+        // stepper stays visible alongside the streamed assistant bubble.
         await loadConversations();
     } catch (e) {
-        pending.classList.replace("assistant", "error");
-        pending.querySelector(".who").textContent = "error";
-        const span = pending.querySelector("span:last-child");
-        span.textContent = e.message;
+        stepper.markError(e.message);
     } finally {
         inFlight = false;
         sendBtn.disabled = false;
         promptEl.focus();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Streaming dispatch (SSE)
+// ---------------------------------------------------------------------------
+
+function appendStepper() {
+    const wrap = document.createElement("div");
+    wrap.className = "stepper";
+
+    const status = document.createElement("div");
+    status.className = "stepper-status";
+    status.textContent = "compiling plan…";
+    wrap.appendChild(status);
+
+    const row = document.createElement("div");
+    row.className = "stepper-row";
+    wrap.appendChild(row);
+
+    conv.appendChild(wrap);
+    conv.scrollTop = conv.scrollHeight;
+
+    const chips = new Map();
+
+    function setStatus(text) {
+        status.textContent = text;
+    }
+
+    function ensureChip(id, peerShort, capability) {
+        if (chips.has(id)) return chips.get(id);
+        const chip = document.createElement("div");
+        chip.className = "chip pending";
+        chip.dataset.id = id;
+        const num = document.createElement("span");
+        num.className = "chip-num";
+        num.textContent = chips.size + 1;
+        const label = document.createElement("span");
+        label.className = "chip-label";
+        label.textContent = peerShort && capability
+            ? `${peerShort.slice(0, 6)}::${capability}`
+            : id;
+        chip.appendChild(num);
+        chip.appendChild(label);
+        row.appendChild(chip);
+        chips.set(id, chip);
+        return chip;
+    }
+
+    function setChipState(id, state) {
+        const chip = chips.get(id);
+        if (!chip) return;
+        chip.classList.remove("pending", "running", "done", "error");
+        chip.classList.add(state);
+    }
+
+    return {
+        renderPlan(steps) {
+            row.innerHTML = "";
+            chips.clear();
+            if (!steps || steps.length === 0) {
+                wrap.classList.add("no-plan");
+                setStatus("no plan — answering directly");
+                return;
+            }
+            wrap.classList.remove("no-plan");
+            for (const s of steps) {
+                ensureChip(s.id, s.peer_short, s.capability);
+            }
+            setStatus(`plan ready · ${steps.length} step${steps.length > 1 ? "s" : ""}`);
+        },
+        startStep(id) {
+            ensureChip(id);
+            setChipState(id, "running");
+            setStatus(`running ${id}…`);
+        },
+        doneStep(id, error) {
+            setChipState(id, error ? "error" : "done");
+        },
+        reflecting() {
+            setStatus("composing reply…");
+        },
+        finalize(reply, model) {
+            setStatus(model ? `done · ${model}` : "done");
+            wrap.classList.add("complete");
+            if (reply) {
+                appendBubble("assistant", model ? `assistant · ${model}` : "assistant", reply);
+            }
+        },
+        markError(msg) {
+            setStatus(`error: ${msg}`);
+            wrap.classList.add("complete");
+            wrap.classList.add("err");
+        },
+    };
+}
+
+async function streamDispatch(convId, message, stepper) {
+    const res = await fetch(
+        `/api/v0/conversations/${encodeURIComponent(convId)}/messages/stream`,
+        {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json", accept: "text/event-stream" },
+            body: JSON.stringify({ message }),
+        }
+    );
+    if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buf = "";
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // Frames are separated by blank lines.
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            handleSseFrame(frame, stepper);
+        }
+    }
+    // Flush any trailing frame.
+    if (buf.trim()) handleSseFrame(buf, stepper);
+}
+
+function handleSseFrame(frame, stepper) {
+    let event = "message";
+    const dataLines = [];
+    for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        // ignore comments / id / retry
+    }
+    if (dataLines.length === 0) return;
+    let payload;
+    try {
+        payload = JSON.parse(dataLines.join("\n"));
+    } catch {
+        return;
+    }
+    switch (event) {
+        case "plan_ready":
+            stepper.renderPlan(payload.steps || []);
+            break;
+        case "step_start":
+            stepper.startStep(payload.id);
+            break;
+        case "step_done":
+            stepper.doneStep(payload.id, payload.error);
+            break;
+        case "reflecting":
+            stepper.reflecting();
+            break;
+        case "final":
+            stepper.finalize(payload.reply, payload.model);
+            break;
+        case "error":
+            stepper.markError(payload.message || "dispatch failed");
+            break;
     }
 }
 

@@ -20,8 +20,10 @@ use crate::conversation::{persist_last, ConversationState};
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
 use crate::planner::catalog::Catalog;
-use crate::planner::plan::{execute_plan, validate_plan, Plan};
-use crate::planner::{DispatchOutcome, Planner, TraceEntry};
+use crate::planner::plan::{execute_plan_streaming, validate_plan, Plan};
+use crate::planner::{
+    DispatchEvent, DispatchOutcome, EventSender, Planner, PlanStepInfo, TraceEntry,
+};
 
 const MAX_CONTEXT_TURNS: usize = 16;
 
@@ -142,6 +144,29 @@ impl Planner for PlanExecPlanner {
         state: &mut ConversationState,
         user_message: String,
     ) -> NodeResult<DispatchOutcome> {
+        self.dispatch_inner(node, state, user_message, None).await
+    }
+
+    async fn dispatch_streaming(
+        &self,
+        node: &Node,
+        state: &mut ConversationState,
+        user_message: String,
+        events: EventSender,
+    ) -> NodeResult<DispatchOutcome> {
+        self.dispatch_inner(node, state, user_message, Some(&events))
+            .await
+    }
+}
+
+impl PlanExecPlanner {
+    async fn dispatch_inner(
+        &self,
+        node: &Node,
+        state: &mut ConversationState,
+        user_message: String,
+        events: Option<&EventSender>,
+    ) -> NodeResult<DispatchOutcome> {
         // 1. Persist user turn.
         state.push_user(user_message.clone());
         persist_last(node.db(), state)
@@ -183,8 +208,11 @@ impl Planner for PlanExecPlanner {
                 warn!(error = %e, raw = %raw_plan_json.chars().take(200).collect::<String>(),
                     "plan compile produced invalid JSON; falling back to direct reply");
                 // Fall back: reflect on the raw user message alone.
+                if let Some(tx) = events {
+                    let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
+                }
                 return self
-                    .reflect_only(node, state, &user_message, None, Vec::new())
+                    .reflect_only(node, state, &user_message, None, Vec::new(), events)
                     .await;
             }
         };
@@ -192,20 +220,48 @@ impl Planner for PlanExecPlanner {
         // 4. Validate.
         if let Err(e) = validate_plan(&plan, &catalog) {
             warn!(error = %e, "plan validation failed; falling back to direct reply");
+            if let Some(tx) = events {
+                let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
+            }
             return self
-                .reflect_only(node, state, &user_message, None, Vec::new())
+                .reflect_only(node, state, &user_message, None, Vec::new(), events)
                 .await;
         }
 
         // Special case: empty plan = answer directly without any tool.
         if plan.plan.is_empty() {
+            if let Some(tx) = events {
+                let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
+            }
             return self
-                .reflect_only(node, state, &user_message, None, Vec::new())
+                .reflect_only(node, state, &user_message, None, Vec::new(), events)
                 .await;
         }
 
+        // Announce the plan upfront so the UI can render the chip row.
+        if let Some(tx) = events {
+            let steps: Vec<PlanStepInfo> = plan
+                .plan
+                .iter()
+                .map(|s| {
+                    let tool_name = format!("{}::{}", s.peer, s.capability);
+                    let tool = catalog.find(&tool_name);
+                    let peer_id = tool
+                        .map(|t| t.peer_id.clone())
+                        .unwrap_or_else(|| s.peer.clone());
+                    PlanStepInfo {
+                        id: s.id.clone(),
+                        peer_id,
+                        peer_short: s.peer.clone(),
+                        capability: s.capability.clone(),
+                    }
+                })
+                .collect();
+            let _ = tx.send(DispatchEvent::PlanReady { steps });
+        }
+
         // 5. Execute.
-        let run = execute_plan(node, &plan, &catalog).await?;
+        let run = execute_plan_streaming(node, &plan, &catalog, events).await?;
 
         // Persist tool turns for the UI / DB record (sequentially).
         for entry in &run.trace {
@@ -238,6 +294,7 @@ impl Planner for PlanExecPlanner {
             &user_message,
             Some(&run.blackboard_summary()),
             run.trace,
+            events,
         )
         .await
     }
@@ -253,7 +310,11 @@ impl PlanExecPlanner {
         user_message: &str,
         blackboard_summary: Option<&str>,
         trace: Vec<TraceEntry>,
+        events: Option<&EventSender>,
     ) -> NodeResult<DispatchOutcome> {
+        if let Some(tx) = events {
+            let _ = tx.send(DispatchEvent::Reflecting);
+        }
         let mut messages: Vec<Value> = Vec::with_capacity(MAX_CONTEXT_TURNS + 2);
         messages.push(json!({"role": "system", "content": self.reflect_system_prompt()}));
         // Include the conversation tail so the LLM has continuity.
@@ -290,6 +351,13 @@ impl PlanExecPlanner {
         state.push_assistant(content.clone(), model_used.clone());
         persist_last(node.db(), state)
             .map_err(|e| NodeError::InvalidPayload(format!("persist assistant: {e}")))?;
+
+        if let Some(tx) = events {
+            let _ = tx.send(DispatchEvent::Final {
+                reply: content.clone(),
+                model: model_used.clone(),
+            });
+        }
 
         Ok(DispatchOutcome {
             reply: content,

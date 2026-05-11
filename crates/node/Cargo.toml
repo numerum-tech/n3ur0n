@@ -26,6 +26,7 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 rand = { workspace = true }
 lru = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

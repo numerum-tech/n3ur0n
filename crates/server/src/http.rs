@@ -21,6 +21,7 @@ use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Json, Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -28,6 +29,7 @@ use n3ur0n_core::SignedMessage;
 use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_node::client as peer_client;
 use n3ur0n_node::conversation;
+use n3ur0n_node::planner::DispatchEvent;
 use n3ur0n_node::runtime::NodeRuntime;
 use n3ur0n_node::{Node, NodeError, handle_request};
 use n3ur0n_storage::conversations as conv_repo;
@@ -35,6 +37,8 @@ use n3ur0n_storage::peers as peers_repo;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::StreamExt;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
@@ -84,6 +88,10 @@ pub fn app(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
         .route(
             "/conversations/:id/messages",
             post(conv_messages).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
+        )
+        .route(
+            "/conversations/:id/messages/stream",
+            post(conv_messages_stream).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
         .layer(DefaultBodyLimit::max(META_LIMIT))
         .layer(middleware::from_fn(client_id_middleware))
@@ -566,56 +574,11 @@ async fn conv_messages(
     Path(id): Path<String>,
     req: Request,
 ) -> Response {
-    let cid = match extract_client_id(&req) {
-        Some(v) => v.to_string(),
-        None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
-    };
-    let runtime = match &state.runtime {
-        Some(rt) => rt.clone(),
-        None => {
-            return api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no_planner: this node has no planner configured. Use /api/v0/chat for manual mode.",
-            );
-        }
-    };
-
-    let (_, body) = req.into_parts();
-    let bytes = match axum::body::to_bytes(body, LOCAL_API_LIMIT).await {
-        Ok(b) => b,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
-    };
-    let payload: ConversationMessageRequest = match serde_json::from_slice(&bytes) {
+    let prep = match prepare_dispatch(&state, &id, req).await {
         Ok(v) => v,
-        Err(e) => return api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+        Err(resp) => return resp,
     };
-    let message = payload.message.trim().to_string();
-    if message.is_empty() {
-        return api_error(StatusCode::BAD_REQUEST, "message is empty");
-    }
-
-    // Auto-title on first user message if none set.
-    if let Ok(record) = conv_repo::get(state.node.db(), &id) {
-        if let Some(rec) = record {
-            if rec.client_id != cid {
-                return api_error(StatusCode::NOT_FOUND, "conversation not found");
-            }
-            if rec.title.is_none() {
-                let title = auto_title(&message, 8);
-                let now = time::OffsetDateTime::now_utc().unix_timestamp();
-                let _ = conv_repo::update_meta(
-                    state.node.db(),
-                    &id,
-                    Some(&title),
-                    now,
-                );
-            }
-        } else {
-            return api_error(StatusCode::NOT_FOUND, "conversation not found");
-        }
-    } else {
-        return api_error(StatusCode::INTERNAL_SERVER_ERROR, "db read failed");
-    }
+    let DispatchPrep { cid, runtime, message } = prep;
 
     match runtime.handle_user_message(&cid, &id, message).await {
         Ok(outcome) => {
@@ -642,6 +605,112 @@ async fn conv_messages(
         }
         Err(e) => http_error(&e),
     }
+}
+
+struct DispatchPrep {
+    cid: String,
+    runtime: Arc<NodeRuntime>,
+    message: String,
+}
+
+/// Common pre-flight for both `conv_messages` and `conv_messages_stream`:
+/// extract cookie, ensure planner runtime, validate ownership, parse body,
+/// auto-title on first user message.
+async fn prepare_dispatch(
+    state: &AppState,
+    id: &str,
+    req: Request,
+) -> Result<DispatchPrep, Response> {
+    let cid = match extract_client_id(&req) {
+        Some(v) => v.to_string(),
+        None => return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id")),
+    };
+    let runtime = match &state.runtime {
+        Some(rt) => rt.clone(),
+        None => {
+            return Err(api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no_planner: this node has no planner configured. Use /api/v0/chat for manual mode.",
+            ));
+        }
+    };
+
+    let (_, body) = req.into_parts();
+    let bytes = match axum::body::to_bytes(body, LOCAL_API_LIMIT).await {
+        Ok(b) => b,
+        Err(e) => return Err(api_error(StatusCode::BAD_REQUEST, &e.to_string())),
+    };
+    let payload: ConversationMessageRequest = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return Err(api_error(StatusCode::BAD_REQUEST, &e.to_string())),
+    };
+    let message = payload.message.trim().to_string();
+    if message.is_empty() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "message is empty"));
+    }
+
+    // Auto-title on first user message if none set.
+    match conv_repo::get(state.node.db(), id) {
+        Ok(Some(rec)) => {
+            if rec.client_id != cid {
+                return Err(api_error(StatusCode::NOT_FOUND, "conversation not found"));
+            }
+            if rec.title.is_none() {
+                let title = auto_title(&message, 8);
+                let now = time::OffsetDateTime::now_utc().unix_timestamp();
+                let _ = conv_repo::update_meta(state.node.db(), id, Some(&title), now);
+            }
+        }
+        Ok(None) => return Err(api_error(StatusCode::NOT_FOUND, "conversation not found")),
+        Err(_) => return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "db read failed")),
+    }
+
+    Ok(DispatchPrep { cid, runtime, message })
+}
+
+async fn conv_messages_stream(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    req: Request,
+) -> Response {
+    let prep = match prepare_dispatch(&state, &id, req).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let DispatchPrep { cid, runtime, message } = prep;
+
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<DispatchEvent>();
+    let tx_err = tx.clone();
+
+    let cid_owned = cid.clone();
+    let id_owned = id.clone();
+    tokio::spawn(async move {
+        if let Err(e) = runtime
+            .handle_user_message_streaming(&cid_owned, &id_owned, message, tx)
+            .await
+        {
+            let _ = tx_err.send(DispatchEvent::Error { message: e.to_string() });
+        }
+        // Drop tx_err to close the channel.
+        drop(tx_err);
+    });
+
+    let stream = UnboundedReceiverStream::new(rx).map(|ev| {
+        let event_name = match &ev {
+            DispatchEvent::PlanReady { .. } => "plan_ready",
+            DispatchEvent::StepStart { .. } => "step_start",
+            DispatchEvent::StepDone { .. } => "step_done",
+            DispatchEvent::Reflecting => "reflecting",
+            DispatchEvent::Final { .. } => "final",
+            DispatchEvent::Error { .. } => "error",
+        };
+        let data = serde_json::to_string(&ev).unwrap_or_else(|_| "{}".into());
+        Ok::<_, std::convert::Infallible>(Event::default().event(event_name).data(data))
+    });
+
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 fn map_conv_load_error(e: n3ur0n_node::conversation::ConversationError) -> Response {
