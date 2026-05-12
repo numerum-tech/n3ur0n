@@ -1,9 +1,15 @@
-# 3-node N3UR0N test cluster.
+# 4-node N3UR0N test cluster.
 #
 # Usage:
 #   docker compose -f docker/compose.yml up --build
 #   docker compose -f docker/compose.yml exec node-a \
 #       n3ur0n send --endpoint http://node-b:4242 --verb ping
+#
+# Nodes:
+#   node-a — planner (PlanExec), llama3.1:8b on host Ollama (port 4242)
+#   node-b — utility backend (4 caps, port 4243)
+#   node-c — chat cap via host Ollama llama3.1:8b (port 4244)
+#   node-d — chat cap via remote Ollama gpt-oss:20b on LAN (port 4245)
 #
 # Each node has its own persistent volume so its identity survives restarts.
 
@@ -81,6 +87,28 @@ services:
     volumes:
       - node-c-data:/var/lib/n3ur0n
 
+  # node-d: chat publisher backed by a *remote* LAN Ollama running
+  # gpt-oss:20b. Useful as a larger-model peer for the planner to route
+  # demanding prompts to. Override endpoint/model via env if needed.
+  node-d:
+    <<: *node
+    container_name: n3uron-node-d
+    hostname: node-d
+    depends_on:
+      node-a:
+        condition: service_healthy
+    environment:
+      N3UR0N_ENDPOINT: http://node-d:4242
+      N3UR0N_BACKEND: ollama
+      N3UR0N_OPENAI_BASE_URL: ${REMOTE_OLLAMA_BASE_URL:-http://192.168.4.101:11435}
+      N3UR0N_OPENAI_MODEL: ${REMOTE_OLLAMA_MODEL:-gpt-oss:20b}
+      N3UR0N_BOOTSTRAP_PEERS: http://node-a:4242
+      RUST_LOG: info,n3ur0n=debug
+    ports:
+      - "4245:4242"
+    volumes:
+      - node-d-data:/var/lib/n3ur0n
+
 networks:
   n3uronnet:
     driver: bridge
@@ -89,3 +117,4 @@ volumes:
   node-a-data:
   node-b-data:
   node-c-data:
+  node-d-data:
