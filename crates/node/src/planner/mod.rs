@@ -1,10 +1,8 @@
 //! Planner trait + concrete impls.
 
 pub mod catalog;
-pub mod llm;
 pub mod plan;
 pub mod plan_exec;
-pub mod tool_call;
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -16,7 +14,6 @@ use crate::error::NodeResult;
 use crate::node::Node;
 
 pub use catalog::{Catalog, ToolDef};
-pub use llm::LLMPlanner;
 pub use plan_exec::PlanExecPlanner;
 
 /// Outcome of one user message → planner exchange. The state has already

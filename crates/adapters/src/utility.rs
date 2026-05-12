@@ -9,7 +9,7 @@
 //! - `string_length` — counts characters in a string.
 
 use async_trait::async_trait;
-use n3ur0n_core::capability::{AccessMode, CapabilityDecl};
+use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 use rand::Rng;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
@@ -63,7 +63,8 @@ impl Backend for UtilityBackend {
         Ok(vec![
             CapabilityDecl {
                 name: "time".into(),
-                description: "Returns the current server time (UTC, RFC 3339) and unix timestamp.".into(),
+                description: "Returns the current server time as RFC 3339 string and \
+unix epoch seconds. Takes no arguments.".into(),
                 schema_in: json!({"type": "object"}),
                 schema_out: json!({
                     "type": "object",
@@ -75,12 +76,50 @@ impl Backend for UtilityBackend {
                 }),
                 mode: AccessMode::Free,
                 pricing: None,
-                tags: vec!["util".into(), "time".into()],
+                tags: vec!["util".into(), "time".into(), "clock".into()],
                 lobe_ids: vec![],
+                examples: vec![
+                    CapabilityExample {
+                        user_intent: "what time is it right now on the server?"
+                            .into(),
+                        args: json!({}),
+                        expected_output: json!({
+                            "now": "2026-05-11T12:34:56.789Z",
+                            "unix": 1778492096
+                        }),
+                    },
+                    CapabilityExample {
+                        user_intent: "get a timestamp to use elsewhere in the plan"
+                            .into(),
+                        args: json!({}),
+                        expected_output: json!({
+                            "now": "2026-05-11T12:34:56.789Z",
+                            "unix": 1778492096
+                        }),
+                    },
+                ],
+                disambiguation: Some(
+                    "Server wall-clock only. Not a monotonic timer, not a date \
+calculator, not a calendar — pick this when the user asks for the literal current \
+moment."
+                        .into(),
+                ),
+                negative_examples: vec![NegativeExample {
+                    user_intent: "what day of the week is December 25 2030".into(),
+                    why_not: "this cap returns *now*, not arbitrary dates; do not use \
+for date arithmetic."
+                        .into(),
+                }],
+                output_semantic: Some(
+                    "Current UTC instant as both human-readable string and unix \
+epoch seconds."
+                        .into(),
+                ),
             },
             CapabilityDecl {
                 name: "random_int".into(),
-                description: "Returns a random integer in [min, max] (inclusive).".into(),
+                description: "Returns a uniformly random integer in [min, max] \
+inclusive. Defaults: min=0, max=100.".into(),
                 schema_in: json!({
                     "type": "object",
                     "properties": {
@@ -99,12 +138,40 @@ impl Backend for UtilityBackend {
                 }),
                 mode: AccessMode::Free,
                 pricing: None,
-                tags: vec!["util".into(), "random".into()],
+                tags: vec!["util".into(), "random".into(), "number".into()],
                 lobe_ids: vec![],
+                examples: vec![
+                    CapabilityExample {
+                        user_intent: "pick a random number between 1 and 10".into(),
+                        args: json!({"min": 1, "max": 10}),
+                        expected_output: json!({"value": 7, "min": 1, "max": 10}),
+                    },
+                    CapabilityExample {
+                        user_intent: "give me a random integer".into(),
+                        args: json!({}),
+                        expected_output: json!({"value": 42, "min": 0, "max": 100}),
+                    },
+                ],
+                disambiguation: Some(
+                    "Integer randomness only. Each call is independent (no seed \
+control). For random floats or weighted choice, this is the wrong cap."
+                        .into(),
+                ),
+                negative_examples: vec![NegativeExample {
+                    user_intent: "shuffle this list of items".into(),
+                    why_not: "this cap returns one integer, not a permutation; do not \
+use for list shuffling."
+                        .into(),
+                }],
+                output_semantic: Some(
+                    "A single uniformly-distributed integer drawn from [min, max]."
+                        .into(),
+                ),
             },
             CapabilityDecl {
                 name: "reverse".into(),
-                description: "Reverses a string character by character.".into(),
+                description: "Reverses a string character by character (Unicode \
+scalar-value order). Input field is `text`.".into(),
                 schema_in: json!({
                     "type": "object",
                     "required": ["text"],
@@ -117,12 +184,49 @@ impl Backend for UtilityBackend {
                 }),
                 mode: AccessMode::Free,
                 pricing: None,
-                tags: vec!["util".into(), "string".into()],
+                tags: vec!["util".into(), "string".into(), "transform".into()],
                 lobe_ids: vec![],
+                examples: vec![
+                    CapabilityExample {
+                        user_intent: "reverse the letters in 'hello'".into(),
+                        args: json!({"text": "hello"}),
+                        expected_output: json!({"reversed": "olleh"}),
+                    },
+                    CapabilityExample {
+                        user_intent: "spell this word backwards: bonjour".into(),
+                        args: json!({"text": "bonjour"}),
+                        expected_output: json!({"reversed": "ruojnob"}),
+                    },
+                ],
+                disambiguation: Some(
+                    "Character-level reversal only. Not for word-order reversal, not \
+for translation, not for case flipping."
+                        .into(),
+                ),
+                negative_examples: vec![
+                    NegativeExample {
+                        user_intent: "translate 'hello' to French".into(),
+                        why_not: "translation is a chat-cap task; this cap only \
+reverses characters."
+                            .into(),
+                    },
+                    NegativeExample {
+                        user_intent: "reverse the order of words in this sentence"
+                            .into(),
+                        why_not: "this reverses characters, producing a backwards \
+string; word-order reversal is a different operation not exposed here."
+                            .into(),
+                    },
+                ],
+                output_semantic: Some(
+                    "Input string with character order reversed."
+                        .into(),
+                ),
             },
             CapabilityDecl {
                 name: "string_length".into(),
-                description: "Counts characters and bytes in a string.".into(),
+                description: "Counts characters (Unicode scalar values) and bytes \
+(UTF-8) in a string. Input field is `text`.".into(),
                 schema_in: json!({
                     "type": "object",
                     "required": ["text"],
@@ -138,8 +242,35 @@ impl Backend for UtilityBackend {
                 }),
                 mode: AccessMode::Free,
                 pricing: None,
-                tags: vec!["util".into(), "string".into()],
+                tags: vec!["util".into(), "string".into(), "measure".into()],
                 lobe_ids: vec![],
+                examples: vec![
+                    CapabilityExample {
+                        user_intent: "how many characters in 'hello world'".into(),
+                        args: json!({"text": "hello world"}),
+                        expected_output: json!({"chars": 11, "bytes": 11}),
+                    },
+                    CapabilityExample {
+                        user_intent: "byte size of 'héllo'".into(),
+                        args: json!({"text": "héllo"}),
+                        expected_output: json!({"chars": 5, "bytes": 6}),
+                    },
+                ],
+                disambiguation: Some(
+                    "Character count (Unicode scalars) and UTF-8 byte count only. \
+Does not count words, lines, or graphemes."
+                        .into(),
+                ),
+                negative_examples: vec![NegativeExample {
+                    user_intent: "how many words in this sentence".into(),
+                    why_not: "this cap counts characters, not whitespace-delimited \
+words. Use a chat cap or a dedicated word-count cap if available."
+                        .into(),
+                }],
+                output_semantic: Some(
+                    "Character count and UTF-8 byte count of the input string."
+                        .into(),
+                ),
             },
         ])
     }

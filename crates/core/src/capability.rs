@@ -14,6 +14,12 @@ pub enum AccessMode {
 }
 
 /// Wire-level capability declaration.
+///
+/// v0.1.1 adds planner-oriented metadata (`examples`, `disambiguation`,
+/// `negative_examples`, `output_semantic`). All new fields default to
+/// empty/None so older publishers (v0.1.0) deserialize without breaking;
+/// the planner side enforces `examples.len() >= 1` for *its own* catalog
+/// inclusion in v0.2.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CapabilityDecl {
     /// Capability name, unique within the instance.
@@ -35,4 +41,44 @@ pub struct CapabilityDecl {
     /// Lobe identifiers this capability is attached to.
     #[serde(default)]
     pub lobe_ids: Vec<String>,
+
+    // ---- v0.1.1 planner-oriented metadata --------------------------------
+    /// Canonical usage examples. The planner injects these into the
+    /// compile prompt so a small LLM (7-13B) can pattern-match intent →
+    /// (capability, args) reliably. Empty list = legacy publisher; v0.2
+    /// planners log a warning and skip the cap from their catalog.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<CapabilityExample>,
+    /// Free-form text disambiguating this capability from similarly-named
+    /// or overlapping ones ("prefer this when …, do not confuse with …").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disambiguation: Option<String>,
+    /// Intents that look like a match but should NOT trigger this cap.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub negative_examples: Vec<NegativeExample>,
+    /// Short prose describing what the output *means* (not its JSON
+    /// structure). Helps the reflection step compose the user-facing
+    /// reply without hallucinating semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_semantic: Option<String>,
+}
+
+/// One canonical example of how to call a capability.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CapabilityExample {
+    /// Natural-language user intent this example covers.
+    pub user_intent: String,
+    /// Args the planner should emit for this intent.
+    pub args: Value,
+    /// Expected output shape (or a representative value).
+    pub expected_output: Value,
+}
+
+/// A user intent that should *not* invoke this capability.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NegativeExample {
+    /// The misleading user intent.
+    pub user_intent: String,
+    /// Why this cap is the wrong choice (often points to the right one).
+    pub why_not: String,
 }

@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use n3ur0n_core::capability::{AccessMode, CapabilityDecl};
+use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -188,8 +188,84 @@ impl Backend for OpenAIBackend {
             schema_out: chat_schema_out(),
             mode: AccessMode::Free,
             pricing: None,
-            tags: vec!["chat".into(), "llm".into()],
+            tags: vec![
+                "chat".into(),
+                "llm".into(),
+                "text-generation".into(),
+                "reasoning".into(),
+            ],
             lobe_ids: vec![],
+            examples: vec![
+                CapabilityExample {
+                    user_intent: "answer a free-form question or generate prose"
+                        .into(),
+                    args: json!({"prompt": "Write one haiku about autumn."}),
+                    expected_output: json!({
+                        "model": "llama3.1:8b",
+                        "message": {
+                            "role": "assistant",
+                            "content": "Crimson leaves descend / Wind whispers a fading song / Stillness draws nearer"
+                        },
+                        "finish_reason": "stop"
+                    }),
+                },
+                CapabilityExample {
+                    user_intent: "translate text between human languages".into(),
+                    args: json!({
+                        "prompt": "Translate to French: 'Good morning, world.'"
+                    }),
+                    expected_output: json!({
+                        "model": "llama3.1:8b",
+                        "message": {
+                            "role": "assistant",
+                            "content": "Bonjour, monde."
+                        },
+                        "finish_reason": "stop"
+                    }),
+                },
+                CapabilityExample {
+                    user_intent: "multi-turn dialogue with system steering".into(),
+                    args: json!({
+                        "messages": [
+                            {"role": "system", "content": "You are a concise assistant."},
+                            {"role": "user", "content": "Summarise: distributed systems trade consistency for availability."}
+                        ]
+                    }),
+                    expected_output: json!({
+                        "model": "llama3.1:8b",
+                        "message": {
+                            "role": "assistant",
+                            "content": "CAP-theorem tradeoff: pick C or A under partition."
+                        },
+                        "finish_reason": "stop"
+                    }),
+                },
+            ],
+            disambiguation: Some(
+                "General-purpose text in / text out. Use for open-ended language \
+tasks (translation, summarisation, reasoning, creative writing, Q&A). For \
+deterministic transformations on strings (reverse, length, etc.) prefer the \
+dedicated utility caps when available."
+                    .into(),
+            ),
+            negative_examples: vec![
+                NegativeExample {
+                    user_intent: "reverse the characters in a string".into(),
+                    why_not: "deterministic utility caps (e.g. `reverse`) are cheaper \
+and exact; do not delegate trivial string ops to a chat model."
+                        .into(),
+                },
+                NegativeExample {
+                    user_intent: "pick a random number".into(),
+                    why_not: "LLMs are not uniform RNGs; use `random_int` instead."
+                        .into(),
+                },
+            ],
+            output_semantic: Some(
+                "Assistant turn content (the model's reply) plus model id and \
+finish reason; the meaningful payload is `message.content`."
+                    .into(),
+            ),
         }])
     }
 

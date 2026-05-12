@@ -12,7 +12,11 @@ use crate::capability::CapabilityDecl;
 use crate::identity::InstanceId;
 
 /// Protocol version string returned by `describe_self`.
-pub const PROTOCOL_VERSION: &str = "n3ur0n/0.1";
+///
+/// v0.1.1 (backwards-compatible): adds optional planner metadata fields
+/// to `CapabilityDecl` (`examples`, `disambiguation`, `negative_examples`,
+/// `output_semantic`). Older v0.1.0 publishers still validate.
+pub const PROTOCOL_VERSION: &str = "n3ur0n/0.1.1";
 
 // ---------------------------------------------------------------------------
 // describe_self

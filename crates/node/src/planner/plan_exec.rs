@@ -19,7 +19,7 @@ use tracing::warn;
 use crate::conversation::{persist_last, ConversationState};
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
-use crate::planner::catalog::Catalog;
+use crate::planner::catalog::{Catalog, ToolDef};
 use crate::planner::plan::{execute_plan_streaming, validate_plan, Plan};
 use crate::planner::{
     DispatchEvent, DispatchOutcome, EventSender, Planner, PlanStepInfo, TraceEntry,
@@ -55,15 +55,15 @@ this schema:\n\n\
   \"plan\": [\n\
     {\n\
       \"id\":         \"<short alpha-numeric id, unique>\",\n\
-      \"peer\":       \"<short_peer from the tools list>\",\n\
-      \"capability\": \"<capability name from the tools list>\",\n\
-      \"args\":       { ...capability-specific args... },\n\
+      \"peer\":       \"<short_peer from the skills list>\",\n\
+      \"capability\": \"<capability name from the skills list>\",\n\
+      \"args\":       { ...skill-specific args... },\n\
       \"depends_on\": [ \"<other step ids>\", ... ]\n\
     },\n\
     ...\n\
   ]\n\
 }\n\n\
-Rules:\n\
+Structural rules (independent of which skills exist):\n\
 - Return ONLY the JSON; no prose, no Markdown fences.\n\
 - Reference results from earlier steps inside `args` with the exact syntax \
 `${stepid.path.to.value}` — the dollar sign is required. Example:\n\
@@ -74,40 +74,35 @@ Rules:\n\
 - A reference inside args creates an implicit dependency (omit from `depends_on`).\n\
 - NO arithmetic, conditionals, or function calls inside `${...}`. Only paths.\n\
   WRONG: `${s2.value + s1.year}`, `${len(s1.text)}`, `${s1.value * 2}`.\n\
-  RIGHT: include the raw values as separate refs and let the downstream tool \
-  do the math. Example: `\"prompt\": \"Year ${s1.year} plus ${s2.value} — describe a bicycle from that year.\"`.\n\
+  RIGHT: include the raw values as separate refs and let the downstream skill \
+  do the math. Example: `\"prompt\": \"Year ${s1.year} plus ${s2.value} — describe \
+a bicycle from that year.\"`.\n\
 - Each `${...}` head must match a step id you defined earlier in the plan. \
 Do NOT invent step ids.\n\
-- For chat-like tools, set only fields the schema declares; never set `model`.\n\
+- For chat-like skills, set only fields the schema declares; never set `model`.\n\
+- All `peer` values must come from the skills list verbatim.\n\
 - Pick the SHORTEST useful plan. If the user asks something you can answer from \
-prior knowledge with no tool, return an empty plan: `{\"plan\": []}`. The \
+prior knowledge with no skill, return an empty plan: `{\"plan\": []}`. The \
 reflection step that runs after execution will compose the answer using your \
 own knowledge.\n\
-- Tasks that need NO tool and should return `{\"plan\": []}` include: \
-translation between human languages, definitions, well-known facts, simple \
-arithmetic, code explanations, summaries of text the user already provided. \
-Do not invent a chain of caps just because they are listed.\n\
-- A capability is RELEVANT only when its declared description matches the \
-user's intent. `reverse` is for reversing strings, NOT for translating. `echo` \
-just passes args through, so it adds no value in a plan.\n\
-- All `peer` values must come from the tools list verbatim.\n\
-- Do NOT add filler steps (e.g. an `echo` cap that just relays a previous \
-result). The reflection step at the end already turns the blackboard into the \
-user's reply.\n\
+- Tasks that should return `{\"plan\": []}` include: translation between human \
+languages, definitions, well-known facts, simple arithmetic, code explanations, \
+summaries of text the user already provided. Do not invent a chain of skills \
+just because they are listed.\n\
+- A skill is RELEVANT only when its declared description and examples match the \
+user's intent. When in doubt, prefer fewer steps. Skill-specific semantics live \
+in the skill metadata below — read it.\n\
+- Do NOT add filler steps that only relay a previous result. The reflection \
+step at the end already turns the blackboard into the user's reply.\n\
 \n\
-Available tools (peer::capability — description, schema_in):\n",
+Available skills (each entry: name — description, schema, examples, \
+disambiguation, anti-patterns):\n\n",
         );
         if catalog.is_empty() {
             s.push_str("(none)\n");
         } else {
             for t in &catalog.tools {
-                let name = catalog.tool_name(t);
-                s.push_str(&format!(
-                    "- {} — {} (input schema: {})\n",
-                    name,
-                    t.cap.description,
-                    serde_json::to_string(&t.cap.schema_in).unwrap_or_else(|_| "?".into())
-                ));
+                s.push_str(&render_skill_block(catalog, t));
             }
         }
         s
@@ -394,6 +389,54 @@ impl crate::planner::plan::PlanRun {
     }
 }
 
+/// Render one capability as a multi-line block for the compile prompt.
+/// Each block carries the planner-oriented metadata (examples,
+/// disambiguation, negative_examples, output_semantic) so the LLM has the
+/// information it needs to match intent → skill without the planner code
+/// having to bake skill-specific rules into the system prompt.
+fn render_skill_block(catalog: &Catalog, t: &ToolDef) -> String {
+    let cap = &t.cap;
+    let name = catalog.tool_name(t);
+    let schema_in = serde_json::to_string(&cap.schema_in)
+        .unwrap_or_else(|_| "{}".into());
+
+    let mut out = String::new();
+    out.push_str(&format!("## {name}\n"));
+    out.push_str(&format!("description: {}\n", cap.description));
+    out.push_str(&format!("schema_in: {schema_in}\n"));
+
+    // Up to 2 examples — enough to seed pattern match, not so many we
+    // crowd the context window.
+    if !cap.examples.is_empty() {
+        out.push_str("examples:\n");
+        for ex in cap.examples.iter().take(2) {
+            let args = serde_json::to_string(&ex.args)
+                .unwrap_or_else(|_| "{}".into());
+            out.push_str(&format!(
+                "  - intent: \"{}\" → args: {}\n",
+                ex.user_intent, args
+            ));
+        }
+    }
+    if let Some(disambig) = &cap.disambiguation {
+        out.push_str(&format!("disambiguation: {disambig}\n"));
+    }
+    if !cap.negative_examples.is_empty() {
+        out.push_str("do_NOT_use_for:\n");
+        for ne in cap.negative_examples.iter().take(2) {
+            out.push_str(&format!(
+                "  - intent: \"{}\" — {}\n",
+                ne.user_intent, ne.why_not
+            ));
+        }
+    }
+    if let Some(sem) = &cap.output_semantic {
+        out.push_str(&format!("output_means: {sem}\n"));
+    }
+    out.push('\n');
+    out
+}
+
 fn short(peer_id: &str) -> String {
     let trimmed = peer_id.strip_prefix("n3:").unwrap_or(peer_id);
     trimmed.chars().take(12).collect()
@@ -478,6 +521,9 @@ fn extract_first_json_object(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use n3ur0n_core::capability::{
+        AccessMode, CapabilityDecl, CapabilityExample, NegativeExample,
+    };
 
     #[test]
     fn parse_plan_direct() {
@@ -498,5 +544,48 @@ mod tests {
         let raw = "Here you go:\n{\"plan\":[{\"id\":\"s1\",\"peer\":\"p\",\"capability\":\"c\",\"args\":{}}]}\nDone.";
         let p = parse_plan(raw).unwrap();
         assert_eq!(p.plan.len(), 1);
+    }
+
+    fn enriched_cap() -> CapabilityDecl {
+        CapabilityDecl {
+            name: "reverse".into(),
+            description: "Reverses a string char by char.".into(),
+            schema_in: json!({"type": "object", "required": ["text"]}),
+            schema_out: json!({"type": "object"}),
+            mode: AccessMode::Free,
+            pricing: None,
+            tags: vec![],
+            lobe_ids: vec![],
+            examples: vec![CapabilityExample {
+                user_intent: "reverse 'hello'".into(),
+                args: json!({"text": "hello"}),
+                expected_output: json!({"reversed": "olleh"}),
+            }],
+            disambiguation: Some("Char-level only, not translation.".into()),
+            negative_examples: vec![NegativeExample {
+                user_intent: "translate to French".into(),
+                why_not: "use chat cap instead".into(),
+            }],
+            output_semantic: Some("input string reversed".into()),
+        }
+    }
+
+    #[test]
+    fn skill_block_renders_metadata() {
+        let mut cat = Catalog::default();
+        cat.tools.push(ToolDef {
+            peer_id: "n3:abcdef123456ghi".into(),
+            peer_endpoint: Some("http://x".into()),
+            cap: enriched_cap(),
+        });
+        let block = render_skill_block(&cat, &cat.tools[0]);
+        assert!(block.contains("## abcdef123456::reverse"));
+        assert!(block.contains("description: Reverses"));
+        assert!(block.contains("examples:"));
+        assert!(block.contains("reverse 'hello'"));
+        assert!(block.contains("disambiguation: Char-level"));
+        assert!(block.contains("do_NOT_use_for:"));
+        assert!(block.contains("translate to French"));
+        assert!(block.contains("output_means: input string reversed"));
     }
 }

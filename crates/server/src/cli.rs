@@ -337,14 +337,10 @@ fn parse_planner_kind(
 ) -> Result<Option<PlannerKind>> {
     match name.to_ascii_lowercase().as_str() {
         "none" | "" | "off" => Ok(None),
-        "llm" | "ollama" | "react" => {
-            let backend = build_openai_config(base_url, model.clone(), api_key)?;
-            Ok(Some(PlannerKind::Llm {
-                backend,
-                model_hint: model,
-            }))
-        }
-        "plan_exec" | "plan-exec" | "plan" | "ptx" => {
+        "plan_exec" | "plan-exec" | "plan" | "ptx" | "llm" | "ollama" => {
+            // v0.2 deprecates the standalone ReAct planner. Legacy mode
+            // names ("llm", "ollama") resolve to PlanExec for
+            // backwards compatibility with existing configs.
             let backend = build_openai_config(base_url, model.clone(), api_key)?;
             Ok(Some(PlannerKind::PlanExec {
                 backend,

@@ -22,6 +22,7 @@ pub mod protocol;
 /// Pure verification of a `SignedMessage` (signature, recipient, clock skew).
 pub mod verify;
 
+pub use capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 pub use error::{CoreError, CoreResult};
 pub use identity::{InstanceId, Keypair, PublicKey};
 pub use message::{Envelope, ProtocolVerb, SignedMessage};
