@@ -1,6 +1,7 @@
 //! Planner trait + concrete impls.
 
 pub mod catalog;
+pub mod grammar;
 pub mod plan;
 pub mod plan_exec;
 pub mod retrieval;

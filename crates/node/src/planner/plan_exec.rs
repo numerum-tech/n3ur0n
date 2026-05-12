@@ -184,16 +184,24 @@ impl PlanExecPlanner {
             REMOTE_TOP_K,
         )?;
 
-        // 3. Compile: ask the LLM for a Plan. JSON-format mode.
+        // 3. Compile: ask the LLM for a Plan. Constrained decoding via
+        // multiple parallel fields so each backend honours whichever it
+        // supports (best-effort propagation; unknown fields are silently
+        // ignored upstream):
+        //   - `grammar`        : llama.cpp / vLLM (GBNF)
+        //   - `response_format`: OpenAI ≥ 2024-08, vLLM (json_schema)
+        //   - `format`         : Ollama 0.4+ (JSON schema OR "json" string)
+        // If none take effect, we still get plain JSON-ish output from the
+        // model and the post-hoc `parse_plan` fallback handles the rest.
         let compile_messages = vec![
             json!({"role": "system", "content": self.compile_system_prompt(&catalog)}),
             json!({"role": "user", "content": user_message.clone()}),
         ];
         let mut compile_args = json!({
             "messages": compile_messages,
-            // Force JSON output (Ollama / llama.cpp interpret this; harmless on
-            // upstreams that don't).
-            "format": "json",
+            "grammar": crate::planner::grammar::plan_grammar(),
+            "response_format": crate::planner::grammar::plan_response_format(),
+            "format": crate::planner::grammar::plan_json_schema(),
             "temperature": 0.0,
         });
         if let Some(model) = &self.model_hint {

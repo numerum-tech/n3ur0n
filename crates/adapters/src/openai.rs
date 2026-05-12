@@ -304,6 +304,18 @@ const CHAT_ARG_ALLOWLIST: &[&str] = &[
     // does); a strict gateway can be added later.
     "tools",
     "tool_choice",
+    // v0.2 constrained-decoding fields. Best-effort propagation:
+    // - `grammar`: llama.cpp / vLLM GBNF string. Honoured by llama.cpp
+    //   natively; Ollama 0.4 ignores; OpenAI ignores.
+    // - `response_format`: OpenAI ≥ 2024-08 json_schema mode. Honoured
+    //   by OpenAI + vLLM (outlines); llama.cpp ignores.
+    // - `format`: Ollama-native (string "json" or a JSON schema object).
+    //   Kept for backwards compatibility with the v0.1 path.
+    // The upstream silently ignores unknown fields — we don't gate by
+    // backend kind here.
+    "grammar",
+    "response_format",
+    "format",
 ];
 
 fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
