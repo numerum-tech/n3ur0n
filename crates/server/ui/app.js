@@ -413,6 +413,13 @@ function appendStepper() {
         reflecting() {
             setStatus("composing reply…");
         },
+        markLowConfidence(confidence) {
+            wrap.classList.add("degraded");
+            const pct = typeof confidence === "number"
+                ? ` (confidence ${Math.round(confidence * 100)}%)`
+                : "";
+            setStatus(`low-confidence plan${pct} — result should be checked`);
+        },
         finalize(reply, model) {
             setStatus(model ? `done · ${model}` : "done");
             wrap.classList.add("complete");
@@ -479,6 +486,9 @@ function handleSseFrame(frame, stepper) {
     switch (event) {
         case "plan_ready":
             stepper.renderPlan(payload.steps || []);
+            break;
+        case "low_confidence":
+            stepper.markLowConfidence(payload.confidence);
             break;
         case "step_start":
             stepper.startStep(payload.id);

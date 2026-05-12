@@ -244,6 +244,13 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
 }
 .stepper.complete { opacity: 0.65; }
 .stepper.err { border-color: var(--error); }
+.stepper.degraded {
+    border-color: var(--warn);
+    background: rgba(245, 158, 11, 0.06);
+}
+.stepper.degraded .stepper-status {
+    color: var(--warn);
+}
 
 .stepper-status {
     color: var(--muted);

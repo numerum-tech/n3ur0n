@@ -1,9 +1,11 @@
 //! Planner trait + concrete impls.
 
 pub mod catalog;
+pub mod compiler;
 pub mod grammar;
 pub mod plan;
 pub mod plan_exec;
+pub mod planner_cap;
 pub mod retrieval;
 
 use async_trait::async_trait;
@@ -60,6 +62,12 @@ pub enum DispatchEvent {
     /// Plan compiled and validated; UI should render the full chip row.
     PlanReady {
         steps: Vec<PlanStepInfo>,
+    },
+    /// Compile step finished but produced a low-confidence plan. UI may
+    /// flag the stepper as degraded so the user knows the answer should
+    /// be checked. Fired post-compile, pre-execute.
+    LowConfidence {
+        confidence: f32,
     },
     /// One step starts executing.
     StepStart {

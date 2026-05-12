@@ -698,6 +698,7 @@ async fn conv_messages_stream(
     let stream = UnboundedReceiverStream::new(rx).map(|ev| {
         let event_name = match &ev {
             DispatchEvent::PlanReady { .. } => "plan_ready",
+            DispatchEvent::LowConfidence { .. } => "low_confidence",
             DispatchEvent::StepStart { .. } => "step_start",
             DispatchEvent::StepDone { .. } => "step_done",
             DispatchEvent::Reflecting => "reflecting",

@@ -34,6 +34,14 @@ const REMOTE_TOP_K: usize = 20;
 
 #[derive(Clone)]
 pub struct PlanExecPlanner {
+    /// The compile step is delegated to a `PlanCompiler`. The simple
+    /// constructor builds a `LocalLLMCompiler` wrapping `llm_backend`;
+    /// callers wanting a cascading or remote compiler use
+    /// `PlanExecPlanner::with_compiler`.
+    pub compiler: Arc<dyn crate::planner::compiler::PlanCompiler>,
+    /// Backend used for the reflect step (final user-facing reply). May
+    /// be a different model than the compile-time one; in practice it's
+    /// the same backend as the local compiler today.
     pub llm_backend: Arc<dyn Backend>,
     pub model_hint: Option<String>,
 }
@@ -41,77 +49,43 @@ pub struct PlanExecPlanner {
 impl std::fmt::Debug for PlanExecPlanner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PlanExecPlanner")
+            .field("compiler", &self.compiler)
             .field("model_hint", &self.model_hint)
             .finish()
     }
 }
 
 impl PlanExecPlanner {
+    /// Build the default planner: compile via a `LocalLLMCompiler` over
+    /// `llm_backend`, reflect via the same backend.
     pub fn new(llm_backend: Arc<dyn Backend>, model_hint: Option<String>) -> Self {
-        Self { llm_backend, model_hint }
+        let compiler = Arc::new(crate::planner::compiler::LocalLLMCompiler {
+            llm_backend: llm_backend.clone(),
+            model_hint: model_hint.clone(),
+            system_prompt: Arc::new(default_compile_system_prompt),
+        });
+        Self {
+            compiler,
+            llm_backend,
+            model_hint,
+        }
     }
 
-    fn compile_system_prompt(&self, catalog: &Catalog) -> String {
-        let mut s = String::from(
-            "You are an n3ur0n plan compiler. Given a user request, produce ONE JSON \
-plan that a deterministic executor will run. Output ONLY valid JSON conforming to \
-this schema:\n\n\
-{\n\
-  \"plan\": [\n\
-    {\n\
-      \"id\":         \"<short alpha-numeric id, unique>\",\n\
-      \"peer\":       \"<short_peer from the skills list>\",\n\
-      \"capability\": \"<capability name from the skills list>\",\n\
-      \"args\":       { ...skill-specific args... },\n\
-      \"depends_on\": [ \"<other step ids>\", ... ]\n\
-    },\n\
-    ...\n\
-  ]\n\
-}\n\n\
-Structural rules (independent of which skills exist):\n\
-- Return ONLY the JSON; no prose, no Markdown fences.\n\
-- Reference results from earlier steps inside `args` with the exact syntax \
-`${stepid.path.to.value}` — the dollar sign is required. Example:\n\
-    {\"id\": \"s1\", \"peer\": \"abc\", \"capability\": \"random_int\", \"args\": {\"min\":1,\"max\":10}}\n\
-    {\"id\": \"s2\", \"peer\": \"abc\", \"capability\": \"reverse\", \"args\": {\"text\": \"${s1.value}\"}}\n\
-    {\"id\": \"s3\", \"peer\": \"xyz\", \"capability\": \"chat\",\n\
-     \"args\": {\"prompt\": \"Write one rhyming line about ${s2.reversed}\"}}\n\
-- A reference inside args creates an implicit dependency (omit from `depends_on`).\n\
-- NO arithmetic, conditionals, or function calls inside `${...}`. Only paths.\n\
-  WRONG: `${s2.value + s1.year}`, `${len(s1.text)}`, `${s1.value * 2}`.\n\
-  RIGHT: include the raw values as separate refs and let the downstream skill \
-  do the math. Example: `\"prompt\": \"Year ${s1.year} plus ${s2.value} — describe \
-a bicycle from that year.\"`.\n\
-- Each `${...}` head must match a step id you defined earlier in the plan. \
-Do NOT invent step ids.\n\
-- For chat-like skills, set only fields the schema declares; never set `model`.\n\
-- All `peer` values must come from the skills list verbatim.\n\
-- Pick the SHORTEST useful plan. If the user asks something you can answer from \
-prior knowledge with no skill, return an empty plan: `{\"plan\": []}`. The \
-reflection step that runs after execution will compose the answer using your \
-own knowledge.\n\
-- Tasks that should return `{\"plan\": []}` include: translation between human \
-languages, definitions, well-known facts, simple arithmetic, code explanations, \
-summaries of text the user already provided. Do not invent a chain of skills \
-just because they are listed.\n\
-- A skill is RELEVANT only when its declared description and examples match the \
-user's intent. When in doubt, prefer fewer steps. Skill-specific semantics live \
-in the skill metadata below — read it.\n\
-- Do NOT add filler steps that only relay a previous result. The reflection \
-step at the end already turns the blackboard into the user's reply.\n\
-\n\
-Available skills (each entry: name — description, schema, examples, \
-disambiguation, anti-patterns):\n\n",
-        );
-        if catalog.is_empty() {
-            s.push_str("(none)\n");
-        } else {
-            for t in &catalog.tools {
-                s.push_str(&render_skill_block(catalog, t));
-            }
+    /// Build a planner with a custom compiler (e.g. `CascadingCompiler`
+    /// wrapping a local and a remote compiler). Reflect still uses the
+    /// supplied backend.
+    pub fn with_compiler(
+        compiler: Arc<dyn crate::planner::compiler::PlanCompiler>,
+        llm_backend: Arc<dyn Backend>,
+        model_hint: Option<String>,
+    ) -> Self {
+        Self {
+            compiler,
+            llm_backend,
+            model_hint,
         }
-        s
     }
+
 
     fn reflect_system_prompt(&self) -> String {
         String::from(
@@ -184,50 +158,22 @@ impl PlanExecPlanner {
             REMOTE_TOP_K,
         )?;
 
-        // 3. Compile: ask the LLM for a Plan. Constrained decoding via
-        // multiple parallel fields so each backend honours whichever it
-        // supports (best-effort propagation; unknown fields are silently
-        // ignored upstream):
-        //   - `grammar`        : llama.cpp / vLLM (GBNF)
-        //   - `response_format`: OpenAI ≥ 2024-08, vLLM (json_schema)
-        //   - `format`         : Ollama 0.4+ (JSON schema OR "json" string)
-        // If none take effect, we still get plain JSON-ish output from the
-        // model and the post-hoc `parse_plan` fallback handles the rest.
-        let compile_messages = vec![
-            json!({"role": "system", "content": self.compile_system_prompt(&catalog)}),
-            json!({"role": "user", "content": user_message.clone()}),
-        ];
-        let mut compile_args = json!({
-            "messages": compile_messages,
-            "grammar": crate::planner::grammar::plan_grammar(),
-            "response_format": crate::planner::grammar::plan_response_format(),
-            "format": crate::planner::grammar::plan_json_schema(),
-            "temperature": 0.0,
-        });
-        if let Some(model) = &self.model_hint {
-            compile_args["model"] = Value::String(model.clone());
-        }
-        let compile_resp = self.llm_backend.invoke("chat", compile_args).await?;
-        let raw_plan_json = compile_resp
-            .pointer("/message/content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        // 3. Compile: delegate to the configured PlanCompiler. The
+        // default LocalLLMCompiler ships the constrained-decoding fields
+        // (grammar / response_format / format) so backends that honour
+        // them stay strict; cascading variants may try a remote planner.
+        let plan = self.compiler.compile(&user_message, &catalog).await?;
 
-        let plan = match parse_plan(&raw_plan_json) {
-            Ok(p) => p,
-            Err(e) => {
-                warn!(error = %e, raw = %raw_plan_json.chars().take(200).collect::<String>(),
-                    "plan compile produced invalid JSON; falling back to direct reply");
-                // Fall back: reflect on the raw user message alone.
-                if let Some(tx) = events {
-                    let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
-                }
-                return self
-                    .reflect_only(node, state, &user_message, None, Vec::new(), events)
-                    .await;
+        // Surface low-confidence plans to the UI. Threshold matches the
+        // default cascade escalation point (0.5) so the chip-row banner
+        // appears precisely when a cascade *would* have triggered an
+        // escalation — useful even when no remote fallback is configured.
+        let confidence = self.compiler.confidence(&plan, &catalog).await;
+        if confidence < 0.5 {
+            if let Some(tx) = events {
+                let _ = tx.send(DispatchEvent::LowConfidence { confidence });
             }
-        };
+        }
 
         // 4. Validate.
         if let Err(e) = validate_plan(&plan, &catalog) {
@@ -406,6 +352,71 @@ impl crate::planner::plan::PlanRun {
     }
 }
 
+/// Canonical compile system prompt — moved out of `PlanExecPlanner` so
+/// `LocalLLMCompiler` can share it as the default. Pure function of the
+/// catalog; no planner state involved.
+pub fn default_compile_system_prompt(catalog: &Catalog) -> String {
+    let mut s = String::from(
+        "You are an n3ur0n plan compiler. Given a user request, produce ONE JSON \
+plan that a deterministic executor will run. Output ONLY valid JSON conforming to \
+this schema:\n\n\
+{\n\
+  \"plan\": [\n\
+    {\n\
+      \"id\":         \"<short alpha-numeric id, unique>\",\n\
+      \"peer\":       \"<short_peer from the skills list>\",\n\
+      \"capability\": \"<capability name from the skills list>\",\n\
+      \"args\":       { ...skill-specific args... },\n\
+      \"depends_on\": [ \"<other step ids>\", ... ]\n\
+    },\n\
+    ...\n\
+  ]\n\
+}\n\n\
+Structural rules (independent of which skills exist):\n\
+- Return ONLY the JSON; no prose, no Markdown fences.\n\
+- Reference results from earlier steps inside `args` with the exact syntax \
+`${stepid.path.to.value}` — the dollar sign is required. Example:\n\
+    {\"id\": \"s1\", \"peer\": \"abc\", \"capability\": \"random_int\", \"args\": {\"min\":1,\"max\":10}}\n\
+    {\"id\": \"s2\", \"peer\": \"abc\", \"capability\": \"reverse\", \"args\": {\"text\": \"${s1.value}\"}}\n\
+    {\"id\": \"s3\", \"peer\": \"xyz\", \"capability\": \"chat\",\n\
+     \"args\": {\"prompt\": \"Write one rhyming line about ${s2.reversed}\"}}\n\
+- A reference inside args creates an implicit dependency (omit from `depends_on`).\n\
+- NO arithmetic, conditionals, or function calls inside `${...}`. Only paths.\n\
+  WRONG: `${s2.value + s1.year}`, `${len(s1.text)}`, `${s1.value * 2}`.\n\
+  RIGHT: include the raw values as separate refs and let the downstream skill \
+  do the math. Example: `\"prompt\": \"Year ${s1.year} plus ${s2.value} — describe \
+a bicycle from that year.\"`.\n\
+- Each `${...}` head must match a step id you defined earlier in the plan. \
+Do NOT invent step ids.\n\
+- For chat-like skills, set only fields the schema declares; never set `model`.\n\
+- All `peer` values must come from the skills list verbatim.\n\
+- Pick the SHORTEST useful plan. If the user asks something you can answer from \
+prior knowledge with no skill, return an empty plan: `{\"plan\": []}`. The \
+reflection step that runs after execution will compose the answer using your \
+own knowledge.\n\
+- Tasks that should return `{\"plan\": []}` include: translation between human \
+languages, definitions, well-known facts, simple arithmetic, code explanations, \
+summaries of text the user already provided. Do not invent a chain of skills \
+just because they are listed.\n\
+- A skill is RELEVANT only when its declared description and examples match the \
+user's intent. When in doubt, prefer fewer steps. Skill-specific semantics live \
+in the skill metadata below — read it.\n\
+- Do NOT add filler steps that only relay a previous result. The reflection \
+step at the end already turns the blackboard into the user's reply.\n\
+\n\
+Available skills (each entry: name — description, schema, examples, \
+disambiguation, anti-patterns):\n\n",
+    );
+    if catalog.is_empty() {
+        s.push_str("(none)\n");
+    } else {
+        for t in &catalog.tools {
+            s.push_str(&render_skill_block(catalog, t));
+        }
+    }
+    s
+}
+
 /// Render one capability as a multi-line block for the compile prompt.
 /// Each block carries the planner-oriented metadata (examples,
 /// disambiguation, negative_examples, output_semantic) so the LLM has the
@@ -462,7 +473,7 @@ fn short(peer_id: &str) -> String {
 /// Parse a JSON plan with two fallbacks:
 /// 1. Direct serde parse (LLM emits exactly the schema).
 /// 2. Look for the first `{` ... matching `}` and try parsing that.
-fn parse_plan(raw: &str) -> Result<Plan, String> {
+pub(crate) fn parse_plan(raw: &str) -> Result<Plan, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("empty plan response".into());

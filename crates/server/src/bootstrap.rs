@@ -11,6 +11,11 @@ use n3ur0n_adapters::{
     utility::UtilityBackend,
 };
 use n3ur0n_core::Keypair;
+use n3ur0n_node::client as peer_client;
+use n3ur0n_node::planner::compiler::{
+    CascadingCompiler, LocalLLMCompiler, PlanCompiler, RemotePlanCompiler,
+};
+use n3ur0n_node::planner::plan_exec::default_compile_system_prompt;
 use n3ur0n_node::planner::{PlanExecPlanner, Planner};
 use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_node::{CapabilityRegistry, IdentityFile, Node, NodeConfig, identity_file};
@@ -107,6 +112,13 @@ pub enum PlannerKind {
 
 /// Build a `NodeRuntime` (Node + Planner + concurrency primitives) from a
 /// resolved `PlannerKind`.
+///
+/// If `N3UR0N_PLANNER_REMOTE_FALLBACK` is set to a peer endpoint (e.g.
+/// `http://node-c:4242`), the planner wraps its local compiler in a
+/// `CascadingCompiler` that escalates to that peer's `plan` capability
+/// when the local compile produces a low-confidence plan. The escalation
+/// threshold is set by `N3UR0N_PLANNER_CONFIDENCE_THRESHOLD` (default
+/// 0.5).
 pub fn build_runtime(
     node: Node,
     kind: PlannerKind,
@@ -119,7 +131,44 @@ pub fn build_runtime(
                     .map_err(|e| anyhow::anyhow!("planner llm init: {e}"))?,
             );
             let chosen_model = model_hint.unwrap_or(backend.default_model);
-            Arc::new(PlanExecPlanner::new(llm, Some(chosen_model)))
+
+            let local = Arc::new(LocalLLMCompiler {
+                llm_backend: llm.clone(),
+                model_hint: Some(chosen_model.clone()),
+                system_prompt: Arc::new(default_compile_system_prompt),
+            });
+
+            let compiler: Arc<dyn PlanCompiler> =
+                match std::env::var("N3UR0N_PLANNER_REMOTE_FALLBACK").ok() {
+                    Some(endpoint) if !endpoint.trim().is_empty() => {
+                        let threshold = std::env::var("N3UR0N_PLANNER_CONFIDENCE_THRESHOLD")
+                            .ok()
+                            .and_then(|v| v.parse::<f32>().ok())
+                            .unwrap_or(0.5);
+                        let remote = Arc::new(RemotePlanCompiler {
+                            http: peer_client::http_client(),
+                            keypair: node.keypair().clone(),
+                            endpoint: endpoint.trim().to_string(),
+                        });
+                        tracing::info!(
+                            remote_endpoint = %remote.endpoint,
+                            threshold,
+                            "planner: cascading compiler enabled"
+                        );
+                        Arc::new(CascadingCompiler {
+                            primary: local,
+                            fallback: Some(remote),
+                            threshold,
+                        })
+                    }
+                    _ => local,
+                };
+
+            Arc::new(PlanExecPlanner::with_compiler(
+                compiler,
+                llm,
+                Some(chosen_model),
+            ))
         }
     };
     Ok(NodeRuntime::new(node, planner, runtime_config))
