@@ -27,6 +27,7 @@ reqwest = { workspace = true }
 rand = { workspace = true }
 lru = { workspace = true }
 futures = { workspace = true }
+jsonschema = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

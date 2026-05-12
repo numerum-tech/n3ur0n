@@ -83,6 +83,9 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 # FuturesUnordered for parallel plan-step execution
 futures = { version = "0.3", default-features = false, features = ["std"] }
 
+# JSON Schema validation (planner args ↔ cap.schema_in)
+jsonschema = { version = "0.18", default-features = false }
+
 # Internal
 n3ur0n-core = { path = "crates/core" }
 n3ur0n-storage = { path = "crates/storage" }

@@ -26,6 +26,11 @@ use crate::planner::{
 };
 
 const MAX_CONTEXT_TURNS: usize = 16;
+/// Maximum number of *remote* tools surfaced in the compile prompt. Local
+/// tools always pass through (the operator configured them explicitly).
+/// 20 picked to keep prompts under ~3k tokens for moderately enriched
+/// caps; tune if observed compile latency starts to dominate.
+const REMOTE_TOP_K: usize = 20;
 
 #[derive(Clone)]
 pub struct PlanExecPlanner {
@@ -167,12 +172,16 @@ impl PlanExecPlanner {
         persist_last(node.db(), state)
             .map_err(|e| NodeError::InvalidPayload(format!("persist user: {e}")))?;
 
-        // 2. Build catalog.
-        let catalog = Catalog::build(
+        // 2. Build catalog — query-aware: local caps always kept, remote
+        // caps ranked against the user message via BM25 and trimmed to the
+        // top REMOTE_TOP_K. Keeps prompt size bounded as the network grows.
+        let catalog = Catalog::build_for_query(
             node.instance_id().as_str(),
             node.registry(),
             node.db(),
             500,
+            &user_message,
+            REMOTE_TOP_K,
         )?;
 
         // 3. Compile: ask the LLM for a Plan. JSON-format mode.

@@ -5,6 +5,7 @@ use n3ur0n_storage::{peers, Db};
 use serde_json::Value;
 
 use crate::error::NodeResult;
+use crate::planner::retrieval::BM25Index;
 use crate::registry::CapabilityRegistry;
 
 /// Capability sourced from a specific peer (self or remote).
@@ -99,6 +100,64 @@ catalog (v0.2 requires at least one CapabilityExample)"
             }
         }
         Ok(Self { tools })
+    }
+
+    /// Build a query-aware catalog: local caps always pass through, remote
+    /// caps are scored against `user_query` via BM25 and the top
+    /// `remote_top_k` survive. Tie-breaking is by original insertion order
+    /// to keep results deterministic for tests + UI history.
+    ///
+    /// Why : compile prompts grow linearly with the catalog. Past ~80 caps
+    /// the LLM context saturates. This filter caps the prompt size at a
+    /// predictable bound regardless of network size.
+    pub fn build_for_query(
+        self_id: &str,
+        local: &CapabilityRegistry,
+        db: &Db,
+        peer_limit: i64,
+        user_query: &str,
+        remote_top_k: usize,
+    ) -> NodeResult<Self> {
+        let full = Self::build(self_id, local, db, peer_limit)?;
+        if remote_top_k == 0 || user_query.trim().is_empty() {
+            // No filtering: keep everything (useful for tests / debug).
+            return Ok(full);
+        }
+
+        // Split into local (always kept) and remote (ranked).
+        let mut locals: Vec<ToolDef> = Vec::new();
+        let mut remotes: Vec<ToolDef> = Vec::new();
+        for t in full.tools.into_iter() {
+            if t.peer_endpoint.is_none() {
+                locals.push(t);
+            } else {
+                remotes.push(t);
+            }
+        }
+
+        if remotes.len() <= remote_top_k {
+            // Nothing to trim; preserve local-first order so prompts stay
+            // stable across queries.
+            let mut out = locals;
+            out.extend(remotes);
+            return Ok(Self { tools: out });
+        }
+
+        let index = BM25Index::build(&remotes);
+        let mut scored: Vec<(usize, f32)> = (0..remotes.len())
+            .map(|i| (i, index.score(user_query, i)))
+            .collect();
+        // Descending by score; stable sort keeps insertion order on ties.
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let keep: Vec<ToolDef> = scored
+            .into_iter()
+            .take(remote_top_k)
+            .map(|(i, _)| remotes[i].clone())
+            .collect();
+
+        let mut out = locals;
+        out.extend(keep);
+        Ok(Self { tools: out })
     }
 
     /// Number of tools.
@@ -267,6 +326,65 @@ mod tests {
         assert!(names.contains(&"remote_good"));
         assert!(!names.contains(&"bare"));
         assert!(!names.contains(&"remote_bare"));
+    }
+
+    #[test]
+    fn build_for_query_keeps_locals_and_filters_remotes() {
+        let db = open_in_memory().unwrap();
+        // 1 local cap.
+        let registry = CapabilityRegistry::from_decls(vec![cap("local_only")]);
+
+        // Two remote peers with one cap each — only one matches the query.
+        let peer_a = serde_json::to_string(&json!({
+            "instance_id": "n3:peera",
+            "protocol_version": "n3ur0n/0.1.1",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "capabilities": [
+                {"name":"weather","description":"Returns the weather forecast.","schema_in":{},"schema_out":{},"mode":"free","tags":["forecast","weather"],"lobe_ids":[],"examples":[{"user_intent":"what is the weather","args":{},"expected_output":{}}]}
+            ]
+        })).unwrap();
+        let peer_b = serde_json::to_string(&json!({
+            "instance_id": "n3:peerb",
+            "protocol_version": "n3ur0n/0.1.1",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "capabilities": [
+                {"name":"translate","description":"Translates text between languages.","schema_in":{},"schema_out":{},"mode":"free","tags":["language","translation"],"lobe_ids":[],"examples":[{"user_intent":"translate to french","args":{},"expected_output":{}}]}
+            ]
+        })).unwrap();
+        for (id, ep, raw) in [
+            ("n3:peera", "http://peera:4242", peer_a),
+            ("n3:peerb", "http://peerb:4242", peer_b),
+        ] {
+            peers::upsert(
+                &db,
+                &PeerRecord {
+                    id: id.into(),
+                    endpoint: ep.into(),
+                    alias: None,
+                    last_seen: Some(1),
+                    tls_fingerprint: None,
+                    describe_self_cached: Some(raw),
+                    describe_self_fetched_at: Some(1),
+                    source: None,
+                },
+            )
+            .unwrap();
+        }
+
+        // top_k = 1 with a translation-flavoured query — translate should win.
+        let cat = Catalog::build_for_query(
+            "n3:selfaaa",
+            &registry,
+            &db,
+            100,
+            "translate this sentence into french",
+            1,
+        )
+        .unwrap();
+        let names: Vec<&str> = cat.tools.iter().map(|t| t.cap.name.as_str()).collect();
+        assert!(names.contains(&"local_only"), "local cap always kept");
+        assert!(names.contains(&"translate"), "matching remote kept");
+        assert!(!names.contains(&"weather"), "irrelevant remote filtered");
     }
 
     #[test]

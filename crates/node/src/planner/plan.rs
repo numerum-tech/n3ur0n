@@ -75,15 +75,31 @@ pub enum PlanError {
 // Validation
 // ---------------------------------------------------------------------------
 
+/// Hard cap on plan size. A small (≤8B) model emitting more than this is
+/// almost always hallucinating a fictitious decomposition; better to reject
+/// and let the reflect step compose from prior knowledge.
+pub const MAX_PLAN_STEPS: usize = 8;
+
 /// Validate the plan against the catalog and structural rules:
 /// - non-empty
+/// - bounded by `MAX_PLAN_STEPS`
 /// - unique step ids
 /// - each (peer, capability) resolves in catalog
+/// - args validate against the capability's declared `schema_in`. Templates
+///   (`${...}`) cause the args to be skipped (they'll be resolved at exec
+///   time); we only validate the *literal* arg structure.
 /// - declared `depends_on` references existing step ids
 /// - acyclic
 pub fn validate_plan(plan: &Plan, catalog: &Catalog) -> Result<(), PlanError> {
     if plan.plan.is_empty() {
         return Err(PlanError::Validation("plan has no steps".into()));
+    }
+    if plan.plan.len() > MAX_PLAN_STEPS {
+        return Err(PlanError::Validation(format!(
+            "plan has {} steps, exceeds MAX_PLAN_STEPS={}",
+            plan.plan.len(),
+            MAX_PLAN_STEPS
+        )));
     }
     let mut seen_ids: HashSet<&str> = HashSet::new();
     for step in &plan.plan {
@@ -97,12 +113,25 @@ pub fn validate_plan(plan: &Plan, catalog: &Catalog) -> Result<(), PlanError> {
     for step in &plan.plan {
         // tool resolves
         let tool_name = format!("{}::{}", step.peer, step.capability);
-        if catalog.find(&tool_name).is_none() {
+        let Some(tool) = catalog.find(&tool_name) else {
             return Err(PlanError::Validation(format!(
                 "step `{}`: tool `{}` not in catalog",
                 step.id, tool_name
             )));
+        };
+
+        // args validate against the cap's input schema — but only if the
+        // args contain no unresolved templates. Templates are checked + run
+        // at execution time when the blackboard is populated.
+        if first_unresolved_template(&step.args).is_none() {
+            if let Err(e) = validate_args_against_schema(&step.args, &tool.cap.schema_in) {
+                return Err(PlanError::Validation(format!(
+                    "step `{}`: args do not conform to `{}` schema_in: {}",
+                    step.id, tool_name, e
+                )));
+            }
         }
+
         // depends_on refs known
         for dep in &step.depends_on {
             if !plan.plan.iter().any(|s| &s.id == dep) {
@@ -120,6 +149,35 @@ pub fn validate_plan(plan: &Plan, catalog: &Catalog) -> Result<(), PlanError> {
         return Err(PlanError::Validation("plan has a dependency cycle".into()));
     }
     Ok(())
+}
+
+/// Validate `args` against `schema`. Returns a short error message on
+/// failure. If `schema` is empty / non-object (degenerate published cap),
+/// we accept anything.
+fn validate_args_against_schema(args: &Value, schema: &Value) -> Result<(), String> {
+    // Treat `{}` or non-object schemas as "no constraints" — common for
+    // pass-through caps and for malformed publishers we shouldn't punish
+    // the planner for.
+    if !schema.is_object()
+        || schema
+            .as_object()
+            .map(|m| m.is_empty())
+            .unwrap_or(true)
+    {
+        return Ok(());
+    }
+    let compiled = jsonschema::JSONSchema::options()
+        .with_draft(jsonschema::Draft::Draft7)
+        .compile(schema)
+        .map_err(|e| format!("schema compile failed: {e}"))?;
+    let result = compiled.validate(args);
+    match result {
+        Ok(()) => Ok(()),
+        Err(errors) => {
+            let msgs: Vec<String> = errors.take(3).map(|e| e.to_string()).collect();
+            Err(msgs.join("; "))
+        }
+    }
 }
 
 /// Return step ids in a valid execution order (Kahn's algorithm).
@@ -764,6 +822,104 @@ mod tests {
         let order = topological_order(&plan).unwrap();
         let expected: Vec<String> = (1..=12).map(|i| format!("s{i}")).collect();
         assert_eq!(order, expected);
+    }
+
+    fn make_catalog(name: &str, peer: &str, schema_in: Value) -> Catalog {
+        use n3ur0n_core::capability::{
+            AccessMode, CapabilityDecl, CapabilityExample,
+        };
+        let mut cat = Catalog::default();
+        cat.tools.push(crate::planner::catalog::ToolDef {
+            peer_id: format!("n3:{peer}aaaaaaaaaaaa"),
+            peer_endpoint: Some(format!("http://{peer}:4242")),
+            cap: CapabilityDecl {
+                name: name.into(),
+                description: format!("test {name}"),
+                schema_in,
+                schema_out: json!({}),
+                mode: AccessMode::Free,
+                pricing: None,
+                tags: vec![],
+                lobe_ids: vec![],
+                examples: vec![CapabilityExample {
+                    user_intent: "go".into(),
+                    args: json!({}),
+                    expected_output: json!({}),
+                }],
+                disambiguation: None,
+                negative_examples: vec![],
+                output_semantic: None,
+            },
+        });
+        cat
+    }
+
+    #[test]
+    fn validate_plan_rejects_more_than_max_steps() {
+        let cat = make_catalog("c", "peera", json!({}));
+        let plan = Plan {
+            plan: (1..=MAX_PLAN_STEPS + 1)
+                .map(|i| PlanStep {
+                    id: format!("s{i}"),
+                    peer: short_peer_helper("peera"),
+                    capability: "c".into(),
+                    args: json!({}),
+                    depends_on: vec![],
+                })
+                .collect(),
+        };
+        let err = validate_plan(&plan, &cat).unwrap_err().to_string();
+        assert!(err.contains("MAX_PLAN_STEPS"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_plan_rejects_args_violating_schema_in() {
+        let schema = json!({
+            "type": "object",
+            "required": ["text"],
+            "properties": {"text": {"type": "string"}}
+        });
+        let cat = make_catalog("reverse", "peera", schema);
+        let plan = Plan {
+            plan: vec![PlanStep {
+                id: "s1".into(),
+                peer: short_peer_helper("peera"),
+                capability: "reverse".into(),
+                // Missing required `text` — must reject.
+                args: json!({"wrong_field": 42}),
+                depends_on: vec![],
+            }],
+        };
+        let err = validate_plan(&plan, &cat).unwrap_err().to_string();
+        assert!(err.contains("schema_in"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_plan_accepts_args_with_unresolved_template() {
+        // Templates skip schema validation — they are resolved at exec time.
+        let schema = json!({
+            "type": "object",
+            "required": ["text"],
+            "properties": {"text": {"type": "string"}}
+        });
+        let cat = make_catalog("reverse", "peera", schema);
+        let plan = Plan {
+            plan: vec![PlanStep {
+                id: "s1".into(),
+                peer: short_peer_helper("peera"),
+                capability: "reverse".into(),
+                args: json!({"text": "${s0.value}"}),
+                depends_on: vec![],
+            }],
+        };
+        assert!(validate_plan(&plan, &cat).is_ok());
+    }
+
+    fn short_peer_helper(peer: &str) -> String {
+        // Mirror catalog's short_peer behaviour: drop "n3:" prefix, take 12.
+        let full = format!("n3:{peer}aaaaaaaaaaaa");
+        let trimmed = full.strip_prefix("n3:").unwrap_or(&full);
+        trimmed.chars().take(12).collect()
     }
 
     #[test]
