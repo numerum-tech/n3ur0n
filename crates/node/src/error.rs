@@ -48,4 +48,8 @@ pub enum NodeError {
     /// JSON (de)serialisation error from a node-level boundary.
     #[error("serde: {0}")]
     Serde(#[from] serde_json::Error),
+
+    /// Template substitution failed (missing path, unknown root, etc).
+    #[error("template: {0}")]
+    Template(#[from] crate::bindings::template::TemplateError),
 }

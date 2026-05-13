@@ -11,6 +11,7 @@
 //! [`SignedMessage`](n3ur0n_core::SignedMessage), call
 //! [`Node::handle`](crate::Node::handle), and re-emit the resulting reply.
 
+pub mod bindings;
 pub mod client;
 pub mod conversation;
 pub mod discovery;
