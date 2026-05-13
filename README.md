@@ -156,7 +156,7 @@ Drop it in `<config>/caps/`. The runtime picks it up; no restart needed. See [`n
 
 **Not yet** — public registry, lobe governance, marketplace, WASM bindings, OS keychain integration, mobile clients.
 
-See [WORK_PLAN.md](WORK_PLAN.md) for the roadmap.
+See [ROADMAP.md](ROADMAP.md) for the milestone tracker.
 
 ## Contributing
 

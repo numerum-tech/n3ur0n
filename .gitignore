@@ -69,3 +69,8 @@ tmp/
 # ---- Personal dev tooling (local-only) ----
 .wolf/
 .claude/
+
+# ---- Internal session notes (kept local; public tracker is ROADMAP.md) ----
+SESSION_STATE.md
+WORK_PLAN.md
+WORK_HISTORY/
