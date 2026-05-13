@@ -50,6 +50,11 @@ See [CHANGELOG.md](CHANGELOG.md) for what has shipped.
 
 - ✅ Apache-2.0 + public docs + GitHub Pages download site
 - ✅ Multi-arch CI + release workflow (server bin × 5 targets, Docker, desktop installers)
+- 🧭 **i18n — EN + FR shipped by default.** Web UI, desktop shell menus,
+  CLI `--help`, error messages. Locale resolved from `Accept-Language`
+  (web) / OS locale (desktop) / `--lang` flag (CLI). Translation
+  catalog under `crates/server/ui/locales/{en,fr}.json` and
+  `crates/server/src/locales/`. Third-party locales accepted via PR.
 - 🧭 MCP + HTTP binding forms in composer (currently prompt-only)
 - 🧭 Backend hot-reload (currently restart-required)
 - 🧭 OS keychain integration for backend `api_key` storage
