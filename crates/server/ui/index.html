@@ -9,14 +9,16 @@
 <body>
     <aside class="sidebar">
         <header class="sidebar-header">
-            <h1>N3UR0N</h1>
+            <div class="header-row">
+                <h1>N3UR0N</h1>
+                <button id="settings-open" class="header-icon" type="button" title="Settings" aria-label="Settings">⚙</button>
+            </div>
             <code id="self-id" class="self-id" title="local instance id">…</code>
         </header>
         <nav class="sidebar-tabs" role="tablist">
             <button class="tab active" data-tab="chats" type="button">Chats</button>
             <button class="tab" data-tab="network" type="button">Network</button>
             <button class="tab" data-tab="skills" type="button">Skills</button>
-            <button class="tab" data-tab="settings" type="button">Settings</button>
         </nav>
         <section class="tab-panel" data-panel="chats">
             <button id="new-chat" type="button" class="primary">+ New chat</button>
@@ -37,14 +39,6 @@
             </div>
             <div id="skills-stats" class="panel-stats"></div>
             <ul id="skills-list" class="compact-list"></ul>
-        </section>
-        <section class="tab-panel hidden" data-panel="settings">
-            <div class="panel-toolbar">
-                <button id="settings-add" type="button" class="primary" style="margin: 0;">+ Backend</button>
-                <button id="settings-refresh" type="button" class="icon-btn" title="Refresh">⟳</button>
-            </div>
-            <div id="settings-stats" class="panel-stats"></div>
-            <ul id="settings-list" class="compact-list"></ul>
         </section>
     </aside>
 

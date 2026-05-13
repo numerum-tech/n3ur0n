@@ -959,14 +959,39 @@ function activateTab(name) {
     if (name === "chats") closeInspector();
     if (name === "network") refreshNetwork();
     if (name === "skills") refreshSkills();
-    if (name === "settings") refreshSettings();
 }
 
 // ---------------------------------------------------------------------------
-// Settings tab — backend manifests CRUD
+// Settings (inspector overlay, opened via gear icon in sidebar header)
 // ---------------------------------------------------------------------------
+//
+// Lives entirely in the inspector pane — no sidebar tab. Two screens
+// inside the same overlay: backends list (default) and backend form.
 
-async function refreshSettings() {
+async function openSettings() {
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent = "Settings";
+    document.getElementById("inspector-body").innerHTML = `
+        <section class="section">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <h3 style="margin: 0;">backends</h3>
+                <button id="settings-add" type="button" class="primary" style="margin: 0;">+ Backend</button>
+            </div>
+            <div id="settings-stats" class="row-sub" style="margin-bottom: 8px;"></div>
+            <ul id="settings-list" class="compact-list" style="padding: 0;"></ul>
+            <p class="row-sub" style="margin-top: 12px;">
+                Changes require an app restart to take effect — the runtime registry is
+                built at boot.
+            </p>
+        </section>
+    `;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    await renderSettingsList();
+    document.getElementById("settings-add")?.addEventListener("click", openBackendForm);
+}
+
+async function renderSettingsList() {
     const list = document.getElementById("settings-list");
     const stats = document.getElementById("settings-stats");
     if (!list) return;
@@ -1014,7 +1039,7 @@ async function refreshSettings() {
             if (!window.confirm(`Delete backend "${name}"? Restart required to take effect.`)) return;
             try {
                 await api("DELETE", `/api/v0/backends/${encodeURIComponent(name)}`);
-                await refreshSettings();
+                await renderSettingsList();
             } catch (err) {
                 window.alert(`delete failed: ${err.message}`);
             }
@@ -1041,7 +1066,7 @@ function openBackendForm() {
                 <input id="bf-key" type="password" placeholder="(leave empty for Ollama / local endpoints)" />
             </form>
             <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
-                <button id="bf-cancel" type="button" class="icon-btn">Cancel</button>
+                <button id="bf-back" type="button" class="icon-btn">← Back</button>
                 <button id="bf-save" type="button" class="primary" style="margin: 0;">Save</button>
             </div>
             <div id="bf-status" class="row-sub" style="margin-top: 8px;"></div>
@@ -1049,7 +1074,7 @@ function openBackendForm() {
     `;
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
-    document.getElementById("bf-cancel")?.addEventListener("click", closeInspector);
+    document.getElementById("bf-back")?.addEventListener("click", openSettings);
     document.getElementById("bf-save")?.addEventListener("click", async () => {
         const name = document.getElementById("bf-name").value.trim();
         const base = document.getElementById("bf-base").value.trim();
@@ -1067,16 +1092,14 @@ function openBackendForm() {
                 base_url: base, default_model: model, api_key: key,
             });
             status.textContent = "saved. restart required.";
-            await refreshSettings();
-            setTimeout(closeInspector, 600);
+            setTimeout(openSettings, 600);
         } catch (e) {
             status.textContent = `save failed: ${e.message}`;
         }
     });
 }
 
-document.getElementById("settings-refresh")?.addEventListener("click", refreshSettings);
-document.getElementById("settings-add")?.addEventListener("click", openBackendForm);
+document.getElementById("settings-open")?.addEventListener("click", openSettings);
 
 document.querySelectorAll(".sidebar-tabs .tab").forEach(t => {
     t.addEventListener("click", () => activateTab(t.dataset.tab));
