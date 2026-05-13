@@ -646,11 +646,17 @@ function renderNetworkList() {
 }
 
 async function refreshSkills() {
+    // Skills tab shows EVERY cap reachable from this node: the local
+    // registry + every peer's cached describe_self. Pulls both endpoints
+    // in parallel and merges into a unified view.
     try {
-        const d = await api("GET", "/api/v0/caps");
-        _capsCache = { self: d.self || "?", caps: d.caps || [] };
+        const [caps, peers] = await Promise.all([
+            api("GET", "/api/v0/caps"),
+            api("GET", "/api/v0/peers"),
+        ]);
+        _capsCache = { self: caps.self || "?", caps: caps.caps || [] };
+        _peersCache = { self: peers.self || "?", peers: peers.peers || [] };
     } catch (e) {
-        _capsCache = { self: "?", caps: [] };
         document.getElementById("skills-stats").textContent = `error: ${e.message}`;
         document.getElementById("skills-list").innerHTML = "";
         return;
@@ -658,33 +664,91 @@ async function refreshSkills() {
     renderSkillsList();
 }
 
+/// Build the merged catalog: union of local caps + every peer's caps,
+/// deduplicated by name. Each entry records which peers expose it.
+function buildMergedCatalog() {
+    const merged = new Map(); // name → { decl, sources: Array<{kind, peer_id, endpoint}> }
+
+    // Local caps first — preserves the local descriptor as canonical.
+    for (const c of _capsCache.caps) {
+        merged.set(c.name, {
+            decl: c,
+            sources: [{
+                kind: c.has_binding ? "manifest" : "legacy",
+                peer_id: _capsCache.self,
+                endpoint: "local",
+            }],
+        });
+    }
+
+    // Then peers. If the cap name is new → use the remote decl as
+    // canonical. If already in the map → just append the peer as a
+    // source.
+    for (const p of _peersCache.peers) {
+        for (const remote of (p.capabilities || [])) {
+            const entry = merged.get(remote.name);
+            if (entry) {
+                entry.sources.push({
+                    kind: "remote",
+                    peer_id: p.instance_id,
+                    endpoint: p.endpoint,
+                });
+            } else {
+                merged.set(remote.name, {
+                    decl: remote,
+                    sources: [{
+                        kind: "remote",
+                        peer_id: p.instance_id,
+                        endpoint: p.endpoint,
+                    }],
+                });
+            }
+        }
+    }
+
+    return Array.from(merged.values());
+}
+
 function renderSkillsList() {
     const filter = (document.getElementById("skills-filter")?.value || "").toLowerCase();
     const list = document.getElementById("skills-list");
     const stats = document.getElementById("skills-stats");
-    const caps = _capsCache.caps;
 
-    const filtered = caps.filter(c => {
+    const all = buildMergedCatalog();
+    const filtered = all.filter(entry => {
         if (!filter) return true;
+        const c = entry.decl;
         const hay = [
             c.name,
             c.description || "",
             ...(c.tags || []),
             ...(c.languages || []),
             ...(c.countries || []),
+            ...entry.sources.map(s => s.endpoint),
         ].join(" ").toLowerCase();
         return hay.includes(filter);
     });
 
-    const manifestCount = caps.filter(c => c.has_binding).length;
-    stats.textContent = `${caps.length} skills · ${manifestCount} manifest · ${caps.length - manifestCount} legacy`;
+    const localCount = all.filter(e => e.sources.some(s => s.kind !== "remote")).length;
+    const remoteOnly = all.length - localCount;
+    stats.textContent = `${all.length} skills total · ${localCount} local · ${remoteOnly} remote-only`;
 
     let html = "";
     if (filtered.length === 0) {
         html = '<li class="empty">no match</li>';
     } else {
-        html = filtered.map(c => {
-            const badge = c.has_binding ? "binding" : "legacy";
+        html = filtered.map(entry => {
+            const c = entry.decl;
+            const localSource = entry.sources.find(s => s.kind !== "remote");
+            const badgeKind = localSource
+                ? (localSource.kind === "manifest" ? "binding" : "legacy")
+                : "";
+            const badgeText = localSource
+                ? (localSource.kind === "manifest" ? "M" : "L")
+                : `R${entry.sources.length}`;
+            const badgeTitle = localSource
+                ? (localSource.kind === "manifest" ? "manifest binding (local)" : "legacy backend (local)")
+                : `remote-only · seen on ${entry.sources.length} peer${entry.sources.length !== 1 ? "s" : ""}`;
             const sub = [
                 c.version ? `v${c.version}` : "",
                 c.mode,
@@ -697,7 +761,7 @@ function renderSkillsList() {
                         <span class="name">${escapeHtml(c.name)}</span>
                         <span class="row-sub">${escapeHtml(sub)}</span>
                     </div>
-                    <span class="row-count ${badge}" title="${c.has_binding ? "manifest binding" : "legacy backend"}">${c.has_binding ? "M" : "L"}</span>
+                    <span class="row-count ${badgeKind}" title="${escapeHtml(badgeTitle)}">${escapeHtml(badgeText)}</span>
                 </li>
             `;
         }).join("");
@@ -782,19 +846,37 @@ function openPeerInspector(peerId) {
 }
 
 function openCapInspector(capName) {
-    const cap = _capsCache.caps.find(c => c.name === capName);
+    // First look in local cap registry; otherwise pull the first remote
+    // declaration we have cached for this name. This makes remote-only
+    // caps inspectable from the merged Skills view.
+    let cap = _capsCache.caps.find(c => c.name === capName);
+    let isLocal = !!cap;
+    if (!cap) {
+        for (const p of _peersCache.peers) {
+            const remote = (p.capabilities || []).find(c => c.name === capName);
+            if (remote) {
+                cap = remote;
+                break;
+            }
+        }
+    }
     if (!cap) {
         openInspector("Skill not found", `<div class="section">${escapeHtml(capName)}</div>`);
         return;
     }
-    // Find every peer that advertises this cap (rough match on name).
     const peersWithCap = _peersCache.peers.filter(p =>
         (p.capabilities || []).some(c => c.name === cap.name)
     );
+    const badgeClass = isLocal
+        ? (cap.has_binding ? "binding" : "legacy")
+        : "";
+    const badgeText = isLocal
+        ? (cap.has_binding ? "manifest (local)" : "legacy (local)")
+        : `remote · ${peersWithCap.length} peer${peersWithCap.length !== 1 ? "s" : ""}`;
 
     const html = `
         <section class="section">
-            <h3>${escapeHtml(cap.name)} <span class="row-count ${cap.has_binding ? "binding" : "legacy"}">${cap.has_binding ? "manifest" : "legacy"}</span></h3>
+            <h3>${escapeHtml(cap.name)} <span class="row-count ${badgeClass}">${escapeHtml(badgeText)}</span></h3>
             <dl class="kv">
                 <dt>version</dt><dd>${escapeHtml(cap.version || "?")}</dd>
                 <dt>mode</dt><dd>${escapeHtml(cap.mode)}</dd>
