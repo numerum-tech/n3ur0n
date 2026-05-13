@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/ui/style.css">
 </head>
 <body>
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar-main">
         <header class="sidebar-header">
             <div class="header-row">
                 <h1>N3UR0N</h1>
@@ -39,6 +39,47 @@
             </div>
             <div id="skills-stats" class="panel-stats"></div>
             <ul id="skills-list" class="compact-list"></ul>
+        </section>
+    </aside>
+
+    <!-- Settings sidebar: swapped in when ⚙ is clicked. Contains its own
+         tab nav (Backends / Caps / Gateways) and an exit button to
+         return to the main sidebar. -->
+    <aside class="sidebar hidden" id="sidebar-settings">
+        <header class="sidebar-header">
+            <div class="header-row">
+                <button id="settings-back" class="header-icon" type="button" title="Back" aria-label="Back">←</button>
+                <h1>Settings</h1>
+                <span style="width: 28px;"></span>
+            </div>
+        </header>
+        <nav class="sidebar-tabs" role="tablist">
+            <button class="tab active" data-stab="backends" type="button">Backends</button>
+            <button class="tab" data-stab="caps" type="button">Caps</button>
+            <button class="tab" data-stab="gateways" type="button">Gateways</button>
+        </nav>
+        <section class="tab-panel" data-spanel="backends">
+            <div class="panel-toolbar">
+                <button id="settings-add-backend" type="button" class="primary" style="margin: 0;">+ Backend</button>
+                <button id="settings-refresh-backends" type="button" class="icon-btn" title="Refresh">⟳</button>
+            </div>
+            <div id="settings-backends-stats" class="panel-stats"></div>
+            <ul id="settings-backends-list" class="compact-list"></ul>
+        </section>
+        <section class="tab-panel hidden" data-spanel="caps">
+            <div class="panel-toolbar">
+                <button id="settings-refresh-caps" type="button" class="icon-btn" title="Refresh">⟳</button>
+            </div>
+            <div id="settings-caps-stats" class="panel-stats"></div>
+            <ul id="settings-caps-list" class="compact-list"></ul>
+        </section>
+        <section class="tab-panel hidden" data-spanel="gateways">
+            <div class="panel-toolbar">
+                <button id="settings-add-gateway" type="button" class="primary" style="margin: 0;">+ Gateway</button>
+                <button id="settings-refresh-gateways" type="button" class="icon-btn" title="Refresh">⟳</button>
+            </div>
+            <div id="settings-gateways-stats" class="panel-stats"></div>
+            <ul id="settings-gateways-list" class="compact-list"></ul>
         </section>
     </aside>
 

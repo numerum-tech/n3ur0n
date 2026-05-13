@@ -39,6 +39,7 @@ body {
     flex-direction: column;
     overflow: hidden;
 }
+.sidebar.hidden { display: none; }
 
 .sidebar-header {
     padding: 16px;

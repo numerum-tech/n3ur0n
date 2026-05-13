@@ -962,38 +962,41 @@ function activateTab(name) {
 }
 
 // ---------------------------------------------------------------------------
-// Settings (inspector overlay, opened via gear icon in sidebar header)
+// Settings — swaps the sidebar to a Settings sidebar (Backends / Caps /
+// Gateways) with its own tab nav. Main pane stays free for any form view
+// (backend form, gateway form, future cap composer) opened via inspector.
 // ---------------------------------------------------------------------------
-//
-// Lives entirely in the inspector pane — no sidebar tab. Two screens
-// inside the same overlay: backends list (default) and backend form.
 
-async function openSettings() {
-    const overlay = document.getElementById("inspector");
-    document.getElementById("inspector-title").textContent = "Settings";
-    document.getElementById("inspector-body").innerHTML = `
-        <section class="section">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                <h3 style="margin: 0;">backends</h3>
-                <button id="settings-add" type="button" class="primary" style="margin: 0;">+ Backend</button>
-            </div>
-            <div id="settings-stats" class="row-sub" style="margin-bottom: 8px;"></div>
-            <ul id="settings-list" class="compact-list" style="padding: 0;"></ul>
-            <p class="row-sub" style="margin-top: 12px;">
-                Changes require an app restart to take effect — the runtime registry is
-                built at boot.
-            </p>
-        </section>
-    `;
-    overlay.classList.remove("hidden");
-    overlay.setAttribute("aria-hidden", "false");
-    await renderSettingsList();
-    document.getElementById("settings-add")?.addEventListener("click", openBackendForm);
+function openSettings() {
+    document.getElementById("sidebar-main").classList.add("hidden");
+    document.getElementById("sidebar-settings").classList.remove("hidden");
+    closeInspector();
+    activateSettingsTab("backends");
 }
 
-async function renderSettingsList() {
-    const list = document.getElementById("settings-list");
-    const stats = document.getElementById("settings-stats");
+function closeSettings() {
+    document.getElementById("sidebar-settings").classList.add("hidden");
+    document.getElementById("sidebar-main").classList.remove("hidden");
+    closeInspector();
+}
+
+function activateSettingsTab(name) {
+    document.querySelectorAll("#sidebar-settings .tab").forEach(t =>
+        t.classList.toggle("active", t.dataset.stab === name)
+    );
+    document.querySelectorAll("#sidebar-settings .tab-panel").forEach(p =>
+        p.classList.toggle("hidden", p.dataset.spanel !== name)
+    );
+    if (name === "backends") renderBackendsList();
+    if (name === "caps") renderCapsList();
+    if (name === "gateways") renderGatewaysList();
+}
+
+// ---- Backends section ----
+
+async function renderBackendsList() {
+    const list = document.getElementById("settings-backends-list");
+    const stats = document.getElementById("settings-backends-stats");
     if (!list) return;
     list.innerHTML = '<li class="empty">loading…</li>';
     let data;
@@ -1001,11 +1004,11 @@ async function renderSettingsList() {
         data = await api("GET", "/api/v0/backends");
     } catch (e) {
         stats.textContent = `error: ${e.message}`;
-        list.innerHTML = '<li class="empty">/api/v0/backends not available on this node (desktop-only endpoint)</li>';
+        list.innerHTML = '<li class="empty">/api/v0/backends not available (desktop-only)</li>';
         return;
     }
     const backends = data.backends || [];
-    stats.textContent = `${backends.length} backend${backends.length !== 1 ? "s" : ""} in ${data.dir || "?"}`;
+    stats.textContent = `${backends.length} backend${backends.length !== 1 ? "s" : ""}`;
     if (backends.length === 0) {
         list.innerHTML = '<li class="empty">no backends. + Backend to add one.</li>';
         return;
@@ -1036,14 +1039,143 @@ async function renderSettingsList() {
         btn.addEventListener("click", async (e) => {
             e.stopPropagation();
             const name = btn.closest("li").dataset.backend;
-            if (!window.confirm(`Delete backend "${name}"? Restart required to take effect.`)) return;
+            if (!window.confirm(`Delete backend "${name}"? Restart required.`)) return;
             try {
                 await api("DELETE", `/api/v0/backends/${encodeURIComponent(name)}`);
-                await renderSettingsList();
+                await renderBackendsList();
             } catch (err) {
                 window.alert(`delete failed: ${err.message}`);
             }
         });
+    });
+}
+
+// ---- Caps section (read-only list; composer TBD) ----
+
+async function renderCapsList() {
+    const list = document.getElementById("settings-caps-list");
+    const stats = document.getElementById("settings-caps-stats");
+    if (!list) return;
+    list.innerHTML = '<li class="empty">loading…</li>';
+    try {
+        const d = await api("GET", "/api/v0/caps");
+        const caps = d.caps || [];
+        const local = caps.filter(c => c.has_binding);
+        stats.textContent = `${caps.length} declared · ${local.length} manifest · cap composer coming soon`;
+        if (caps.length === 0) {
+            list.innerHTML = '<li class="empty">no caps. Drop a cap.toml under <code>caps/</code> in the app config dir.</li>';
+            return;
+        }
+        list.innerHTML = caps.map(c => {
+            const badge = c.has_binding ? "M" : "L";
+            const cls = c.has_binding ? "binding" : "legacy";
+            return `
+                <li data-cap="${escapeHtml(c.name)}">
+                    <div class="row-main">
+                        <span class="name">${escapeHtml(c.name)}</span>
+                        <span class="row-sub">v${escapeHtml(c.version || "?")} · ${escapeHtml(c.mode)}</span>
+                    </div>
+                    <span class="row-count ${cls}">${badge}</span>
+                </li>
+            `;
+        }).join("");
+        list.querySelectorAll("li[data-cap]").forEach(li => {
+            li.addEventListener("click", () => openCapInspector(li.dataset.cap));
+        });
+    } catch (e) {
+        stats.textContent = `error: ${e.message}`;
+        list.innerHTML = "";
+    }
+}
+
+// ---- Gateways section (peer endpoints) ----
+
+async function renderGatewaysList() {
+    const list = document.getElementById("settings-gateways-list");
+    const stats = document.getElementById("settings-gateways-stats");
+    if (!list) return;
+    list.innerHTML = '<li class="empty">loading…</li>';
+    try {
+        const d = await api("GET", "/api/v0/peers");
+        const peers = d.peers || [];
+        stats.textContent = `${peers.length} gateway${peers.length !== 1 ? "s" : ""} (peers known to this node)`;
+        if (peers.length === 0) {
+            list.innerHTML = '<li class="empty">no gateways yet. + Gateway to add a remote n3ur0n peer endpoint.</li>';
+            return;
+        }
+        list.innerHTML = peers.map(p => {
+            const caps = (p.capabilities || []).length;
+            return `
+                <li data-peer="${escapeHtml(p.instance_id)}">
+                    <div class="row-main">
+                        <span class="name">${escapeHtml(shortId(p.instance_id))}</span>
+                        <span class="row-sub">${escapeHtml(p.endpoint)} · ${caps} cap${caps !== 1 ? "s" : ""}</span>
+                    </div>
+                    <button class="icon-btn" data-action="refresh" title="Refresh describe_self">⟳</button>
+                </li>
+            `;
+        }).join("");
+        list.querySelectorAll('li[data-peer] [data-action="refresh"]').forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                const li = btn.closest("li");
+                const peerId = li.dataset.peer;
+                const peer = peers.find(p => p.instance_id === peerId);
+                if (!peer) return;
+                btn.textContent = "…";
+                try {
+                    await api("POST", "/api/v0/peers/refresh", { endpoint: peer.endpoint });
+                    await renderGatewaysList();
+                } catch (err) {
+                    window.alert(`refresh failed: ${err.message}`);
+                    btn.textContent = "⟳";
+                }
+            });
+        });
+        list.querySelectorAll("li[data-peer]").forEach(li => {
+            li.addEventListener("click", () => openPeerInspector(li.dataset.peer));
+        });
+    } catch (e) {
+        stats.textContent = `error: ${e.message}`;
+        list.innerHTML = "";
+    }
+}
+
+function openGatewayForm() {
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent = "Add gateway (remote n3ur0n peer)";
+    document.getElementById("inspector-body").innerHTML = `
+        <section class="section">
+            <p>Pull <code>describe_self</code> from a remote n3ur0n endpoint and add it to
+            your peer directory. The endpoint will be signed-pinged immediately to verify it
+            is reachable.</p>
+            <form class="kv" onsubmit="return false;">
+                <label for="gf-url">endpoint</label>
+                <input id="gf-url" type="url" required placeholder="http://node-a:4242 · https://peer.example.com:4242" />
+            </form>
+            <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
+                <button id="gf-cancel" type="button" class="icon-btn">Cancel</button>
+                <button id="gf-save" type="button" class="primary" style="margin: 0;">Add</button>
+            </div>
+            <div id="gf-status" class="row-sub" style="margin-top: 8px;"></div>
+        </section>
+    `;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.getElementById("gf-cancel")?.addEventListener("click", closeInspector);
+    document.getElementById("gf-save")?.addEventListener("click", async () => {
+        const url = document.getElementById("gf-url").value.trim();
+        const status = document.getElementById("gf-status");
+        if (!url) { status.textContent = "endpoint required"; return; }
+        status.textContent = "adding…";
+        try {
+            const r = await api("POST", "/api/v0/peers/refresh", { endpoint: url });
+            status.textContent = `added · ${r.instance_id || "ok"}`;
+            await renderGatewaysList();
+            setTimeout(closeInspector, 600);
+        } catch (e) {
+            status.textContent = `failed: ${e.message}`;
+        }
     });
 }
 
@@ -1074,7 +1206,7 @@ function openBackendForm() {
     `;
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
-    document.getElementById("bf-back")?.addEventListener("click", openSettings);
+    document.getElementById("bf-back")?.addEventListener("click", closeInspector);
     document.getElementById("bf-save")?.addEventListener("click", async () => {
         const name = document.getElementById("bf-name").value.trim();
         const base = document.getElementById("bf-base").value.trim();
@@ -1092,7 +1224,8 @@ function openBackendForm() {
                 base_url: base, default_model: model, api_key: key,
             });
             status.textContent = "saved. restart required.";
-            setTimeout(openSettings, 600);
+            await renderBackendsList();
+            setTimeout(closeInspector, 600);
         } catch (e) {
             status.textContent = `save failed: ${e.message}`;
         }
@@ -1100,6 +1233,15 @@ function openBackendForm() {
 }
 
 document.getElementById("settings-open")?.addEventListener("click", openSettings);
+document.getElementById("settings-back")?.addEventListener("click", closeSettings);
+document.querySelectorAll("#sidebar-settings .tab").forEach(t => {
+    t.addEventListener("click", () => activateSettingsTab(t.dataset.stab));
+});
+document.getElementById("settings-add-backend")?.addEventListener("click", openBackendForm);
+document.getElementById("settings-refresh-backends")?.addEventListener("click", renderBackendsList);
+document.getElementById("settings-refresh-caps")?.addEventListener("click", renderCapsList);
+document.getElementById("settings-add-gateway")?.addEventListener("click", openGatewayForm);
+document.getElementById("settings-refresh-gateways")?.addEventListener("click", renderGatewaysList);
 
 document.querySelectorAll(".sidebar-tabs .tab").forEach(t => {
     t.addEventListener("click", () => activateTab(t.dataset.tab));
