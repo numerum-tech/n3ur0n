@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "identifier": "default",
+  "description": "Default capability set for the N3UR0N desktop shell.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

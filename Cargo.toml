@@ -6,10 +6,8 @@ members = [
     "crates/adapters",
     "crates/node",
     "crates/server",
+    "crates/desktop",
 ]
-# crates/desktop will join once Tauri 2 is initialised via `pnpm tauri init`
-# (requires a built frontend/ first).
-exclude = ["crates/desktop"]
 
 [workspace.package]
 version = "0.1.0"
@@ -96,6 +94,7 @@ n3ur0n-core = { path = "crates/core" }
 n3ur0n-storage = { path = "crates/storage" }
 n3ur0n-adapters = { path = "crates/adapters" }
 n3ur0n-node = { path = "crates/node" }
+n3ur0n-server = { path = "crates/server" }
 
 [profile.release]
 lto = "thin"

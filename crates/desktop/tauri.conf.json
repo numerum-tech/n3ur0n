@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.tauri.app/config/2.0.0",
+  "productName": "N3UR0N",
+  "version": "0.3.0",
+  "identifier": "dev.n3ur0n.desktop",
+  "build": {
+    "frontendDist": "../server/ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "deb", "appimage", "msi"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "category": "Productivity",
+    "shortDescription": "N3UR0N consumer client",
+    "longDescription": "Connect to local + remote LLM, MCP servers, HTTP APIs and other N3UR0N peers. Compose and consume AI capabilities under a single signed protocol."
+  }
+}

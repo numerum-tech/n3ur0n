@@ -1,0 +1,4 @@
+# Tauri build artifacts generated from tauri.conf.json at build time.
+# These are reproducible — no need to commit.
+gen/schemas/
+target/

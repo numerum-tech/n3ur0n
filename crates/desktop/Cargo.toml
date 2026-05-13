@@ -1,0 +1,40 @@
+[package]
+name = "n3ur0n-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "N3UR0N consumer-profile desktop app (Tauri 2). Wraps an in-process node + axum server on 127.0.0.1 with a native window."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "n3ur0n-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+n3ur0n-core = { workspace = true }
+n3ur0n-storage = { workspace = true }
+n3ur0n-adapters = { workspace = true }
+n3ur0n-node = { workspace = true }
+n3ur0n-server = { workspace = true }
+
+tauri = { version = "2", features = [] }
+axum = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+reqwest = { workspace = true }
+toml = { workspace = true }
+dirs = "5"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
