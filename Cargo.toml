@@ -75,6 +75,9 @@ governor = "0.6"
 # Caching
 lru = "0.12"
 
+# Lock-free atomic swap of Arc<T> for live-reload of registries.
+arc-swap = "1"
+
 # Stream adapters (mpsc receiver → Stream for SSE)
 tokio-stream = { version = "0.1", features = ["sync"] }
 

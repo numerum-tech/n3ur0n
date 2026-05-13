@@ -46,6 +46,72 @@ async function api(method, path, body) {
 }
 
 // ---------------------------------------------------------------------------
+// Modal dialog (replaces native confirm/alert — Tauri WKWebView blocks them)
+// ---------------------------------------------------------------------------
+
+function _openModal({ title, message, okLabel, cancelLabel, danger, withCancel }) {
+    return new Promise((resolve) => {
+        const modal = $("modal");
+        const titleEl = $("modal-title");
+        const bodyEl = $("modal-body");
+        const okBtn = $("modal-ok");
+        const cancelBtn = $("modal-cancel");
+        titleEl.textContent = title;
+        bodyEl.textContent = message;
+        okBtn.textContent = okLabel;
+        cancelBtn.textContent = cancelLabel;
+        cancelBtn.style.display = withCancel ? "" : "none";
+        okBtn.classList.toggle("modal-ok-danger", !!danger);
+        modal.classList.remove("hidden");
+        modal.setAttribute("aria-hidden", "false");
+
+        const cleanup = (result) => {
+            modal.classList.add("hidden");
+            modal.setAttribute("aria-hidden", "true");
+            okBtn.removeEventListener("click", onOk);
+            cancelBtn.removeEventListener("click", onCancel);
+            document.removeEventListener("keydown", onKey);
+            modal.querySelector(".modal-backdrop").removeEventListener("click", onCancel);
+            okBtn.classList.remove("modal-ok-danger");
+            resolve(result);
+        };
+        const onOk = () => cleanup(true);
+        const onCancel = () => cleanup(false);
+        const onKey = (e) => {
+            if (e.key === "Escape") onCancel();
+            else if (e.key === "Enter") onOk();
+        };
+        okBtn.addEventListener("click", onOk);
+        cancelBtn.addEventListener("click", onCancel);
+        modal.querySelector(".modal-backdrop").addEventListener("click", onCancel);
+        document.addEventListener("keydown", onKey);
+        setTimeout(() => okBtn.focus(), 0);
+    });
+}
+
+function confirmModal(message, opts = {}) {
+    return _openModal({
+        title: opts.title || "Confirm",
+        message,
+        okLabel: opts.okLabel || "OK",
+        cancelLabel: opts.cancelLabel || "Cancel",
+        danger: !!opts.danger,
+        withCancel: true,
+    });
+}
+
+function alertModal(message, opts = {}) {
+    return _openModal({
+        title: opts.title || "Notice",
+        message,
+        okLabel: opts.okLabel || "OK",
+        cancelLabel: "Cancel",
+        danger: !!opts.danger,
+        withCancel: false,
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
 
@@ -524,7 +590,7 @@ async function renameActive() {
 
 async function deleteActive() {
     if (!activeId) return;
-    if (!window.confirm(`Delete this conversation?`)) return;
+    if (!(await confirmModal(`Delete this conversation?`, { title: "Delete conversation", okLabel: "Delete", danger: true }))) return;
     try {
         await api("DELETE", `/api/v0/conversations/${encodeURIComponent(activeId)}`);
         localStorage.removeItem(LS_CURRENT);
@@ -1059,12 +1125,12 @@ async function renderBackendsCards() {
         btn.addEventListener("click", async (e) => {
             e.stopPropagation();
             const name = btn.closest(".card").dataset.backend;
-            if (!window.confirm(`Delete backend "${name}"? Restart required.`)) return;
+            if (!(await confirmModal(`Delete backend "${name}"? Restart required.`, { title: "Delete backend", okLabel: "Delete", danger: true }))) return;
             try {
                 await api("DELETE", `/api/v0/backends/${encodeURIComponent(name)}`);
                 await renderBackendsCards();
             } catch (err) {
-                window.alert(`delete failed: ${err.message}`);
+                await alertModal(`delete failed: ${err.message}`, { title: "Error" });
             }
         });
     });
@@ -1159,12 +1225,12 @@ async function renderCapsCards() {
             btn.addEventListener("click", async (e) => {
                 e.stopPropagation();
                 const name = btn.closest(".card").dataset.cap;
-                if (!window.confirm(`Delete skill "${name}"?`)) return;
+                if (!(await confirmModal(`Delete skill "${name}"?`, { title: "Delete skill", okLabel: "Delete", danger: true }))) return;
                 try {
                     await api("DELETE", `/api/v0/caps/manifests/${encodeURIComponent(name)}`);
                     await renderCapsCards();
                 } catch (err) {
-                    window.alert(`delete failed: ${err.message}`);
+                    await alertModal(`delete failed: ${err.message}`, { title: "Error" });
                 }
             });
         });
@@ -1234,7 +1300,7 @@ async function renderGatewaysCards() {
                     await api("POST", "/api/v0/peers/refresh", { endpoint: peer.endpoint });
                     await renderGatewaysCards();
                 } catch (err) {
-                    window.alert(`refresh failed: ${err.message}`);
+                    await alertModal(`refresh failed: ${err.message}`, { title: "Error" });
                     btn.textContent = "Refresh";
                 }
             });

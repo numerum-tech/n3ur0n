@@ -133,6 +133,20 @@
         </section>
     </main>
 
+    <!-- Modal dialog for confirms + alerts. Native window.confirm doesn't
+         work in Tauri's WKWebView, so we ship our own. -->
+    <div id="modal" class="modal hidden" aria-hidden="true">
+        <div class="modal-backdrop"></div>
+        <div class="modal-box" role="dialog" aria-modal="true">
+            <h3 id="modal-title" class="modal-title">Confirm</h3>
+            <p id="modal-body" class="modal-body"></p>
+            <div class="modal-actions">
+                <button id="modal-cancel" type="button" class="icon-btn">Cancel</button>
+                <button id="modal-ok" type="button" class="primary" style="margin: 0;">OK</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/ui/app.js" defer></script>
 </body>
 </html>
