@@ -12,8 +12,23 @@
             <h1>N3UR0N</h1>
             <code id="self-id" class="self-id" title="local instance id">…</code>
         </header>
-        <button id="new-chat" type="button" class="primary">+ New chat</button>
-        <ul id="conv-list" class="conv-list"></ul>
+        <nav class="sidebar-tabs" role="tablist">
+            <button class="tab active" data-tab="chats" type="button">Chats</button>
+            <button class="tab" data-tab="network" type="button">Network</button>
+            <button class="tab" data-tab="skills" type="button">Skills</button>
+        </nav>
+        <section class="tab-panel" data-panel="chats">
+            <button id="new-chat" type="button" class="primary">+ New chat</button>
+            <ul id="conv-list" class="conv-list"></ul>
+        </section>
+        <section class="tab-panel hidden" data-panel="network">
+            <button id="network-refresh" type="button" class="primary">⟳ Refresh</button>
+            <div id="network-body" class="info-body"></div>
+        </section>
+        <section class="tab-panel hidden" data-panel="skills">
+            <button id="skills-refresh" type="button" class="primary">⟳ Refresh</button>
+            <div id="skills-body" class="info-body"></div>
+        </section>
     </aside>
 
     <main class="main-pane">

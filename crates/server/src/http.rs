@@ -69,6 +69,7 @@ pub fn app(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
     let api_v0 = Router::new()
         .route("/health", get(health))
         .route("/whoami", get(whoami))
+        .route("/caps", get(api_caps))
         .route("/peers", get(api_peers))
         .route("/peers/refresh", post(api_peers_refresh))
         .route("/peers/discover", post(api_peers_discover))
@@ -195,6 +196,31 @@ async fn public_health(State(state): State<AppState>) -> Json<serde_json::Value>
 
 async fn whoami(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(json!({"instance_id": state.node.instance_id().as_str()}))
+}
+
+/// Local capability registry as JSON. Each entry mirrors `CapabilityDecl`
+/// (the wire form returned by `describe_self`) plus a `has_binding` flag
+/// so the UI can distinguish manifest-mode caps from legacy compile-time
+/// caps.
+async fn api_caps(State(state): State<AppState>) -> impl IntoResponse {
+    let decls = state.node.registry().all();
+    let body: Vec<Value> = decls
+        .into_iter()
+        .map(|d| {
+            let has_binding = state.node.registry().binding_for(&d.name).is_some();
+            let mut v = serde_json::to_value(&d).unwrap_or(Value::Null);
+            if let Value::Object(m) = &mut v {
+                m.insert("has_binding".into(), Value::Bool(has_binding));
+            }
+            v
+        })
+        .collect();
+    Json(json!({
+        "self": state.node.instance_id().as_str(),
+        "protocol_version": n3ur0n_core::protocol::PROTOCOL_VERSION,
+        "caps": body,
+    }))
+    .into_response()
 }
 
 async fn post_message(

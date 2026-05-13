@@ -557,3 +557,123 @@ promptEl.addEventListener("keydown", (e) => {
         await renderActive();
     }
 })();
+
+// ---------------------------------------------------------------------------
+// Sidebar tabs (Chats / Network / Skills)
+// ---------------------------------------------------------------------------
+
+function shortId(id) {
+    if (!id) return "?";
+    const trimmed = id.startsWith("n3:") ? id.slice(3) : id;
+    return trimmed.slice(0, 12);
+}
+
+function renderCapCard(cap) {
+    const badge = cap.has_binding === false
+        ? '<span class="badge legacy" title="legacy compile-time backend">legacy</span>'
+        : (cap.has_binding === true ? '<span class="badge binding">manifest</span>' : '');
+    const langs = (cap.languages || []).length
+        ? ` · ${(cap.languages).join(",")}`
+        : "";
+    const countries = (cap.countries || []).length
+        ? ` · ${(cap.countries).join(",")}`
+        : "";
+    const version = cap.version ? `v${cap.version}` : "";
+    const tags = (cap.tags || []).length
+        ? ` · tags: ${cap.tags.join(", ")}`
+        : "";
+    const lobeIds = (cap.lobe_ids || []).length
+        ? ` · lobes: ${cap.lobe_ids.join(", ")}`
+        : "";
+    const examples = (cap.examples || []).map(ex =>
+        `  • "${ex.user_intent}" → ${JSON.stringify(ex.args)}`
+    ).join("\n");
+    return `
+        <div class="cap">
+            <div><span class="cap-name">${cap.name}</span> ${badge}</div>
+            <div class="cap-meta">${version} · mode=${cap.mode}${langs}${countries}${tags}${lobeIds}</div>
+            <div class="cap-desc">${cap.description || ""}</div>
+            ${cap.disambiguation ? `<div class="cap-meta">disambig: ${cap.disambiguation}</div>` : ""}
+            ${examples ? `<details><summary>examples</summary><pre>${examples}</pre></details>` : ""}
+            <details><summary>schema_in</summary><pre>${JSON.stringify(cap.schema_in, null, 2)}</pre></details>
+        </div>
+    `;
+}
+
+async function refreshNetwork() {
+    const body = document.querySelector('[data-panel="network"] #network-body');
+    body.innerHTML = '<div class="empty">loading…</div>';
+    try {
+        const d = await api("GET", "/api/v0/peers");
+        const selfId = d.self || "?";
+        const peers = d.peers || [];
+        let html = `
+            <div class="node self">
+                <span class="node-id">${selfId}</span>
+                <span class="node-endpoint">self</span>
+                <div class="cap-meta">${peers.length} peer${peers.length !== 1 ? "s" : ""} in directory</div>
+            </div>
+        `;
+        if (peers.length === 0) {
+            html += '<div class="empty">No peers yet. Use peers/refresh to bootstrap.</div>';
+        }
+        for (const p of peers) {
+            const caps = (p.capabilities || [])
+                .map(c => `<div class="cap"><span class="cap-name">${c.name}</span><div class="cap-desc">${c.description || ""}</div></div>`)
+                .join("");
+            html += `
+                <div class="node">
+                    <span class="node-id">${p.instance_id}</span>
+                    <span class="node-endpoint">${p.endpoint}${p.alias ? " · " + p.alias : ""}</span>
+                    ${caps || '<div class="empty">no cached caps</div>'}
+                </div>
+            `;
+        }
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = `<div class="empty">error: ${e.message}</div>`;
+    }
+}
+
+async function refreshSkills() {
+    const body = document.querySelector('[data-panel="skills"] #skills-body');
+    body.innerHTML = '<div class="empty">loading…</div>';
+    try {
+        const d = await api("GET", "/api/v0/caps");
+        const caps = d.caps || [];
+        let html = `
+            <div class="node self">
+                <span class="node-id">${d.self}</span>
+                <span class="node-endpoint">${d.protocol_version || ""}</span>
+                <div class="cap-meta">${caps.length} skill${caps.length !== 1 ? "s" : ""} registered locally</div>
+            </div>
+        `;
+        if (caps.length === 0) {
+            html += '<div class="empty">No skills registered. Drop a cap.toml in caps/ (manifest mode) or pick a backend.</div>';
+        } else {
+            html += caps.map(renderCapCard).join("");
+        }
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = `<div class="empty">error: ${e.message}</div>`;
+    }
+}
+
+function activateTab(name) {
+    document.querySelectorAll(".sidebar-tabs .tab").forEach(t =>
+        t.classList.toggle("active", t.dataset.tab === name)
+    );
+    document.querySelectorAll(".tab-panel").forEach(p =>
+        p.classList.toggle("hidden", p.dataset.panel !== name)
+    );
+    if (name === "network") refreshNetwork();
+    if (name === "skills") refreshSkills();
+}
+
+document.querySelectorAll(".sidebar-tabs .tab").forEach(t => {
+    t.addEventListener("click", () => activateTab(t.dataset.tab));
+});
+document.getElementById("network-refresh")
+    ?.addEventListener("click", refreshNetwork);
+document.getElementById("skills-refresh")
+    ?.addEventListener("click", refreshSkills);
