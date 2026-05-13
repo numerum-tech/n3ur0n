@@ -42,9 +42,8 @@
         </section>
     </aside>
 
-    <!-- Settings sidebar: swapped in when ⚙ is clicked. Contains its own
-         tab nav (Backends / Caps / Gateways) and an exit button to
-         return to the main sidebar. -->
+    <!-- Settings sidebar: master-detail. Click a section in the list,
+         the main pane swaps to a rich settings page for that section. -->
     <aside class="sidebar hidden" id="sidebar-settings">
         <header class="sidebar-header">
             <div class="header-row">
@@ -53,34 +52,43 @@
                 <span style="width: 28px;"></span>
             </div>
         </header>
-        <nav class="sidebar-tabs" role="tablist">
-            <button class="tab active" data-stab="backends" type="button">Backends</button>
-            <button class="tab" data-stab="caps" type="button">Caps</button>
-            <button class="tab" data-stab="gateways" type="button">Gateways</button>
-        </nav>
-        <section class="tab-panel" data-spanel="backends">
-            <div class="panel-toolbar">
-                <button id="settings-add-backend" type="button" class="primary" style="margin: 0;">+ Backend</button>
-                <button id="settings-refresh-backends" type="button" class="icon-btn" title="Refresh">⟳</button>
-            </div>
-            <div id="settings-backends-stats" class="panel-stats"></div>
-            <ul id="settings-backends-list" class="compact-list"></ul>
-        </section>
-        <section class="tab-panel hidden" data-spanel="caps">
-            <div class="panel-toolbar">
-                <button id="settings-refresh-caps" type="button" class="icon-btn" title="Refresh">⟳</button>
-            </div>
-            <div id="settings-caps-stats" class="panel-stats"></div>
-            <ul id="settings-caps-list" class="compact-list"></ul>
-        </section>
-        <section class="tab-panel hidden" data-spanel="gateways">
-            <div class="panel-toolbar">
-                <button id="settings-add-gateway" type="button" class="primary" style="margin: 0;">+ Gateway</button>
-                <button id="settings-refresh-gateways" type="button" class="icon-btn" title="Refresh">⟳</button>
-            </div>
-            <div id="settings-gateways-stats" class="panel-stats"></div>
-            <ul id="settings-gateways-list" class="compact-list"></ul>
-        </section>
+        <ul id="settings-nav" class="settings-nav">
+            <li class="settings-nav-item active" data-section="backends">
+                <span class="nav-icon">⚡</span>
+                <div class="nav-text">
+                    <span class="nav-title">Backends</span>
+                    <span class="nav-sub">LLMs, MCP servers, HTTP APIs</span>
+                </div>
+            </li>
+            <li class="settings-nav-item" data-section="caps">
+                <span class="nav-icon">✦</span>
+                <div class="nav-text">
+                    <span class="nav-title">Skills</span>
+                    <span class="nav-sub">Capability manifests you publish</span>
+                </div>
+            </li>
+            <li class="settings-nav-item" data-section="gateways">
+                <span class="nav-icon">⇄</span>
+                <div class="nav-text">
+                    <span class="nav-title">Gateways</span>
+                    <span class="nav-sub">Remote n3ur0n peers you trust</span>
+                </div>
+            </li>
+            <li class="settings-nav-item" data-section="identity">
+                <span class="nav-icon">⊙</span>
+                <div class="nav-text">
+                    <span class="nav-title">Identity</span>
+                    <span class="nav-sub">Your instance key</span>
+                </div>
+            </li>
+            <li class="settings-nav-item" data-section="about">
+                <span class="nav-icon">ⓘ</span>
+                <div class="nav-text">
+                    <span class="nav-title">About</span>
+                    <span class="nav-sub">Version, license, links</span>
+                </div>
+            </li>
+        </ul>
     </aside>
 
     <main class="main-pane">
@@ -109,6 +117,19 @@
                 <button id="inspector-close" type="button" class="inspector-close" title="Close">×</button>
             </header>
             <div id="inspector-body" class="inspector-body"></div>
+        </section>
+
+        <!-- Settings page: rendered when the user is in Settings mode and
+             has a section selected. Replaces the chat view. -->
+        <section id="settings-page" class="settings-page hidden" aria-hidden="true">
+            <header class="settings-page-header">
+                <div>
+                    <h2 id="settings-page-title">Settings</h2>
+                    <p id="settings-page-subtitle" class="settings-page-subtitle"></p>
+                </div>
+                <div id="settings-page-actions" class="settings-page-actions"></div>
+            </header>
+            <div id="settings-page-body" class="settings-page-body"></div>
         </section>
     </main>
 

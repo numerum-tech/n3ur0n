@@ -962,87 +962,105 @@ function activateTab(name) {
 }
 
 // ---------------------------------------------------------------------------
-// Settings — swaps the sidebar to a Settings sidebar (Backends / Caps /
-// Gateways) with its own tab nav. Main pane stays free for any form view
-// (backend form, gateway form, future cap composer) opened via inspector.
+// Settings — master/detail: sidebar lists sections, main pane renders the
+// selected section as a rich page (card grids, friendly empty states).
 // ---------------------------------------------------------------------------
 
 function openSettings() {
     document.getElementById("sidebar-main").classList.add("hidden");
     document.getElementById("sidebar-settings").classList.remove("hidden");
     closeInspector();
-    activateSettingsTab("backends");
+    document.getElementById("settings-page").classList.remove("hidden");
+    activateSettingsSection("backends");
 }
 
 function closeSettings() {
     document.getElementById("sidebar-settings").classList.add("hidden");
     document.getElementById("sidebar-main").classList.remove("hidden");
+    document.getElementById("settings-page").classList.add("hidden");
     closeInspector();
 }
 
-function activateSettingsTab(name) {
-    document.querySelectorAll("#sidebar-settings .tab").forEach(t =>
-        t.classList.toggle("active", t.dataset.stab === name)
+function activateSettingsSection(name) {
+    document.querySelectorAll("#settings-nav .settings-nav-item").forEach(el =>
+        el.classList.toggle("active", el.dataset.section === name)
     );
-    document.querySelectorAll("#sidebar-settings .tab-panel").forEach(p =>
-        p.classList.toggle("hidden", p.dataset.spanel !== name)
-    );
-    if (name === "backends") renderBackendsList();
-    if (name === "caps") renderCapsList();
-    if (name === "gateways") renderGatewaysList();
+    const title = document.getElementById("settings-page-title");
+    const sub = document.getElementById("settings-page-subtitle");
+    const actions = document.getElementById("settings-page-actions");
+    const body = document.getElementById("settings-page-body");
+    title.textContent = "";
+    sub.textContent = "";
+    actions.innerHTML = "";
+    body.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div></div>';
+
+    if (name === "backends") {
+        title.textContent = "Backends";
+        sub.textContent = "Where AI calls go. Add a local LLM (Ollama), a cloud API (OpenAI, Anthropic, Mistral), or any OpenAI-compatible endpoint.";
+        actions.innerHTML = `<button class="primary" id="settings-add-backend">+ Add backend</button>`;
+        document.getElementById("settings-add-backend")?.addEventListener("click", openBackendForm);
+        renderBackendsCards();
+    } else if (name === "caps") {
+        title.textContent = "Skills";
+        sub.textContent = "Capabilities (skills) declared in your manifests. They're invokable by this client and can be shared with peers.";
+        renderCapsCards();
+    } else if (name === "gateways") {
+        title.textContent = "Gateways";
+        sub.textContent = "Remote n3ur0n peers you've added. Their skills appear in your catalog.";
+        actions.innerHTML = `<button class="primary" id="settings-add-gateway">+ Add gateway</button>`;
+        document.getElementById("settings-add-gateway")?.addEventListener("click", openGatewayForm);
+        renderGatewaysCards();
+    } else if (name === "identity") {
+        renderIdentityPage();
+    } else if (name === "about") {
+        renderAboutPage();
+    }
 }
+
+const KIND_ICON = {
+    openai_compat: "✦",
+    mcp_server: "⌨",
+    http_base: "↗",
+};
+const KIND_LABEL = {
+    openai_compat: "LLM endpoint",
+    mcp_server: "MCP server",
+    http_base: "HTTP API",
+};
 
 // ---- Backends section ----
 
-async function renderBackendsList() {
-    const list = document.getElementById("settings-backends-list");
-    const stats = document.getElementById("settings-backends-stats");
-    if (!list) return;
-    list.innerHTML = '<li class="empty">loading…</li>';
+async function renderBackendsCards() {
+    const body = document.getElementById("settings-page-body");
     let data;
     try {
         data = await api("GET", "/api/v0/backends");
     } catch (e) {
-        stats.textContent = `error: ${e.message}`;
-        list.innerHTML = '<li class="empty">/api/v0/backends not available (desktop-only)</li>';
+        body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">/api/v0/backends not available</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
         return;
     }
     const backends = data.backends || [];
-    stats.textContent = `${backends.length} backend${backends.length !== 1 ? "s" : ""}`;
     if (backends.length === 0) {
-        list.innerHTML = '<li class="empty">no backends. + Backend to add one.</li>';
+        body.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">⚡</div>
+                <p class="empty-title">No backends yet</p>
+                <p class="empty-body">A backend tells N3UR0N where to send AI calls — your local Ollama, an OpenAI key, an MCP server, or any HTTP API. Add your first one to get started.</p>
+                <button class="primary" id="empty-add-backend">+ Add backend</button>
+            </div>
+        `;
+        document.getElementById("empty-add-backend")?.addEventListener("click", openBackendForm);
         return;
     }
-    list.innerHTML = backends.map(b => {
-        if (b.error) {
-            return `<li class="error-row"><div class="row-main"><span class="name">⚠ malformed</span><span class="row-sub">${escapeHtml(b.error)}</span></div></li>`;
-        }
-        const d = b.details || {};
-        const sub = b.kind === "openai_compat"
-            ? `${escapeHtml(d.base_url || "")} · ${escapeHtml(d.default_model || "")}${d.has_api_key ? " · 🔑" : ""}`
-            : b.kind === "mcp_server"
-                ? `${escapeHtml(d.transport || "")} · ${escapeHtml(d.command || "")}`
-                : b.kind === "http_base"
-                    ? `${escapeHtml(d.base_url || "")}`
-                    : "";
-        return `
-            <li data-backend="${escapeHtml(b.name)}">
-                <div class="row-main">
-                    <span class="name">${escapeHtml(b.name)}</span>
-                    <span class="row-sub">${escapeHtml(b.kind)} · ${sub}</span>
-                </div>
-                <button class="icon-btn" data-action="delete" title="Delete">✕</button>
-            </li>
-        `;
-    }).join("");
-    list.querySelectorAll('li[data-backend] [data-action="delete"]').forEach(btn => {
+    body.innerHTML = `<div class="card-grid">${backends.map(backendCard).join("")}</div>`;
+    body.querySelectorAll('.card [data-action="delete"]').forEach(btn => {
         btn.addEventListener("click", async (e) => {
             e.stopPropagation();
-            const name = btn.closest("li").dataset.backend;
+            const name = btn.closest(".card").dataset.backend;
             if (!window.confirm(`Delete backend "${name}"? Restart required.`)) return;
             try {
                 await api("DELETE", `/api/v0/backends/${encodeURIComponent(name)}`);
-                await renderBackendsList();
+                await renderBackendsCards();
             } catch (err) {
                 window.alert(`delete failed: ${err.message}`);
             }
@@ -1050,95 +1068,224 @@ async function renderBackendsList() {
     });
 }
 
-// ---- Caps section (read-only list; composer TBD) ----
+function backendCard(b) {
+    if (b.error) {
+        return `
+            <article class="card" style="border-color: var(--warn);">
+                <div class="card-head">
+                    <div class="card-icon" style="color: var(--warn);">⚠</div>
+                    <span class="card-title">malformed manifest</span>
+                </div>
+                <div class="card-meta">${escapeHtml(b.error)}</div>
+            </article>
+        `;
+    }
+    const d = b.details || {};
+    const icon = KIND_ICON[b.kind] || "•";
+    const label = KIND_LABEL[b.kind] || b.kind;
+    let meta = "";
+    if (b.kind === "openai_compat") {
+        meta = `
+            <div class="card-meta">
+                model · <code>${escapeHtml(d.default_model || "?")}</code><br>
+                endpoint · <code>${escapeHtml(d.base_url || "?")}</code><br>
+                api key · ${d.has_api_key ? "configured 🔑" : '<span style="color: var(--muted);">none</span>'}
+            </div>`;
+    } else if (b.kind === "mcp_server") {
+        meta = `
+            <div class="card-meta">
+                transport · ${escapeHtml(d.transport || "?")}<br>
+                command · <code>${escapeHtml(d.command || "?")}</code><br>
+                args · ${d.args_count || 0}
+            </div>`;
+    } else if (b.kind === "http_base") {
+        meta = `
+            <div class="card-meta">
+                base · <code>${escapeHtml(d.base_url || "?")}</code><br>
+                headers · ${d.header_count || 0}
+            </div>`;
+    }
+    return `
+        <article class="card" data-backend="${escapeHtml(b.name)}">
+            <div class="card-head">
+                <div class="card-icon">${icon}</div>
+                <span class="card-title">${escapeHtml(b.name)}</span>
+                <span class="card-kind">${escapeHtml(label)}</span>
+            </div>
+            ${meta}
+            <div class="card-actions">
+                <button data-action="delete" class="danger">Delete</button>
+            </div>
+        </article>
+    `;
+}
 
-async function renderCapsList() {
-    const list = document.getElementById("settings-caps-list");
-    const stats = document.getElementById("settings-caps-stats");
-    if (!list) return;
-    list.innerHTML = '<li class="empty">loading…</li>';
+// ---- Skills section (read-only cards; composer TBD) ----
+
+async function renderCapsCards() {
+    const body = document.getElementById("settings-page-body");
     try {
         const d = await api("GET", "/api/v0/caps");
         const caps = d.caps || [];
-        const local = caps.filter(c => c.has_binding);
-        stats.textContent = `${caps.length} declared · ${local.length} manifest · cap composer coming soon`;
         if (caps.length === 0) {
-            list.innerHTML = '<li class="empty">no caps. Drop a cap.toml under <code>caps/</code> in the app config dir.</li>';
+            body.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">✦</div>
+                    <p class="empty-title">No skills yet</p>
+                    <p class="empty-body">A skill is a capability you expose: a translation, a search, a structured chat. Drop a <code>cap.toml</code> in your config dir under <code>caps/</code>. A friendly composer is coming soon.</p>
+                </div>
+            `;
             return;
         }
-        list.innerHTML = caps.map(c => {
-            const badge = c.has_binding ? "M" : "L";
-            const cls = c.has_binding ? "binding" : "legacy";
-            return `
-                <li data-cap="${escapeHtml(c.name)}">
-                    <div class="row-main">
-                        <span class="name">${escapeHtml(c.name)}</span>
-                        <span class="row-sub">v${escapeHtml(c.version || "?")} · ${escapeHtml(c.mode)}</span>
-                    </div>
-                    <span class="row-count ${cls}">${badge}</span>
-                </li>
-            `;
-        }).join("");
-        list.querySelectorAll("li[data-cap]").forEach(li => {
-            li.addEventListener("click", () => openCapInspector(li.dataset.cap));
+        body.innerHTML = `<div class="card-grid">${caps.map(capCard).join("")}</div>`;
+        body.querySelectorAll(".card[data-cap]").forEach(c => {
+            c.addEventListener("click", () => openCapInspector(c.dataset.cap));
         });
     } catch (e) {
-        stats.textContent = `error: ${e.message}`;
-        list.innerHTML = "";
+        body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">load failed</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
     }
 }
 
-// ---- Gateways section (peer endpoints) ----
+function capCard(c) {
+    const label = c.has_binding ? "manifest" : "legacy";
+    return `
+        <article class="card" data-cap="${escapeHtml(c.name)}" style="cursor: pointer;">
+            <div class="card-head">
+                <div class="card-icon">✦</div>
+                <span class="card-title">${escapeHtml(c.name)}</span>
+                <span class="card-kind">${label}</span>
+            </div>
+            <div class="card-meta">
+                v${escapeHtml(c.version || "?")} · ${escapeHtml(c.mode)}
+                ${(c.languages || []).length ? ` · ${escapeHtml(c.languages.join(", "))}` : ""}
+            </div>
+            <div class="card-meta" style="color: var(--text); font-size: 0.84rem; line-height: 1.45;">
+                ${escapeHtml((c.description || "").slice(0, 140))}${(c.description || "").length > 140 ? "…" : ""}
+            </div>
+        </article>
+    `;
+}
 
-async function renderGatewaysList() {
-    const list = document.getElementById("settings-gateways-list");
-    const stats = document.getElementById("settings-gateways-stats");
-    if (!list) return;
-    list.innerHTML = '<li class="empty">loading…</li>';
+// ---- Gateways section ----
+
+async function renderGatewaysCards() {
+    const body = document.getElementById("settings-page-body");
     try {
         const d = await api("GET", "/api/v0/peers");
         const peers = d.peers || [];
-        stats.textContent = `${peers.length} gateway${peers.length !== 1 ? "s" : ""} (peers known to this node)`;
         if (peers.length === 0) {
-            list.innerHTML = '<li class="empty">no gateways yet. + Gateway to add a remote n3ur0n peer endpoint.</li>';
+            body.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">⇄</div>
+                    <p class="empty-title">No gateways yet</p>
+                    <p class="empty-body">A gateway is a remote n3ur0n peer you've connected to. Their published skills will appear in your skills catalog. Add the URL of a peer to start sharing.</p>
+                    <button class="primary" id="empty-add-gateway">+ Add gateway</button>
+                </div>
+            `;
+            document.getElementById("empty-add-gateway")?.addEventListener("click", openGatewayForm);
             return;
         }
-        list.innerHTML = peers.map(p => {
-            const caps = (p.capabilities || []).length;
-            return `
-                <li data-peer="${escapeHtml(p.instance_id)}">
-                    <div class="row-main">
-                        <span class="name">${escapeHtml(shortId(p.instance_id))}</span>
-                        <span class="row-sub">${escapeHtml(p.endpoint)} · ${caps} cap${caps !== 1 ? "s" : ""}</span>
-                    </div>
-                    <button class="icon-btn" data-action="refresh" title="Refresh describe_self">⟳</button>
-                </li>
-            `;
-        }).join("");
-        list.querySelectorAll('li[data-peer] [data-action="refresh"]').forEach(btn => {
+        body.innerHTML = `<div class="card-grid">${peers.map(gatewayCard).join("")}</div>`;
+        body.querySelectorAll(".card[data-peer]").forEach(c => {
+            c.addEventListener("click", () => openPeerInspector(c.dataset.peer));
+        });
+        body.querySelectorAll('.card [data-action="refresh"]').forEach(btn => {
             btn.addEventListener("click", async (e) => {
                 e.stopPropagation();
-                const li = btn.closest("li");
-                const peerId = li.dataset.peer;
+                const card = btn.closest(".card");
+                const peerId = card.dataset.peer;
                 const peer = peers.find(p => p.instance_id === peerId);
                 if (!peer) return;
                 btn.textContent = "…";
                 try {
                     await api("POST", "/api/v0/peers/refresh", { endpoint: peer.endpoint });
-                    await renderGatewaysList();
+                    await renderGatewaysCards();
                 } catch (err) {
                     window.alert(`refresh failed: ${err.message}`);
-                    btn.textContent = "⟳";
+                    btn.textContent = "Refresh";
                 }
             });
         });
-        list.querySelectorAll("li[data-peer]").forEach(li => {
-            li.addEventListener("click", () => openPeerInspector(li.dataset.peer));
-        });
     } catch (e) {
-        stats.textContent = `error: ${e.message}`;
-        list.innerHTML = "";
+        body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">load failed</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
     }
+}
+
+function gatewayCard(p) {
+    const caps = (p.capabilities || []).length;
+    const capNames = (p.capabilities || []).map(c => c.name).slice(0, 4).join(" · ") +
+        (caps > 4 ? ` · +${caps - 4}` : "");
+    return `
+        <article class="card" data-peer="${escapeHtml(p.instance_id)}" style="cursor: pointer;">
+            <div class="card-head">
+                <div class="card-icon">⇄</div>
+                <span class="card-title">${escapeHtml(shortId(p.instance_id))}</span>
+                <span class="card-kind">${caps} skill${caps !== 1 ? "s" : ""}</span>
+            </div>
+            <div class="card-meta">
+                <code>${escapeHtml(p.endpoint)}</code>
+                ${p.alias ? `<br><span style="color:var(--muted);">${escapeHtml(p.alias)}</span>` : ""}
+            </div>
+            ${capNames ? `<div class="card-meta" style="color: var(--text); font-size: 0.78rem;">${escapeHtml(capNames)}</div>` : ""}
+            <div class="card-actions">
+                <button data-action="refresh">Refresh</button>
+            </div>
+        </article>
+    `;
+}
+
+// ---- Identity + About sections ----
+
+async function renderIdentityPage() {
+    const body = document.getElementById("settings-page-body");
+    document.getElementById("settings-page-title").textContent = "Identity";
+    document.getElementById("settings-page-subtitle").textContent =
+        "Your cryptographic identity. Used to sign every call you make. Treat the private key like a password — it lives in the app config dir.";
+    let me = { instance_id: "?" };
+    try { me = await api("GET", "/api/v0/whoami"); } catch { /* ignore */ }
+    body.innerHTML = `
+        <article class="card" style="max-width: 720px;">
+            <div class="card-head">
+                <div class="card-icon">⊙</div>
+                <span class="card-title">Instance ID</span>
+            </div>
+            <div class="card-meta">
+                <code style="word-break: break-all; display: block; padding: 8px;">${escapeHtml(me.instance_id || "?")}</code>
+            </div>
+            <p class="card-meta">
+                Derived from your public key. Anyone receiving a signed call from you sees this id.
+                Keys live in <code>keys.json</code> in your config dir (file mode 0600).
+            </p>
+        </article>
+    `;
+}
+
+function renderAboutPage() {
+    const body = document.getElementById("settings-page-body");
+    document.getElementById("settings-page-title").textContent = "About N3UR0N";
+    document.getElementById("settings-page-subtitle").textContent =
+        "Federated AI gateway. One manifest per skill, signed protocol, optional peer network.";
+    body.innerHTML = `
+        <article class="card" style="max-width: 720px;">
+            <div class="card-head">
+                <div class="card-icon">ⓘ</div>
+                <span class="card-title">N3UR0N desktop</span>
+                <span class="card-kind">v0.3 alpha</span>
+            </div>
+            <div class="card-meta">
+                A consumer client for N3UR0N — connects to local + remote LLMs,
+                MCP servers, HTTP APIs and remote n3ur0n peers under a single
+                Ed25519-signed protocol. Capabilities live as TOML manifests
+                on disk; they can be invoked locally, shared with peers, or
+                consumed from peers.
+            </div>
+            <div class="card-meta">
+                Protocol: <code>n3ur0n/0.3</code><br>
+                License: Apache-2.0 (planned)<br>
+                Source: <code>github.com/&lt;tbd&gt;</code>
+            </div>
+        </article>
+    `;
 }
 
 function openGatewayForm() {
@@ -1234,14 +1381,9 @@ function openBackendForm() {
 
 document.getElementById("settings-open")?.addEventListener("click", openSettings);
 document.getElementById("settings-back")?.addEventListener("click", closeSettings);
-document.querySelectorAll("#sidebar-settings .tab").forEach(t => {
-    t.addEventListener("click", () => activateSettingsTab(t.dataset.stab));
+document.querySelectorAll("#settings-nav .settings-nav-item").forEach(el => {
+    el.addEventListener("click", () => activateSettingsSection(el.dataset.section));
 });
-document.getElementById("settings-add-backend")?.addEventListener("click", openBackendForm);
-document.getElementById("settings-refresh-backends")?.addEventListener("click", renderBackendsList);
-document.getElementById("settings-refresh-caps")?.addEventListener("click", renderCapsList);
-document.getElementById("settings-add-gateway")?.addEventListener("click", openGatewayForm);
-document.getElementById("settings-refresh-gateways")?.addEventListener("click", renderGatewaysList);
 
 document.querySelectorAll(".sidebar-tabs .tab").forEach(t => {
     t.addEventListener("click", () => activateTab(t.dataset.tab));
