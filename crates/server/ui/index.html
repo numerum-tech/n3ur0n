@@ -22,12 +22,20 @@
             <ul id="conv-list" class="conv-list"></ul>
         </section>
         <section class="tab-panel hidden" data-panel="network">
-            <button id="network-refresh" type="button" class="primary">⟳ Refresh</button>
-            <div id="network-body" class="info-body"></div>
+            <div class="panel-toolbar">
+                <input id="network-filter" type="search" class="filter" placeholder="filter peers · id / endpoint / cap…" />
+                <button id="network-refresh" type="button" class="icon-btn" title="Refresh">⟳</button>
+            </div>
+            <div id="network-stats" class="panel-stats"></div>
+            <ul id="network-list" class="compact-list"></ul>
         </section>
         <section class="tab-panel hidden" data-panel="skills">
-            <button id="skills-refresh" type="button" class="primary">⟳ Refresh</button>
-            <div id="skills-body" class="info-body"></div>
+            <div class="panel-toolbar">
+                <input id="skills-filter" type="search" class="filter" placeholder="filter skills · name / tag / lang…" />
+                <button id="skills-refresh" type="button" class="icon-btn" title="Refresh">⟳</button>
+            </div>
+            <div id="skills-stats" class="panel-stats"></div>
+            <ul id="skills-list" class="compact-list"></ul>
         </section>
     </aside>
 
@@ -47,6 +55,16 @@
         <section class="composer">
             <textarea id="prompt" rows="3" placeholder="Type your message and press Enter (Shift+Enter = newline)…" disabled></textarea>
             <button id="send" type="button" disabled>Send</button>
+        </section>
+
+        <!-- Inspector: overlays the chat when a peer or cap is opened from the sidebar. -->
+        <section id="inspector" class="inspector hidden" aria-hidden="true">
+            <header class="inspector-header">
+                <button id="inspector-back" type="button" class="inspector-back" title="Back to chat">←</button>
+                <h2 id="inspector-title">…</h2>
+                <button id="inspector-close" type="button" class="inspector-close" title="Close">×</button>
+            </header>
+            <div id="inspector-body" class="inspector-body"></div>
         </section>
     </main>
 

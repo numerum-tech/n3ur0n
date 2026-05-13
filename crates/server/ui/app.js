@@ -559,8 +559,14 @@ promptEl.addEventListener("keydown", (e) => {
 })();
 
 // ---------------------------------------------------------------------------
-// Sidebar tabs (Chats / Network / Skills)
+// Sidebar tabs (Chats / Network / Skills) + Inspector overlay
 // ---------------------------------------------------------------------------
+//
+// Network + Skills panels show compact 1-line entries with a text filter.
+// Clicking an entry opens an Inspector pane that slides over the chat in
+// the main pane (chat state is preserved underneath). Cross-links: a peer
+// detail lists its caps as chips → click → cap detail; a cap detail lists
+// every peer exposing it → click → peer detail.
 
 function shortId(id) {
     if (!id) return "?";
@@ -568,95 +574,297 @@ function shortId(id) {
     return trimmed.slice(0, 12);
 }
 
-function renderCapCard(cap) {
-    const badge = cap.has_binding === false
-        ? '<span class="badge legacy" title="legacy compile-time backend">legacy</span>'
-        : (cap.has_binding === true ? '<span class="badge binding">manifest</span>' : '');
-    const langs = (cap.languages || []).length
-        ? ` · ${(cap.languages).join(",")}`
-        : "";
-    const countries = (cap.countries || []).length
-        ? ` · ${(cap.countries).join(",")}`
-        : "";
-    const version = cap.version ? `v${cap.version}` : "";
-    const tags = (cap.tags || []).length
-        ? ` · tags: ${cap.tags.join(", ")}`
-        : "";
-    const lobeIds = (cap.lobe_ids || []).length
-        ? ` · lobes: ${cap.lobe_ids.join(", ")}`
-        : "";
-    const examples = (cap.examples || []).map(ex =>
-        `  • "${ex.user_intent}" → ${JSON.stringify(ex.args)}`
-    ).join("\n");
-    return `
-        <div class="cap">
-            <div><span class="cap-name">${cap.name}</span> ${badge}</div>
-            <div class="cap-meta">${version} · mode=${cap.mode}${langs}${countries}${tags}${lobeIds}</div>
-            <div class="cap-desc">${cap.description || ""}</div>
-            ${cap.disambiguation ? `<div class="cap-meta">disambig: ${cap.disambiguation}</div>` : ""}
-            ${examples ? `<details><summary>examples</summary><pre>${examples}</pre></details>` : ""}
-            <details><summary>schema_in</summary><pre>${JSON.stringify(cap.schema_in, null, 2)}</pre></details>
-        </div>
-    `;
+function escapeHtml(s) {
+    if (s === null || s === undefined) return "";
+    return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
 }
 
+// Caches kept in memory so the inspector can cross-link without re-fetching.
+let _peersCache = { self: null, peers: [] };
+let _capsCache = { self: null, caps: [] };
+
 async function refreshNetwork() {
-    const body = document.querySelector('[data-panel="network"] #network-body');
-    body.innerHTML = '<div class="empty">loading…</div>';
     try {
         const d = await api("GET", "/api/v0/peers");
-        const selfId = d.self || "?";
-        const peers = d.peers || [];
-        let html = `
-            <div class="node self">
-                <span class="node-id">${selfId}</span>
-                <span class="node-endpoint">self</span>
-                <div class="cap-meta">${peers.length} peer${peers.length !== 1 ? "s" : ""} in directory</div>
-            </div>
-        `;
-        if (peers.length === 0) {
-            html += '<div class="empty">No peers yet. Use peers/refresh to bootstrap.</div>';
-        }
-        for (const p of peers) {
-            const caps = (p.capabilities || [])
-                .map(c => `<div class="cap"><span class="cap-name">${c.name}</span><div class="cap-desc">${c.description || ""}</div></div>`)
-                .join("");
-            html += `
-                <div class="node">
-                    <span class="node-id">${p.instance_id}</span>
-                    <span class="node-endpoint">${p.endpoint}${p.alias ? " · " + p.alias : ""}</span>
-                    ${caps || '<div class="empty">no cached caps</div>'}
-                </div>
-            `;
-        }
-        body.innerHTML = html;
+        _peersCache = { self: d.self || "?", peers: d.peers || [] };
     } catch (e) {
-        body.innerHTML = `<div class="empty">error: ${e.message}</div>`;
+        _peersCache = { self: "?", peers: [] };
+        document.getElementById("network-stats").textContent = `error: ${e.message}`;
+        document.getElementById("network-list").innerHTML = "";
+        return;
     }
+    renderNetworkList();
+}
+
+function renderNetworkList() {
+    const filter = (document.getElementById("network-filter")?.value || "").toLowerCase();
+    const list = document.getElementById("network-list");
+    const stats = document.getElementById("network-stats");
+    const peers = _peersCache.peers;
+
+    const filtered = peers.filter(p => {
+        if (!filter) return true;
+        const hay = [
+            p.instance_id,
+            p.endpoint,
+            p.alias || "",
+            ...(p.capabilities || []).flatMap(c => [c.name, c.description || ""]),
+        ].join(" ").toLowerCase();
+        return hay.includes(filter);
+    });
+
+    const uniqueCaps = new Set();
+    peers.forEach(p => (p.capabilities || []).forEach(c => uniqueCaps.add(c.name)));
+    stats.textContent = `${peers.length} peers · ${uniqueCaps.size} unique caps · self ${shortId(_peersCache.self)}`;
+
+    let html = "";
+    if (filtered.length === 0) {
+        html = '<li class="empty">no match</li>';
+    } else {
+        html = filtered.map(p => {
+            const caps = (p.capabilities || []).length;
+            const sub = `${p.endpoint}${p.alias ? " · " + p.alias : ""}`;
+            return `
+                <li data-peer="${escapeHtml(p.instance_id)}">
+                    <div class="row-main">
+                        <span class="name">${escapeHtml(shortId(p.instance_id))}</span>
+                        <span class="row-sub">${escapeHtml(sub)}</span>
+                    </div>
+                    <span class="row-count" title="${caps} cap${caps !== 1 ? "s" : ""}">${caps}</span>
+                </li>
+            `;
+        }).join("");
+    }
+    list.innerHTML = html;
+    list.querySelectorAll("li[data-peer]").forEach(li => {
+        li.addEventListener("click", () => openPeerInspector(li.dataset.peer));
+    });
 }
 
 async function refreshSkills() {
-    const body = document.querySelector('[data-panel="skills"] #skills-body');
-    body.innerHTML = '<div class="empty">loading…</div>';
     try {
         const d = await api("GET", "/api/v0/caps");
-        const caps = d.caps || [];
-        let html = `
-            <div class="node self">
-                <span class="node-id">${d.self}</span>
-                <span class="node-endpoint">${d.protocol_version || ""}</span>
-                <div class="cap-meta">${caps.length} skill${caps.length !== 1 ? "s" : ""} registered locally</div>
-            </div>
-        `;
-        if (caps.length === 0) {
-            html += '<div class="empty">No skills registered. Drop a cap.toml in caps/ (manifest mode) or pick a backend.</div>';
-        } else {
-            html += caps.map(renderCapCard).join("");
-        }
-        body.innerHTML = html;
+        _capsCache = { self: d.self || "?", caps: d.caps || [] };
     } catch (e) {
-        body.innerHTML = `<div class="empty">error: ${e.message}</div>`;
+        _capsCache = { self: "?", caps: [] };
+        document.getElementById("skills-stats").textContent = `error: ${e.message}`;
+        document.getElementById("skills-list").innerHTML = "";
+        return;
     }
+    renderSkillsList();
+}
+
+function renderSkillsList() {
+    const filter = (document.getElementById("skills-filter")?.value || "").toLowerCase();
+    const list = document.getElementById("skills-list");
+    const stats = document.getElementById("skills-stats");
+    const caps = _capsCache.caps;
+
+    const filtered = caps.filter(c => {
+        if (!filter) return true;
+        const hay = [
+            c.name,
+            c.description || "",
+            ...(c.tags || []),
+            ...(c.languages || []),
+            ...(c.countries || []),
+        ].join(" ").toLowerCase();
+        return hay.includes(filter);
+    });
+
+    const manifestCount = caps.filter(c => c.has_binding).length;
+    stats.textContent = `${caps.length} skills · ${manifestCount} manifest · ${caps.length - manifestCount} legacy`;
+
+    let html = "";
+    if (filtered.length === 0) {
+        html = '<li class="empty">no match</li>';
+    } else {
+        html = filtered.map(c => {
+            const badge = c.has_binding ? "binding" : "legacy";
+            const sub = [
+                c.version ? `v${c.version}` : "",
+                c.mode,
+                ...(c.languages || []),
+                ...(c.tags || []).slice(0, 3),
+            ].filter(Boolean).join(" · ");
+            return `
+                <li data-cap="${escapeHtml(c.name)}">
+                    <div class="row-main">
+                        <span class="name">${escapeHtml(c.name)}</span>
+                        <span class="row-sub">${escapeHtml(sub)}</span>
+                    </div>
+                    <span class="row-count ${badge}" title="${c.has_binding ? "manifest binding" : "legacy backend"}">${c.has_binding ? "M" : "L"}</span>
+                </li>
+            `;
+        }).join("");
+    }
+    list.innerHTML = html;
+    list.querySelectorAll("li[data-cap]").forEach(li => {
+        li.addEventListener("click", () => openCapInspector(li.dataset.cap));
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Inspector overlay (replaces chat view temporarily)
+// ---------------------------------------------------------------------------
+
+function openInspector(title, html) {
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent = title;
+    document.getElementById("inspector-body").innerHTML = html;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+}
+
+function closeInspector() {
+    const overlay = document.getElementById("inspector");
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+}
+
+function openPeerInspector(peerId) {
+    const peer = _peersCache.peers.find(p => p.instance_id === peerId);
+    if (!peer) {
+        openInspector("Peer not found", `<div class="section">${escapeHtml(peerId)}</div>`);
+        return;
+    }
+    const caps = peer.capabilities || [];
+    const capChips = caps.length
+        ? caps.map(c => `<span class="badge" data-cap="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>`).join("")
+        : '<span class="row-sub">no cached caps</span>';
+
+    const html = `
+        <section class="section">
+            <h3>identity</h3>
+            <dl class="kv">
+                <dt>instance_id</dt><dd><code>${escapeHtml(peer.instance_id)}</code></dd>
+                <dt>endpoint</dt><dd><code>${escapeHtml(peer.endpoint)}</code></dd>
+                <dt>alias</dt><dd>${peer.alias ? escapeHtml(peer.alias) : "<em>none</em>"}</dd>
+            </dl>
+        </section>
+        <section class="section">
+            <h3>capabilities (${caps.length})</h3>
+            <div class="chip-list">${capChips}</div>
+        </section>
+        ${caps.length ? `
+        <section class="section">
+            <h3>cap descriptions (cached)</h3>
+            ${caps.map(c => `
+                <details>
+                    <summary><strong>${escapeHtml(c.name)}</strong></summary>
+                    <p>${escapeHtml(c.description || "")}</p>
+                    <pre>${escapeHtml(JSON.stringify(c.schema_in || {}, null, 2))}</pre>
+                </details>
+            `).join("")}
+        </section>` : ""}
+    `;
+    openInspector(`peer · ${shortId(peer.instance_id)}`, html);
+
+    // Cross-link: clicking a cap chip jumps to the cap inspector if the
+    // cap exists locally (Skills cache). Falls back to a "remote cap"
+    // detail rendered from the cached describe_self entry.
+    document.querySelectorAll("#inspector-body .badge[data-cap]").forEach(b => {
+        b.addEventListener("click", () => {
+            const name = b.dataset.cap;
+            const local = _capsCache.caps.find(c => c.name === name);
+            if (local) {
+                openCapInspector(name);
+            } else {
+                const remote = (peer.capabilities || []).find(c => c.name === name);
+                if (remote) openRemoteCapInspector(remote, peer);
+            }
+        });
+    });
+}
+
+function openCapInspector(capName) {
+    const cap = _capsCache.caps.find(c => c.name === capName);
+    if (!cap) {
+        openInspector("Skill not found", `<div class="section">${escapeHtml(capName)}</div>`);
+        return;
+    }
+    // Find every peer that advertises this cap (rough match on name).
+    const peersWithCap = _peersCache.peers.filter(p =>
+        (p.capabilities || []).some(c => c.name === cap.name)
+    );
+
+    const html = `
+        <section class="section">
+            <h3>${escapeHtml(cap.name)} <span class="row-count ${cap.has_binding ? "binding" : "legacy"}">${cap.has_binding ? "manifest" : "legacy"}</span></h3>
+            <dl class="kv">
+                <dt>version</dt><dd>${escapeHtml(cap.version || "?")}</dd>
+                <dt>mode</dt><dd>${escapeHtml(cap.mode)}</dd>
+                <dt>languages</dt><dd>${(cap.languages || []).join(", ") || "<em>any</em>"}</dd>
+                <dt>countries</dt><dd>${(cap.countries || []).join(", ") || "<em>any</em>"}</dd>
+                <dt>tags</dt><dd>${(cap.tags || []).join(", ") || "<em>none</em>"}</dd>
+                <dt>lobes</dt><dd>${(cap.lobe_ids || []).join(", ") || "<em>none</em>"}</dd>
+            </dl>
+        </section>
+        <section class="section">
+            <h3>description</h3>
+            <p>${escapeHtml(cap.description || "")}</p>
+            ${cap.output_semantic ? `<p><strong>output means:</strong> ${escapeHtml(cap.output_semantic)}</p>` : ""}
+            ${cap.disambiguation ? `<p><strong>disambiguation:</strong> ${escapeHtml(cap.disambiguation)}</p>` : ""}
+        </section>
+        ${(cap.examples || []).length ? `
+        <section class="section">
+            <h3>examples</h3>
+            ${cap.examples.map(ex => `
+                <details>
+                    <summary>"${escapeHtml(ex.user_intent)}"</summary>
+                    <pre>${escapeHtml(JSON.stringify({args: ex.args, expected_output: ex.expected_output}, null, 2))}</pre>
+                </details>
+            `).join("")}
+        </section>` : ""}
+        ${(cap.negative_examples || []).length ? `
+        <section class="section">
+            <h3>do NOT use for</h3>
+            <ul>${cap.negative_examples.map(ne =>
+                `<li><strong>"${escapeHtml(ne.user_intent)}"</strong> — ${escapeHtml(ne.why_not)}</li>`
+            ).join("")}</ul>
+        </section>` : ""}
+        <section class="section">
+            <h3>schemas</h3>
+            <details><summary>schema_in</summary><pre>${escapeHtml(JSON.stringify(cap.schema_in || {}, null, 2))}</pre></details>
+            <details><summary>schema_out</summary><pre>${escapeHtml(JSON.stringify(cap.schema_out || {}, null, 2))}</pre></details>
+        </section>
+        <section class="section">
+            <h3>exposed by ${peersWithCap.length} peer${peersWithCap.length !== 1 ? "s" : ""} (network view)</h3>
+            <div class="chip-list">
+                ${peersWithCap.length
+                    ? peersWithCap.map(p => `<span class="badge" data-peer="${escapeHtml(p.instance_id)}">${escapeHtml(shortId(p.instance_id))}</span>`).join("")
+                    : '<span class="row-sub">no peers cached with this cap</span>'}
+            </div>
+        </section>
+    `;
+    openInspector(`skill · ${cap.name}`, html);
+    document.querySelectorAll("#inspector-body .badge[data-peer]").forEach(b => {
+        b.addEventListener("click", () => openPeerInspector(b.dataset.peer));
+    });
+}
+
+function openRemoteCapInspector(cap, peer) {
+    const html = `
+        <section class="section">
+            <h3>${escapeHtml(cap.name)} <span class="row-count">remote</span></h3>
+            <dl class="kv">
+                <dt>seen on</dt><dd><code>${escapeHtml(peer.instance_id)}</code> · ${escapeHtml(peer.endpoint)}</dd>
+            </dl>
+        </section>
+        <section class="section">
+            <h3>description</h3>
+            <p>${escapeHtml(cap.description || "")}</p>
+        </section>
+        <section class="section">
+            <h3>schema_in (cached)</h3>
+            <pre>${escapeHtml(JSON.stringify(cap.schema_in || {}, null, 2))}</pre>
+        </section>
+    `;
+    openInspector(`skill · ${cap.name} @ ${shortId(peer.instance_id)}`, html);
 }
 
 function activateTab(name) {
@@ -666,6 +874,7 @@ function activateTab(name) {
     document.querySelectorAll(".tab-panel").forEach(p =>
         p.classList.toggle("hidden", p.dataset.panel !== name)
     );
+    if (name === "chats") closeInspector();
     if (name === "network") refreshNetwork();
     if (name === "skills") refreshSkills();
 }
@@ -673,7 +882,12 @@ function activateTab(name) {
 document.querySelectorAll(".sidebar-tabs .tab").forEach(t => {
     t.addEventListener("click", () => activateTab(t.dataset.tab));
 });
-document.getElementById("network-refresh")
-    ?.addEventListener("click", refreshNetwork);
-document.getElementById("skills-refresh")
-    ?.addEventListener("click", refreshSkills);
+document.getElementById("network-refresh")?.addEventListener("click", refreshNetwork);
+document.getElementById("skills-refresh")?.addEventListener("click", refreshSkills);
+document.getElementById("network-filter")?.addEventListener("input", renderNetworkList);
+document.getElementById("skills-filter")?.addEventListener("input", renderSkillsList);
+document.getElementById("inspector-back")?.addEventListener("click", closeInspector);
+document.getElementById("inspector-close")?.addEventListener("click", closeInspector);
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeInspector();
+});
