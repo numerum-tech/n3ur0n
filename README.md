@@ -4,11 +4,11 @@
 
 **A peer-to-peer network for publishing and invoking AI capabilities — no central authority, no vendor lock-in.**
 
-[![CI](https://github.com/n3ur0n/n3ur0n/actions/workflows/ci.yml/badge.svg)](https://github.com/n3ur0n/n3ur0n/actions/workflows/ci.yml)
+[![CI](https://github.com/numerum-tech/n3ur0n/actions/workflows/ci.yml/badge.svg)](https://github.com/numerum-tech/n3ur0n/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 
-[Download](https://n3ur0n.github.io/n3ur0n/) · [Documentation](docs/) · [Architecture](n3ur0n-architecture-v0.md) · [Capability manifests](n3ur0n-capability-manifest-v0.md)
+[Download](https://numerum-tech.github.io/n3ur0n/) · [Documentation](docs/) · [Architecture](n3ur0n-architecture-v0.md) · [Capability manifests](n3ur0n-capability-manifest-v0.md)
 
 </div>
 
@@ -33,7 +33,7 @@ Capabilities are not shipped with the binary. They are **TOML manifests** users 
 
 ### Desktop app
 
-Download the latest installer for your OS from the [releases page](https://github.com/n3ur0n/n3ur0n/releases/latest) or the [project site](https://n3ur0n.github.io/n3ur0n/).
+Download the latest installer for your OS from the [releases page](https://github.com/numerum-tech/n3ur0n/releases/latest) or the [project site](https://numerum-tech.github.io/n3ur0n/).
 
 - **macOS** — `n3ur0n_<version>_universal.dmg`
 - **Windows** — `n3ur0n_<version>_x64-setup.exe`
@@ -46,7 +46,7 @@ On first launch the app auto-detects a local Ollama server and scaffolds a defau
 ```bash
 # Pre-built binary (replace VERSION + ARCH)
 curl -L -o n3ur0n \
-  https://github.com/n3ur0n/n3ur0n/releases/latest/download/n3ur0n-linux-x86_64
+  https://github.com/numerum-tech/n3ur0n/releases/latest/download/n3ur0n-linux-x86_64
 chmod +x n3ur0n
 
 ./n3ur0n init                                    # generate identity + db
@@ -63,7 +63,7 @@ Open `http://localhost:4242/ui/` in a browser.
 docker run -d --name n3ur0n \
   -p 4242:4242 \
   -v n3ur0n_data:/var/lib/n3ur0n \
-  ghcr.io/n3ur0n/n3ur0n:latest
+  ghcr.io/numerum-tech/n3ur0n:latest
 ```
 
 ### Build from source

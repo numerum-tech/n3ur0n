@@ -13,7 +13,7 @@ N3UR0N is pre-1.0. Only the latest tagged release is supported with security fix
 
 **Do not file a public issue.** Use GitHub's private vulnerability reporting:
 
-1. Go to https://github.com/n3ur0n/n3ur0n/security/advisories/new
+1. Go to https://github.com/numerum-tech/n3ur0n/security/advisories/new
 2. Describe the issue with reproduction steps and impact.
 3. Suggest a fix if you have one.
 

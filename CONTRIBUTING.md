@@ -5,7 +5,7 @@ Thanks for your interest. This project is in active development and we welcome p
 ## Before you start
 
 1. Read [`n3ur0n-architecture-v0.md`](n3ur0n-architecture-v0.md) and [`project-tech-stack.md`](project-tech-stack.md). The architecture is opinionated and the choices are firm, not suggestions.
-2. Search existing [issues](https://github.com/n3ur0n/n3ur0n/issues) and [pull requests](https://github.com/n3ur0n/n3ur0n/pulls) before opening a new one.
+2. Search existing [issues](https://github.com/numerum-tech/n3ur0n/issues) and [pull requests](https://github.com/numerum-tech/n3ur0n/pulls) before opening a new one.
 3. For non-trivial changes, open an issue first so we can align on scope before you write code.
 
 ## Hard rules (cannot regress)

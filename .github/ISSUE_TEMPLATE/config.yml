@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/n3ur0n/n3ur0n/security/advisories/new
+    url: https://github.com/numerum-tech/n3ur0n/security/advisories/new
     about: Report a security issue privately. Do not file a public issue.
   - name: Question / discussion
-    url: https://github.com/n3ur0n/n3ur0n/discussions
+    url: https://github.com/numerum-tech/n3ur0n/discussions
     about: Use GitHub Discussions for questions, ideas, and showcase.

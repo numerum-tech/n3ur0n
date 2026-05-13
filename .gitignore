@@ -66,11 +66,6 @@ logs/
 tmp/
 .tmp/
 
-# ---- OpenWolf runtime artifacts (local-only state) ----
-.wolf/daemon.log
-.wolf/token-ledger.json
-.wolf/cron-state.json
-.wolf/suggestions.json
-.wolf/designqc-report.json
-.wolf/designqc-captures/
-.wolf/hooks/_session.json
+# ---- Personal dev tooling (local-only) ----
+.wolf/
+.claude/
