@@ -27,11 +27,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use n3ur0n_adapters::openai::OpenAIConfig;
+use n3ur0n_node::manifest::{load_backend_dir, BackendKind as MfBackendKind};
 use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
-use n3ur0n_server::bootstrap::{self, BackendKind};
+use n3ur0n_server::bootstrap::{self, BackendKind, PlannerKind};
 use n3ur0n_server::http;
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, warn};
 
 const TUI_PROBE_OLLAMA_URL: &str = "http://localhost:11434/v1/models";
 const OLLAMA_BACKEND_NAME: &str = "local_ollama";
@@ -105,6 +107,32 @@ api_key       = ""
     Ok(())
 }
 
+/// Scan `<config>/backends/` and return the first `openai_compat` config
+/// found, materialised as an `OpenAIConfig`. Used to auto-wire the
+/// planner runtime so the chat tab works out of the box when an LLM
+/// endpoint is reachable.
+fn pick_planner_backend(backends_dir: &PathBuf) -> Option<OpenAIConfig> {
+    if !backends_dir.exists() {
+        return None;
+    }
+    for result in load_backend_dir(backends_dir) {
+        let Ok(manifest) = result else { continue };
+        if let MfBackendKind::OpenAICompat(cfg) = manifest.kind {
+            return Some(OpenAIConfig {
+                base_url: cfg.base_url,
+                default_model: cfg.default_model,
+                api_key: if cfg.api_key.is_empty() {
+                    None
+                } else {
+                    Some(cfg.api_key)
+                },
+                description: None,
+            });
+        }
+    }
+    None
+}
+
 async fn start_server() -> Result<u16> {
     let config_dir = app_config_dir();
     std::fs::create_dir_all(&config_dir)
@@ -140,10 +168,39 @@ async fn start_server() -> Result<u16> {
     let port = listener.local_addr()?.port();
 
     let runtime_config = RuntimeConfig::default();
-    // No planner mode auto-wiring in the consumer shell yet: it requires
-    // an OpenAI-compat backend reachable + a chosen model. Skipped for
-    // the prototype; the Settings UI will plumb it once it ships.
-    let runtime: Option<Arc<NodeRuntime>> = None;
+    // Auto-wire the planner runtime when the user has at least one
+    // `openai_compat` backend declared. We pick the FIRST such backend by
+    // load order (deterministic per-filename sort) — heuristic, but it
+    // means "Ollama auto-detected on first launch" → working chat with
+    // zero further config. When no openai_compat backend exists, the
+    // node still runs but the conversation routes return 503.
+    let runtime: Option<Arc<NodeRuntime>> =
+        match pick_planner_backend(&config_dir.join("backends")) {
+            Some(cfg) => {
+                let chosen_model = Some(cfg.default_model.clone());
+                match bootstrap::build_runtime(
+                    node.clone(),
+                    PlannerKind::PlanExec {
+                        backend: cfg,
+                        model_hint: chosen_model,
+                    },
+                    runtime_config,
+                ) {
+                    Ok(rt) => {
+                        info!("planner runtime wired");
+                        Some(Arc::new(rt))
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "planner runtime failed to init; chat tab will return 503");
+                        None
+                    }
+                }
+            }
+            None => {
+                warn!("no openai_compat backend found in backends/; chat tab will return 503 until one is added");
+                None
+            }
+        };
 
     let app = http::app(node, runtime);
     tokio::spawn(async move {
