@@ -427,6 +427,10 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* establish positioning context so the .inspector overlay
+       (position: absolute; inset: 0) is bounded to the main pane
+       and does not cover the sidebar. */
+    position: relative;
 }
 
 .main-header {
