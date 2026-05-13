@@ -2505,6 +2505,7 @@ dependencies = [
  "n3ur0n-node",
  "n3ur0n-storage",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",
