@@ -1,11 +1,17 @@
 //! Runtime n3ur0n node.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use n3ur0n_adapters::Backend;
 use n3ur0n_core::{Keypair, SystemClock, VerifyConfig};
 use n3ur0n_storage::Db;
 
+use crate::backends_registry::BackendsRegistry;
+use crate::bindings::build_binding;
+use crate::error::{NodeError, NodeResult};
+use crate::manifest::load_cap_dir;
 use crate::registry::CapabilityRegistry;
 
 /// Static configuration of a [`Node`].
@@ -28,7 +34,21 @@ pub struct Node {
     pub(crate) keypair: Arc<Keypair>,
     pub(crate) db: Db,
     pub(crate) backend: Arc<dyn Backend>,
-    pub(crate) registry: Arc<CapabilityRegistry>,
+    /// `Arc<ArcSwap<_>>` so the cap registry can be hot-swapped
+    /// (cap.toml CRUD / file-watcher) without a node restart. Readers
+    /// load a snapshot via [`Node::registry()`] which returns an
+    /// `Arc<CapabilityRegistry>`; writers call
+    /// [`Node::reload_caps_from`] to swap atomically.
+    pub(crate) registry: Arc<ArcSwap<CapabilityRegistry>>,
+    /// Manifest-mode backends registry, only set when the node was
+    /// loaded from a `<config>/{backends,caps}/` directory. Used to
+    /// re-bind capability entries when caps reload. `None` in legacy
+    /// compile-time-backend mode.
+    pub(crate) backends: Option<Arc<BackendsRegistry>>,
+    /// Manifest dir (parent of `caps/` and `backends/`). Set when
+    /// running in manifest mode so the cap-reload entry point can scan
+    /// the same directory.
+    pub(crate) manifest_dir: Option<PathBuf>,
     pub(crate) config: NodeConfig,
     pub(crate) clock: Arc<dyn n3ur0n_core::Clock>,
 }
@@ -38,7 +58,8 @@ impl std::fmt::Debug for Node {
         f.debug_struct("Node")
             .field("instance_id", &self.keypair.instance_id())
             .field("config", &self.config)
-            .field("capabilities", &self.registry.len())
+            .field("capabilities", &self.registry.load().len())
+            .field("manifest_dir", &self.manifest_dir)
             .finish()
     }
 }
@@ -57,10 +78,24 @@ impl Node {
             keypair: Arc::new(keypair),
             db,
             backend,
-            registry: Arc::new(registry),
+            registry: Arc::new(ArcSwap::from_pointee(registry)),
+            backends: None,
+            manifest_dir: None,
             config,
             clock: Arc::new(SystemClock),
         }
+    }
+
+    /// Attach a `BackendsRegistry` + manifest dir to enable
+    /// [`Node::reload_caps_from`]. Required for cap hot-reload.
+    pub fn with_manifest_runtime(
+        mut self,
+        backends: Arc<BackendsRegistry>,
+        manifest_dir: PathBuf,
+    ) -> Self {
+        self.backends = Some(backends);
+        self.manifest_dir = Some(manifest_dir);
+        self
     }
 
     /// Override the clock — only useful for tests.
@@ -84,9 +119,67 @@ impl Node {
         &self.config
     }
 
-    /// Borrow the in-memory capability registry.
-    pub fn registry(&self) -> &CapabilityRegistry {
-        &self.registry
+    /// Snapshot the current capability registry. The returned `Arc` is
+    /// detached from the cell — a concurrent reload will not invalidate
+    /// it, but the reader sees a frozen view.
+    pub fn registry(&self) -> Arc<CapabilityRegistry> {
+        self.registry.load_full()
+    }
+
+    /// Re-scan the configured manifest dir's `caps/` subfolder and
+    /// atomically swap the capability registry. Caller MUST have built
+    /// the node with [`Node::with_manifest_runtime`]; otherwise this
+    /// returns an error.
+    ///
+    /// Returns the number of caps successfully registered after reload.
+    pub fn reload_caps_from_manifest_dir(&self) -> NodeResult<usize> {
+        let Some(dir) = self.manifest_dir.as_deref() else {
+            return Err(NodeError::InvalidPayload(
+                "node was not built in manifest mode — cap hot-reload unavailable".into(),
+            ));
+        };
+        let Some(backends) = self.backends.as_ref() else {
+            return Err(NodeError::InvalidPayload(
+                "node has no backends registry — cap hot-reload unavailable".into(),
+            ));
+        };
+        let caps_dir = dir.join("caps");
+        let mut entries: Vec<(n3ur0n_core::CapabilityDecl, Arc<dyn crate::bindings::Binding>)> =
+            Vec::new();
+        for result in load_cap_dir(&caps_dir) {
+            let cap = match result {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, "skipping malformed cap manifest on reload");
+                    continue;
+                }
+            };
+            let Some(backend_instance) = backends.get(cap.binding.backend()) else {
+                tracing::warn!(
+                    cap = %cap.descriptor.name,
+                    backend = %cap.binding.backend(),
+                    "cap references unknown backend on reload; skipping"
+                );
+                continue;
+            };
+            let binding = match build_binding(&cap.binding, backend_instance) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(
+                        cap = %cap.descriptor.name,
+                        error = %e,
+                        "binding construction failed on reload; skipping cap"
+                    );
+                    continue;
+                }
+            };
+            entries.push((cap.descriptor, binding));
+        }
+        let new_registry = CapabilityRegistry::from_entries(entries);
+        let len = new_registry.len();
+        self.registry.store(Arc::new(new_registry));
+        tracing::info!(loaded = len, "cap registry hot-reloaded");
+        Ok(len)
     }
 
     /// Borrow the storage handle.

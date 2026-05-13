@@ -149,9 +149,10 @@ impl PlanExecPlanner {
         // 2. Build catalog — query-aware: local caps always kept, remote
         // caps ranked against the user message via BM25 and trimmed to the
         // top REMOTE_TOP_K. Keeps prompt size bounded as the network grows.
+        let registry_snapshot = node.registry();
         let catalog = Catalog::build_for_query(
             node.instance_id().as_str(),
-            node.registry(),
+            &registry_snapshot,
             node.db(),
             500,
             &user_message,

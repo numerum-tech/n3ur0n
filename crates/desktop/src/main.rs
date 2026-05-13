@@ -215,6 +215,7 @@ async fn start_server() -> Result<u16> {
     // shell access.
     let settings_state = SettingsState {
         config_dir: config_dir.clone(),
+        node: node.clone(),
     };
     let settings_router = Router::new()
         .route("/api/v0/backends", get(list_backends).post(create_backend))
@@ -300,6 +301,9 @@ fn main() {
 #[derive(Clone)]
 struct SettingsState {
     config_dir: PathBuf,
+    /// Live node handle so cap CRUD can trigger a hot-reload of the
+    /// in-memory registry — no app restart needed for skill changes.
+    node: n3ur0n_node::Node,
 }
 
 #[derive(Debug, Deserialize)]
@@ -571,7 +575,17 @@ async fn delete_cap_manifest(
     if let Err(e) = std::fs::remove_file(&target) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
-    Json(json!({"ok": true, "name": name, "requires_restart": true})).into_response()
+    let registered = match state.node.reload_caps_from_manifest_dir() {
+        Ok(n) => n,
+        Err(e) => {
+            warn!(error = %e, "cap reload after delete failed");
+            return settings_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("delete ok but reload failed: {e}"),
+            );
+        }
+    };
+    Json(json!({"ok": true, "name": name, "registered": registered})).into_response()
 }
 
 async fn upsert_cap_manifest(
@@ -614,11 +628,21 @@ async fn upsert_cap_manifest(
     if let Err(e) = std::fs::write(&target, toml_body) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
+    let registered = match state.node.reload_caps_from_manifest_dir() {
+        Ok(n) => n,
+        Err(e) => {
+            warn!(error = %e, "cap reload after upsert failed");
+            return settings_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("saved but reload failed: {e}"),
+            );
+        }
+    };
     Json(json!({
         "ok": true,
         "name": name,
         "path": target.display().to_string(),
-        "requires_restart": true,
+        "registered": registered,
     }))
     .into_response()
 }

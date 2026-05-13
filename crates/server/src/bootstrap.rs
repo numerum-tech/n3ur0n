@@ -70,9 +70,12 @@ pub async fn load_node(
     //     build a binding-less CapabilityRegistry.
     match backend_kind {
         BackendKind::Manifest { dir } => {
-            let registry = load_manifest_registry(&dir).await?;
+            let (registry, backends) = load_manifest_registry(&dir).await?;
             let inert: Arc<dyn Backend> = Arc::new(EchoBackend);
-            Ok(Node::new(kp, db, inert, registry, cfg))
+            // Attach the BackendsRegistry + dir so the node can
+            // hot-reload caps later without a restart.
+            Ok(Node::new(kp, db, inert, registry, cfg)
+                .with_manifest_runtime(Arc::new(backends), dir))
         }
         other => {
             let backend: Arc<dyn Backend> = build_backend(other)?;
@@ -86,8 +89,11 @@ pub async fn load_node(
 /// Scan `<manifest_dir>/backends/` and `<manifest_dir>/caps/`, build a
 /// `BackendsRegistry`, materialise one `Binding` per cap and register it.
 /// Malformed manifests are logged + skipped so one broken file never
-/// takes the whole node down.
-async fn load_manifest_registry(dir: &Path) -> Result<CapabilityRegistry> {
+/// takes the whole node down. Returns `(caps_registry, backends_registry)`
+/// so the caller can attach both to the Node for cap hot-reload.
+async fn load_manifest_registry(
+    dir: &Path,
+) -> Result<(CapabilityRegistry, BackendsRegistry)> {
     let backends_dir = dir.join("backends");
     let caps_dir = dir.join("caps");
 
@@ -145,8 +151,7 @@ async fn load_manifest_registry(dir: &Path) -> Result<CapabilityRegistry> {
         loaded = entries.len(),
         "manifest mode: capabilities registered"
     );
-
-    Ok(CapabilityRegistry::from_entries(entries))
+    Ok((CapabilityRegistry::from_entries(entries), backends))
 }
 
 /// Backend selector resolved from CLI flags / env at startup.

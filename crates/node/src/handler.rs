@@ -203,8 +203,11 @@ async fn invoke(node: &Node, envelope: &Envelope) -> NodeResult<Value> {
     let req: InvokeRequest = serde_json::from_value(envelope.payload.clone())
         .map_err(|e| NodeError::InvalidPayload(format!("invoke: {e}")))?;
 
-    let decl = node
-        .registry()
+    // Hold the registry snapshot for the whole call so the &CapabilityDecl
+    // borrow stays valid even if a concurrent reload swaps the underlying
+    // Arc.
+    let registry = node.registry();
+    let decl = registry
         .get(&req.capability)
         .ok_or_else(|| NodeError::UnknownCapability(req.capability.clone()))?;
 
@@ -220,7 +223,7 @@ async fn invoke(node: &Node, envelope: &Envelope) -> NodeResult<Value> {
     // When the registry carries a binding for this cap (manifest mode),
     // dispatch through it; otherwise fall back to the compile-time
     // backend wired into the Node.
-    let result = if let Some(binding) = node.registry().binding_for(&req.capability) {
+    let result = if let Some(binding) = registry.binding_for(&req.capability) {
         binding.invoke(req.args).await?
     } else {
         node.backend().invoke(&req.capability, req.args).await?

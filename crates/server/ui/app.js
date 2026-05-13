@@ -1159,7 +1159,7 @@ async function renderCapsCards() {
             btn.addEventListener("click", async (e) => {
                 e.stopPropagation();
                 const name = btn.closest(".card").dataset.cap;
-                if (!window.confirm(`Delete skill "${name}"? Restart required.`)) return;
+                if (!window.confirm(`Delete skill "${name}"?`)) return;
                 try {
                     await api("DELETE", `/api/v0/caps/manifests/${encodeURIComponent(name)}`);
                     await renderCapsCards();
@@ -1565,8 +1565,8 @@ async function openCapForm(existingName) {
         };
         status.textContent = "saving…";
         try {
-            await api("POST", "/api/v0/caps/manifests", payload);
-            status.textContent = "saved. restart required.";
+            const r = await api("POST", "/api/v0/caps/manifests", payload);
+            status.textContent = `saved — ${r.registered} skill${r.registered !== 1 ? "s" : ""} active.`;
             await renderCapsCards();
             setTimeout(closeInspector, 700);
         } catch (e) {
