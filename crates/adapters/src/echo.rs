@@ -55,6 +55,9 @@ result; an echo step is redundant filler."
                 },
             ],
             output_semantic: Some("Same JSON object the caller supplied.".into()),
+            version: "0.1.0".into(),
+            languages: vec![],
+            countries: vec![],
         }])
     }
 

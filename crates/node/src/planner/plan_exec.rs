@@ -595,6 +595,9 @@ mod tests {
                 why_not: "use chat cap instead".into(),
             }],
             output_semantic: Some("input string reversed".into()),
+            version: "0.0.0".into(),
+            languages: vec![],
+            countries: vec![],
         }
     }
 

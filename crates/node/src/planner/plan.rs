@@ -849,6 +849,9 @@ mod tests {
                 disambiguation: None,
                 negative_examples: vec![],
                 output_semantic: None,
+                version: "0.0.0".into(),
+                languages: vec![],
+                countries: vec![],
             },
         });
         cat

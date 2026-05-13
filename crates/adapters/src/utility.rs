@@ -115,6 +115,9 @@ for date arithmetic."
 epoch seconds."
                         .into(),
                 ),
+                version: "0.1.0".into(),
+                languages: vec![],
+                countries: vec![],
             },
             CapabilityDecl {
                 name: "random_int".into(),
@@ -167,6 +170,9 @@ use for list shuffling."
                     "A single uniformly-distributed integer drawn from [min, max]."
                         .into(),
                 ),
+                version: "0.1.0".into(),
+                languages: vec![],
+                countries: vec![],
             },
             CapabilityDecl {
                 name: "reverse".into(),
@@ -222,6 +228,9 @@ string; word-order reversal is a different operation not exposed here."
                     "Input string with character order reversed."
                         .into(),
                 ),
+                version: "0.1.0".into(),
+                languages: vec![],
+                countries: vec![],
             },
             CapabilityDecl {
                 name: "string_length".into(),
@@ -271,6 +280,9 @@ words. Use a chat cap or a dedicated word-count cap if available."
                     "Character count and UTF-8 byte count of the input string."
                         .into(),
                 ),
+                version: "0.1.0".into(),
+                languages: vec![],
+                countries: vec![],
             },
         ])
     }

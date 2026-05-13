@@ -86,6 +86,11 @@ futures = { version = "0.3", default-features = false, features = ["std"] }
 # JSON Schema validation (planner args ↔ cap.schema_in)
 jsonschema = { version = "0.18", default-features = false }
 
+# Capability manifests (v0.3)
+toml = "0.8"
+semver = { version = "1", features = ["serde"] }
+serde_json_path = "0.7"
+
 # Internal
 n3ur0n-core = { path = "crates/core" }
 n3ur0n-storage = { path = "crates/storage" }

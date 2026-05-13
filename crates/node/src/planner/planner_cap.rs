@@ -128,6 +128,9 @@ answers."
                     .into(),
             }],
             output_semantic: Some("Typed Plan ready for a deterministic executor.".into()),
+            version: "0.1.0".into(),
+            languages: vec![],
+            countries: vec![],
         }])
     }
 

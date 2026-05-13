@@ -16,10 +16,16 @@ pub enum AccessMode {
 /// Wire-level capability declaration.
 ///
 /// v0.1.1 adds planner-oriented metadata (`examples`, `disambiguation`,
-/// `negative_examples`, `output_semantic`). All new fields default to
-/// empty/None so older publishers (v0.1.0) deserialize without breaking;
-/// the planner side enforces `examples.len() >= 1` for *its own* catalog
-/// inclusion in v0.2.
+/// `negative_examples`, `output_semantic`).
+///
+/// v0.2 (protocol "n3ur0n/0.2") adds publisher versioning + localisation:
+/// `version` (semver, mandatory for new publishers; defaults to "0.0.0"
+/// for backward compat when receiving from legacy peers), plus optional
+/// `languages` (BCP 47) and `countries` (ISO 3166-1 alpha-2) lists.
+///
+/// All new fields default to empty/None so older publishers deserialize
+/// without breaking; the planner side enforces `examples.len() >= 1` for
+/// its own catalog inclusion in v0.2.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CapabilityDecl {
     /// Capability name, unique within the instance.
@@ -61,6 +67,25 @@ pub struct CapabilityDecl {
     /// reply without hallucinating semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_semantic: Option<String>,
+
+    // ---- v0.2 publisher metadata -----------------------------------------
+    /// Semver of the capability content itself (independent of
+    /// `PROTOCOL_VERSION`). Lets consumers detect when a publisher updates
+    /// a cap. Default `"0.0.0"` for legacy peers that omit the field.
+    #[serde(default = "default_cap_version")]
+    pub version: String,
+    /// BCP 47 language tags the cap operates in (e.g. `["fr", "en"]`).
+    /// Empty list = language-agnostic.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
+    /// ISO 3166-1 alpha-2 country codes the cap is meaningful or
+    /// available in (e.g. `["FR", "BE"]`). Empty list = unrestricted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub countries: Vec<String>,
+}
+
+fn default_cap_version() -> String {
+    "0.0.0".to_string()
 }
 
 /// One canonical example of how to call a capability.

@@ -266,6 +266,9 @@ and exact; do not delegate trivial string ops to a chat model."
 finish reason; the meaningful payload is `message.content`."
                     .into(),
             ),
+            version: "0.1.0".into(),
+            languages: vec![],
+            countries: vec![],
         }])
     }
 
