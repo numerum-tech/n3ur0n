@@ -23,3 +23,7 @@ keys.json
 .wolf/designqc-report.json
 .wolf/designqc-captures/
 .wolf/hooks/_session.json
+
+# Tauri build artefacts (CI emits installers; never check them in)
+crates/desktop/target/
+crates/desktop/gen/schemas/

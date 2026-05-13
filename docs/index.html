@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>N3UR0N — peer-to-peer AI capability network</title>
+<meta name="description" content="N3UR0N is a peer-to-peer protocol for publishing and invoking AI capabilities — no central authority, no vendor lock-in.">
+<meta property="og:title" content="N3UR0N">
+<meta property="og:description" content="Peer-to-peer AI capability network. No central authority. Apache-2.0.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0a0e14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230a0e14'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%2370e3c5'/%3E%3Cpath d='M16 4v6M16 22v6M4 16h6M22 16h6M7 7l4 4M21 21l4 4M7 25l4-4M21 11l4-4' stroke='%2370e3c5' stroke-width='1.5'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="hero">
+  <nav class="topnav">
+    <a class="brand" href="#"><span class="brand-mark"></span> N3UR0N</a>
+    <div class="topnav-links">
+      <a href="#downloads">Download</a>
+      <a href="#how">How it works</a>
+      <a href="https://github.com/n3ur0n/n3ur0n">GitHub</a>
+    </div>
+  </nav>
+
+  <div class="hero-content">
+    <h1>A peer-to-peer network for <span class="accent">AI capabilities</span>.</h1>
+    <p class="tagline">
+      Publish a skill. Invoke a peer's skill. No registry, no broker, no vendor lock-in.
+      Every message is cryptographically signed. Every capability is just a TOML file.
+    </p>
+    <div class="cta-row">
+      <a class="cta primary" href="#downloads">Download N3UR0N</a>
+      <a class="cta ghost" href="https://github.com/n3ur0n/n3ur0n">View on GitHub →</a>
+    </div>
+  </div>
+</header>
+
+<section id="downloads" class="downloads">
+  <h2>Get the desktop app</h2>
+  <p class="section-sub">Auto-detects local Ollama on first launch. Works offline. Apache-2.0.</p>
+
+  <div class="download-grid">
+    <article class="download-card">
+      <div class="dl-icon">🍎</div>
+      <h3>macOS</h3>
+      <p>Universal binary (Apple Silicon + Intel)</p>
+      <a class="cta primary small" data-os="macos"
+         href="https://github.com/n3ur0n/n3ur0n/releases/latest">
+        Download .dmg
+      </a>
+    </article>
+
+    <article class="download-card">
+      <div class="dl-icon">⊞</div>
+      <h3>Windows</h3>
+      <p>x86_64 installer</p>
+      <a class="cta primary small" data-os="windows"
+         href="https://github.com/n3ur0n/n3ur0n/releases/latest">
+        Download .exe
+      </a>
+    </article>
+
+    <article class="download-card">
+      <div class="dl-icon">🐧</div>
+      <h3>Linux</h3>
+      <p>x86_64 AppImage or .deb</p>
+      <a class="cta primary small" data-os="linux"
+         href="https://github.com/n3ur0n/n3ur0n/releases/latest">
+        Download AppImage
+      </a>
+    </article>
+  </div>
+
+  <h2 class="server-h">Run a publisher (server)</h2>
+  <p class="section-sub">Headless binary or Docker. Expose your capabilities to the network.</p>
+
+  <div class="download-grid">
+    <article class="download-card">
+      <div class="dl-icon">▼</div>
+      <h3>Linux x86_64</h3>
+      <p>Standalone binary</p>
+      <a class="cta primary small"
+         href="https://github.com/n3ur0n/n3ur0n/releases/latest/download/n3ur0n-linux-x86_64">
+        Download
+      </a>
+    </article>
+
+    <article class="download-card">
+      <div class="dl-icon">▼</div>
+      <h3>Linux aarch64</h3>
+      <p>ARM64 binary (Raspberry Pi, Graviton)</p>
+      <a class="cta primary small"
+         href="https://github.com/n3ur0n/n3ur0n/releases/latest/download/n3ur0n-linux-aarch64">
+        Download
+      </a>
+    </article>
+
+    <article class="download-card">
+      <div class="dl-icon">🐳</div>
+      <h3>Docker</h3>
+      <p>Multi-arch image on GHCR</p>
+      <pre class="docker-pull"><code>docker pull ghcr.io/n3ur0n/n3ur0n:latest</code></pre>
+    </article>
+  </div>
+
+  <p class="latest-note">
+    Every link points to the <a href="https://github.com/n3ur0n/n3ur0n/releases/latest">latest GitHub release</a>.
+    Looking for an older version? <a href="https://github.com/n3ur0n/n3ur0n/releases">Browse all releases</a>.
+  </p>
+</section>
+
+<section id="how" class="how">
+  <h2>How it works</h2>
+  <div class="how-grid">
+    <div class="how-card">
+      <div class="how-num">1</div>
+      <h3>Run an instance</h3>
+      <p>The desktop app gives you a chat UI and a local backend out of the box. The server binary lets you publish capabilities to peers.</p>
+    </div>
+    <div class="how-card">
+      <div class="how-num">2</div>
+      <h3>Author capabilities</h3>
+      <p>A capability is a <code>cap.toml</code> file. Point it at a backend (Ollama, OpenAI, MCP server, plain HTTP) and it shows up in your registry.</p>
+    </div>
+    <div class="how-card">
+      <div class="how-num">3</div>
+      <h3>Connect to peers</h3>
+      <p>Add a peer endpoint. The planner discovers their capabilities, picks the right one, signs the call, and routes the result back.</p>
+    </div>
+    <div class="how-card">
+      <div class="how-num">4</div>
+      <h3>No central authority</h3>
+      <p>Identity is <code>n3:</code> + Base32(SHA-256(Ed25519 pubkey)). Every message is signed. Anyone can verify; nobody can revoke.</p>
+    </div>
+  </div>
+</section>
+
+<section class="invariants">
+  <h2>What N3UR0N is not</h2>
+  <ul>
+    <li>Not a model or an inference engine — bring your own backend.</li>
+    <li>Not a new tool-calling format — capabilities are TOML manifests on disk.</li>
+    <li>Not a registry — peer discovery is gossip-based, not curated.</li>
+    <li>Not vendor-tied — Apache-2.0, no telemetry, no required accounts.</li>
+  </ul>
+</section>
+
+<footer>
+  <div class="footer-row">
+    <span>N3UR0N · Apache-2.0 · 2026</span>
+    <span class="footer-links">
+      <a href="https://github.com/n3ur0n/n3ur0n">GitHub</a>
+      <a href="https://github.com/n3ur0n/n3ur0n/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/n3ur0n/n3ur0n/blob/main/SECURITY.md">Security</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+  // Best-effort OS detection: nudges the download buttons toward the
+  // platform-appropriate asset name. Falls back to /releases/latest
+  // when detection is uncertain.
+  (function () {
+    const ua = navigator.userAgent.toLowerCase();
+    const platform = (navigator.platform || "").toLowerCase();
+    const REPO = "https://github.com/n3ur0n/n3ur0n";
+    const LATEST = `${REPO}/releases/latest`;
+
+    let os = null;
+    if (/mac|iphone|ipad|ipod/.test(platform) || ua.includes("mac os")) os = "macos";
+    else if (platform.includes("win") || ua.includes("windows")) os = "windows";
+    else if (platform.includes("linux") || ua.includes("linux")) os = "linux";
+
+    document.querySelectorAll("a.cta[data-os]").forEach(a => {
+      a.href = LATEST;
+      if (os && a.dataset.os === os) a.classList.add("recommended");
+    });
+
+    // Hint banner above download grid when OS is detected.
+    if (os) {
+      const sub = document.querySelector("#downloads .section-sub");
+      if (sub) {
+        const label = { macos: "macOS", windows: "Windows", linux: "Linux" }[os];
+        sub.innerHTML += ` · detected <strong>${label}</strong> — the matching card is highlighted.`;
+      }
+    }
+  })();
+</script>
+</body>
+</html>

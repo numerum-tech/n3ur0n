@@ -1,0 +1,70 @@
+name: Bug report
+description: File a reproducible bug
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Before submitting, please search existing issues.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `n3ur0n serve --port 4242`
+        2. Click '...'
+        3. Observe '...'
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: N3UR0N version
+      description: Output of `n3ur0n --version` or the desktop app's About page.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Profile
+      options:
+        - Desktop app (Tauri)
+        - Headless server (n3ur0n serve)
+        - Docker image
+        - Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS + architecture
+      placeholder: macOS 14.4 (arm64), Ubuntu 22.04 (x86_64), Windows 11, ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Run with `RUST_LOG=debug` if you can. Paste only the relevant section.
+      render: shell
