@@ -6,7 +6,11 @@ FROM rust:1.89-bookworm AS builder
 WORKDIR /work
 
 # Cache deps separately from sources by first copying manifests only.
+# Root Cargo.toml is filtered so the workspace doesn't reference the
+# `crates/desktop` member — desktop pulls in Tauri + system GUI deps
+# we don't need in the publisher image.
 COPY Cargo.toml Cargo.lock ./
+RUN sed -i '/"crates\/desktop"/d' Cargo.toml
 COPY crates/core/Cargo.toml         crates/core/Cargo.toml
 COPY crates/storage/Cargo.toml      crates/storage/Cargo.toml
 COPY crates/adapters/Cargo.toml     crates/adapters/Cargo.toml
@@ -29,6 +33,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Now copy real sources and build the release binary.
 COPY crates ./crates
 COPY frontend ./frontend
+
+# Re-strip the desktop member after the real crates/ tree is copied
+# (the COPY restored the original tree).
+RUN sed -i '/"crates\/desktop"/d' Cargo.toml \
+ && rm -rf crates/desktop
 
 # `--bin n3ur0n` builds only the publisher binary; desktop crate is excluded
 # at the workspace level so we never pull in Tauri here.
