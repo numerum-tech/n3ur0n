@@ -60,6 +60,7 @@ fn signed(
         nonce: Uuid::new_v4().to_string(),
         verb,
         payload,
+        sender_endpoint: None,
     }
     .sign(sender)
     .unwrap()

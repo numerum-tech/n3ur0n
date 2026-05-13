@@ -64,6 +64,7 @@ async fn signed_ping_round_trip() {
         nonce: Uuid::new_v4().to_string(),
         verb: ProtocolVerb::Ping,
         payload: json!({}),
+        sender_endpoint: None,
     };
     let signed = env.sign(&client).unwrap();
 
@@ -90,6 +91,7 @@ async fn tampered_signature_returns_unauthorized() {
         nonce: Uuid::new_v4().to_string(),
         verb: ProtocolVerb::Ping,
         payload: json!({}),
+        sender_endpoint: None,
     }
     .sign(&client)
     .unwrap();
@@ -119,6 +121,7 @@ async fn replay_returns_conflict() {
         nonce: Uuid::new_v4().to_string(),
         verb: ProtocolVerb::Ping,
         payload: json!({}),
+        sender_endpoint: None,
     }
     .sign(&client)
     .unwrap();

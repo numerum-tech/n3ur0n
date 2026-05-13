@@ -329,6 +329,7 @@ async fn api_chat(
         &req.peer_endpoint,
         ProtocolVerb::Invoke,
         payload,
+        state.node.config().endpoint.as_deref(),
     )
     .await
     {
@@ -403,6 +404,7 @@ async fn api_invoke(
         &req.peer_endpoint,
         ProtocolVerb::Invoke,
         payload,
+        state.node.config().endpoint.as_deref(),
     )
     .await
     {

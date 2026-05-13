@@ -76,11 +76,15 @@ services:
     hostname: node-c
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      node-a:
+        condition: service_healthy
     environment:
       N3UR0N_ENDPOINT: http://node-c:4242
       N3UR0N_BACKEND: ollama
       N3UR0N_OPENAI_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       N3UR0N_OPENAI_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+      N3UR0N_BOOTSTRAP_PEERS: http://node-a:4242
       RUST_LOG: info,n3ur0n=debug
     ports:
       - "4244:4242"

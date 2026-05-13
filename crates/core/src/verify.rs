@@ -113,6 +113,7 @@ mod tests {
             nonce: "n".into(),
             verb: ProtocolVerb::Ping,
             payload: json!({}),
+            sender_endpoint: None,
         }
         .sign(kp)
         .unwrap()

@@ -241,6 +241,7 @@ pub fn build_runtime(
                             http: peer_client::http_client(),
                             keypair: node.keypair().clone(),
                             endpoint: endpoint.trim().to_string(),
+                            sender_endpoint: node.config().endpoint.clone(),
                         });
                         tracing::info!(
                             remote_endpoint = %remote.endpoint,

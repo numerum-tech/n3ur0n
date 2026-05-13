@@ -608,6 +608,7 @@ use raw refs only, let the downstream tool combine values)",
         let backend = node.backend().clone();
         let keypair = node.keypair().clone();
         let http_client = http.clone();
+        let our_endpoint = node.config().endpoint.clone();
         let cap_name = tool.cap.name.clone();
         let endpoint = tool.peer_endpoint.clone();
         let sem = step_sem.clone();
@@ -638,6 +639,7 @@ use raw refs only, let the downstream tool combine values)",
                         endpoint.as_deref().unwrap(),
                         ProtocolVerb::Invoke,
                         payload,
+                        our_endpoint.as_deref(),
                     )
                     .await
                     {

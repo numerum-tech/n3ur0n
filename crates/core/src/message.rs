@@ -41,6 +41,17 @@ pub struct Envelope {
     pub verb: ProtocolVerb,
     /// Verb-specific payload.
     pub payload: Value,
+    /// Optional reverse-announce: the URL the sender wants to be reached
+    /// at. Receivers MAY upsert `(sender_id, sender_endpoint)` into their
+    /// peer directory after signature verification, enabling passive
+    /// reverse discovery (when A calls B, B learns A's endpoint).
+    ///
+    /// Signed: yes — included in the JCS bytes covered by the signature.
+    /// The receiver SHOULD treat the endpoint as a *claim* (verify by
+    /// pulling `describe_self` from it and matching the returned id) for
+    /// strong correctness, or simply cache TOFU-style. v0.3 ships TOFU.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_endpoint: Option<String>,
 }
 
 impl Envelope {
@@ -154,6 +165,7 @@ mod tests {
             nonce: "abc123".into(),
             verb: ProtocolVerb::Ping,
             payload,
+            sender_endpoint: None,
         }
     }
 

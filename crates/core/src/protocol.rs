@@ -20,7 +20,7 @@ use crate::identity::InstanceId;
 /// legacy input), plus optional `languages` (BCP 47) and `countries`
 /// (ISO 3166-1 alpha-2) lists. Backwards-compatible at the serde level —
 /// older publishers still validate because every new field has a default.
-pub const PROTOCOL_VERSION: &str = "n3ur0n/0.2";
+pub const PROTOCOL_VERSION: &str = "n3ur0n/0.3";
 
 // ---------------------------------------------------------------------------
 // describe_self

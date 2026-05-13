@@ -43,6 +43,13 @@ pub(crate) struct ServeArgs {
     #[arg(long = "bootstrap", env = "N3UR0N_BOOTSTRAP_PEERS", value_delimiter = ',', num_args = 0..)]
     pub(crate) bootstrap: Vec<String>,
 
+    /// Transitive bootstrap depth. 0 = pull only the seeds themselves
+    /// (legacy v0.2 behaviour). 1 = seeds + their immediate known peers.
+    /// 2 = up to grand-peers (default). Higher values walk further but
+    /// fan-out grows; capped at 100 peers total.
+    #[arg(long = "bootstrap-depth", env = "N3UR0N_BOOTSTRAP_DEPTH", default_value_t = 2)]
+    pub(crate) bootstrap_depth: u32,
+
     /// Backend adapter: `echo` (default) or `openai` (also covers Ollama,
     /// llama.cpp, vLLM, etc.).
     #[arg(long, env = "N3UR0N_BACKEND", default_value = "echo")]
@@ -196,9 +203,11 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
 
     if !bootstrap_peers.is_empty() {
         let bg = node.clone();
+        let depth = args.bootstrap_depth;
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let outcomes = n3ur0n_node::discovery::bootstrap_initial_peers(&bg, &bootstrap_peers).await;
+            let outcomes =
+                n3ur0n_node::discovery::bootstrap_transitive(&bg, &bootstrap_peers, depth).await;
             for o in &outcomes {
                 match (&o.instance_id, &o.error) {
                     (Some(id), _) => tracing::info!(endpoint = %o.endpoint, peer = %id, "bootstrap ok"),
@@ -249,7 +258,8 @@ pub(crate) async fn send(args: SendArgs) -> Result<()> {
         .with_context(|| format!("parsing --payload as JSON: {}", args.payload))?;
 
     let client = peer_client::http_client();
-    let reply = peer_client::send_signed(&client, &kp, &args.endpoint, verb, payload).await?;
+    // CLI `send` does not run a server, so no sender_endpoint to advertise.
+    let reply = peer_client::send_signed(&client, &kp, &args.endpoint, verb, payload, None).await?;
     println!("{}", serde_json::to_string_pretty(&reply.envelope.payload)?);
     Ok(())
 }

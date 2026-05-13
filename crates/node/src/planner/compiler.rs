@@ -149,6 +149,10 @@ pub struct RemotePlanCompiler {
     pub http: HttpClient,
     pub keypair: Keypair,
     pub endpoint: String,
+    /// Our public endpoint, advertised on outbound envelopes so the
+    /// remote planner can call us back / cache us. None = stay
+    /// anonymous (e.g. consumer-only node).
+    pub sender_endpoint: Option<String>,
 }
 
 impl std::fmt::Debug for RemotePlanCompiler {
@@ -190,6 +194,7 @@ impl PlanCompiler for RemotePlanCompiler {
             &self.endpoint,
             ProtocolVerb::Invoke,
             payload,
+            self.sender_endpoint.as_deref(),
         )
         .await
         .map_err(|e| NodeError::InvalidPayload(format!("remote plan invoke: {e}")))?;

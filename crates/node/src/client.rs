@@ -77,12 +77,19 @@ pub async fn discover_recipient(client: &Client, base: &str) -> ClientResult<Ins
 }
 
 /// Sign `verb` + `payload` with `keypair`, POST to `base`, verify the reply.
+///
+/// `sender_endpoint` is the URL at which this caller wants to be reached
+/// (typically `node.config().endpoint`). When set, the receiver learns
+/// our endpoint passively from the signed envelope and can upsert us
+/// into its peer directory (reverse-announce). Pass `None` to remain
+/// anonymous (e.g. CLI `send` without a public endpoint).
 pub async fn send_signed(
     client: &Client,
     keypair: &Keypair,
     base: &str,
     verb: ProtocolVerb,
     payload: Value,
+    sender_endpoint: Option<&str>,
 ) -> ClientResult<SignedMessage> {
     let recipient = discover_recipient(client, base).await?;
     let env = Envelope {
@@ -92,6 +99,7 @@ pub async fn send_signed(
         nonce: Uuid::new_v4().to_string(),
         verb,
         payload,
+        sender_endpoint: sender_endpoint.map(String::from),
     };
     let signed = env.sign(keypair)?;
 
@@ -123,9 +131,18 @@ pub async fn describe_self(
     client: &Client,
     keypair: &Keypair,
     base: &str,
+    sender_endpoint: Option<&str>,
 ) -> ClientResult<DescribeSelfResponse> {
     let payload = serde_json::to_value(DescribeSelfRequest::default())?;
-    let reply = send_signed(client, keypair, base, ProtocolVerb::DescribeSelf, payload).await?;
+    let reply = send_signed(
+        client,
+        keypair,
+        base,
+        ProtocolVerb::DescribeSelf,
+        payload,
+        sender_endpoint,
+    )
+    .await?;
     Ok(serde_json::from_value(reply.envelope.payload)?)
 }
 
@@ -135,8 +152,17 @@ pub async fn get_known_peers(
     keypair: &Keypair,
     base: &str,
     req: GetKnownPeersRequest,
+    sender_endpoint: Option<&str>,
 ) -> ClientResult<GetKnownPeersResponse> {
     let payload = serde_json::to_value(req)?;
-    let reply = send_signed(client, keypair, base, ProtocolVerb::GetKnownPeers, payload).await?;
+    let reply = send_signed(
+        client,
+        keypair,
+        base,
+        ProtocolVerb::GetKnownPeers,
+        payload,
+        sender_endpoint,
+    )
+    .await?;
     Ok(serde_json::from_value(reply.envelope.payload)?)
 }
