@@ -61,6 +61,13 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "N3UR0N_OPENAI_API_KEY", hide_env_values = true)]
     pub(crate) openai_api_key: Option<String>,
 
+    /// v0.3 manifest mode: scan `<dir>/backends/*.toml` and
+    /// `<dir>/caps/*.toml` at startup; each capability carries its own
+    /// binding (prompt / http / mcp). When set, the `--backend` flag is
+    /// ignored.
+    #[arg(long = "manifest-dir", env = "N3UR0N_MANIFEST_DIR")]
+    pub(crate) manifest_dir: Option<PathBuf>,
+
     /// Planner selector. `none` = no planner (manual mode only); `llm` =
     /// LLM-driven planner using the `--planner-llm-*` flags below.
     #[arg(long, env = "N3UR0N_PLANNER_MODE", default_value = "none")]
@@ -168,12 +175,21 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let backend_kind = parse_backend_kind(
-        &args.backend,
-        args.openai_base_url.clone(),
-        args.openai_model.clone(),
-        args.openai_api_key.clone(),
-    )?;
+    // v0.3 manifest mode trumps the compile-time --backend selector.
+    let backend_kind = if let Some(manifest_dir) = args.manifest_dir.clone() {
+        tracing::info!(
+            manifest_dir = %manifest_dir.display(),
+            "manifest mode active; --backend flag ignored"
+        );
+        bootstrap::BackendKind::Manifest { dir: manifest_dir }
+    } else {
+        parse_backend_kind(
+            &args.backend,
+            args.openai_base_url.clone(),
+            args.openai_model.clone(),
+            args.openai_api_key.clone(),
+        )?
+    };
     let node = bootstrap::load_node(&dir, args.endpoint, bootstrap_peers.clone(), backend_kind).await?;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], args.port));
     tracing::info!(instance_id = %node.instance_id(), port = args.port, "starting n3ur0n server");

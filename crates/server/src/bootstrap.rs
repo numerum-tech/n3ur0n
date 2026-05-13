@@ -11,7 +11,10 @@ use n3ur0n_adapters::{
     utility::UtilityBackend,
 };
 use n3ur0n_core::Keypair;
+use n3ur0n_node::backends_registry::BackendsRegistry;
+use n3ur0n_node::bindings::{build_binding, Binding};
 use n3ur0n_node::client as peer_client;
+use n3ur0n_node::manifest::{load_backend_dir, load_cap_dir};
 use n3ur0n_node::planner::compiler::{
     CascadingCompiler, LocalLLMCompiler, PlanCompiler, RemotePlanCompiler,
 };
@@ -51,10 +54,6 @@ pub async fn load_node(
     let db = n3ur0n_storage::open(db_path(config_dir))
         .with_context(|| format!("opening db at {}", db_path(config_dir).display()))?;
 
-    let backend: Arc<dyn Backend> = build_backend(backend_kind)?;
-    let decls = backend.describe().await?;
-    let registry = CapabilityRegistry::from_decls(decls);
-
     let cfg = NodeConfig {
         endpoint,
         alias: None,
@@ -62,7 +61,92 @@ pub async fn load_node(
         ..Default::default()
     };
 
-    Ok(Node::new(kp, db, backend, registry, cfg))
+    // Two paths:
+    //   - manifest mode: scan <config_dir>/{backends,caps}/ and build a
+    //     CapabilityRegistry whose entries each carry a binding. The
+    //     single legacy backend on `Node` is set to an inert EchoBackend
+    //     and never invoked (handler dispatches via the binding).
+    //   - legacy mode: pick one compile-time backend, call describe(),
+    //     build a binding-less CapabilityRegistry.
+    match backend_kind {
+        BackendKind::Manifest { dir } => {
+            let registry = load_manifest_registry(&dir).await?;
+            let inert: Arc<dyn Backend> = Arc::new(EchoBackend);
+            Ok(Node::new(kp, db, inert, registry, cfg))
+        }
+        other => {
+            let backend: Arc<dyn Backend> = build_backend(other)?;
+            let decls = backend.describe().await?;
+            let registry = CapabilityRegistry::from_decls(decls);
+            Ok(Node::new(kp, db, backend, registry, cfg))
+        }
+    }
+}
+
+/// Scan `<manifest_dir>/backends/` and `<manifest_dir>/caps/`, build a
+/// `BackendsRegistry`, materialise one `Binding` per cap and register it.
+/// Malformed manifests are logged + skipped so one broken file never
+/// takes the whole node down.
+async fn load_manifest_registry(dir: &Path) -> Result<CapabilityRegistry> {
+    let backends_dir = dir.join("backends");
+    let caps_dir = dir.join("caps");
+
+    let mut backend_manifests = Vec::new();
+    for result in load_backend_dir(&backends_dir) {
+        match result {
+            Ok(m) => backend_manifests.push(m),
+            Err(e) => tracing::warn!(error = %e, "skipping malformed backend manifest"),
+        }
+    }
+    let backends = BackendsRegistry::from_manifests(backend_manifests)
+        .map_err(|e| anyhow::anyhow!("backends registry: {e}"))?;
+    tracing::info!(
+        backends_dir = %backends_dir.display(),
+        loaded = backends.len(),
+        "manifest mode: backends loaded"
+    );
+
+    let mut entries: Vec<(n3ur0n_core::CapabilityDecl, Arc<dyn Binding>)> = Vec::new();
+    for result in load_cap_dir(&caps_dir) {
+        let cap = match result {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "skipping malformed cap manifest");
+                continue;
+            }
+        };
+        let backend_name = cap.binding.backend().to_string();
+        let backend_instance = match backends.get(&backend_name) {
+            Some(b) => b,
+            None => {
+                tracing::warn!(
+                    cap = %cap.descriptor.name,
+                    backend = %backend_name,
+                    "cap references unknown backend; skipping"
+                );
+                continue;
+            }
+        };
+        let binding = match build_binding(&cap.binding, backend_instance) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(
+                    cap = %cap.descriptor.name,
+                    error = %e,
+                    "binding construction failed; skipping cap"
+                );
+                continue;
+            }
+        };
+        entries.push((cap.descriptor, binding));
+    }
+    tracing::info!(
+        caps_dir = %caps_dir.display(),
+        loaded = entries.len(),
+        "manifest mode: capabilities registered"
+    );
+
+    Ok(CapabilityRegistry::from_entries(entries))
 }
 
 /// Backend selector resolved from CLI flags / env at startup.
@@ -74,6 +158,11 @@ pub enum BackendKind {
     Utility,
     /// OpenAI-compatible chat endpoint (Ollama, llama.cpp, vLLM, OpenAI...).
     OpenAI(OpenAIConfig),
+    /// v0.3: capabilities loaded from `<dir>/{backends,caps}/*.toml` at
+    /// startup. Each cap carries its own binding (prompt / http / mcp).
+    /// The single compile-time backend slot is filled with an inert
+    /// placeholder (EchoBackend) and never invoked.
+    Manifest { dir: PathBuf },
 }
 
 impl Default for BackendKind {
@@ -90,6 +179,9 @@ fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {
             let backend = OpenAIBackend::new(cfg)
                 .map_err(|e| anyhow::anyhow!("openai backend init: {e}"))?;
             Ok(Arc::new(backend))
+        }
+        BackendKind::Manifest { .. } => {
+            anyhow::bail!("build_backend called with Manifest kind; should be handled in load_node")
         }
     }
 }

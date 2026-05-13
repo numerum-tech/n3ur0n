@@ -150,7 +150,15 @@ async fn invoke(node: &Node, envelope: &Envelope) -> NodeResult<Value> {
     }
     // v0.1: subscription token validation is the operator's concern (out-of-band).
 
-    let result = node.backend().invoke(&req.capability, req.args).await?;
+    // v0.3: bindings take precedence over the legacy single-backend path.
+    // When the registry carries a binding for this cap (manifest mode),
+    // dispatch through it; otherwise fall back to the compile-time
+    // backend wired into the Node.
+    let result = if let Some(binding) = node.registry().binding_for(&req.capability) {
+        binding.invoke(req.args).await?
+    } else {
+        node.backend().invoke(&req.capability, req.args).await?
+    };
     let body = InvokeResponse { result };
     Ok(serde_json::to_value(body)?)
 }
