@@ -25,6 +25,7 @@ n3ur0n-server = { workspace = true }
 
 tauri = { version = "2", features = [] }
 axum = { workspace = true }
+semver = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

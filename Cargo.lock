@@ -2441,6 +2441,7 @@ dependencies = [
  "n3ur0n-server",
  "n3ur0n-storage",
  "reqwest 0.12.28",
+ "semver",
  "serde",
  "serde_json",
  "tauri",

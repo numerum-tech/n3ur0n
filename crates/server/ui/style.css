@@ -388,7 +388,37 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
     padding: 6px 8px;
     width: 100%;
 }
-.inspector-body .kv input:focus { outline: none; border-color: var(--accent); }
+.inspector-body .kv input:focus,
+.inspector-body .kv select:focus,
+.inspector-body .form-textarea:focus { outline: none; border-color: var(--accent); }
+
+.inspector-body .kv select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    width: 100%;
+    font: inherit;
+}
+
+.inspector-body .form-textarea {
+    width: 100%;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    resize: vertical;
+    box-sizing: border-box;
+}
+.inspector-body .form-textarea.code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+}
 
 .compact-list li.error-row { border-color: var(--warn); }
 

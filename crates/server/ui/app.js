@@ -1003,6 +1003,8 @@ function activateSettingsSection(name) {
     } else if (name === "caps") {
         title.textContent = "Skills";
         sub.textContent = "Capabilities (skills) declared in your manifests. They're invokable by this client and can be shared with peers.";
+        actions.innerHTML = `<button class="primary" id="settings-add-cap">+ Add skill</button>`;
+        document.getElementById("settings-add-cap")?.addEventListener("click", () => openCapForm(null));
         renderCapsCards();
     } else if (name === "gateways") {
         title.textContent = "Gateways";
@@ -1132,14 +1134,39 @@ async function renderCapsCards() {
                 <div class="empty-state">
                     <div class="empty-icon">✦</div>
                     <p class="empty-title">No skills yet</p>
-                    <p class="empty-body">A skill is a capability you expose: a translation, a search, a structured chat. Drop a <code>cap.toml</code> in your config dir under <code>caps/</code>. A friendly composer is coming soon.</p>
+                    <p class="empty-body">A skill is a capability you expose: a translation, a search, a structured chat. Use the composer to declare your first one.</p>
+                    <button class="primary" id="empty-add-cap">+ Add skill</button>
                 </div>
             `;
+            document.getElementById("empty-add-cap")?.addEventListener("click", () => openCapForm(null));
             return;
         }
         body.innerHTML = `<div class="card-grid">${caps.map(capCard).join("")}</div>`;
         body.querySelectorAll(".card[data-cap]").forEach(c => {
-            c.addEventListener("click", () => openCapInspector(c.dataset.cap));
+            // Card click opens inspector unless the click came from an action button.
+            c.addEventListener("click", (e) => {
+                if (e.target.closest("[data-action]")) return;
+                openCapInspector(c.dataset.cap);
+            });
+        });
+        body.querySelectorAll('.card [data-action="edit"]').forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                openCapForm(btn.closest(".card").dataset.cap);
+            });
+        });
+        body.querySelectorAll('.card [data-action="delete"]').forEach(btn => {
+            btn.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                const name = btn.closest(".card").dataset.cap;
+                if (!window.confirm(`Delete skill "${name}"? Restart required.`)) return;
+                try {
+                    await api("DELETE", `/api/v0/caps/manifests/${encodeURIComponent(name)}`);
+                    await renderCapsCards();
+                } catch (err) {
+                    window.alert(`delete failed: ${err.message}`);
+                }
+            });
         });
     } catch (e) {
         body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">load failed</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
@@ -1148,6 +1175,7 @@ async function renderCapsCards() {
 
 function capCard(c) {
     const label = c.has_binding ? "manifest" : "legacy";
+    const canEdit = c.has_binding; // legacy backend caps can't be edited via cap.toml CRUD
     return `
         <article class="card" data-cap="${escapeHtml(c.name)}" style="cursor: pointer;">
             <div class="card-head">
@@ -1162,6 +1190,11 @@ function capCard(c) {
             <div class="card-meta" style="color: var(--text); font-size: 0.84rem; line-height: 1.45;">
                 ${escapeHtml((c.description || "").slice(0, 140))}${(c.description || "").length > 140 ? "…" : ""}
             </div>
+            ${canEdit ? `
+            <div class="card-actions">
+                <button data-action="edit">Edit</button>
+                <button data-action="delete" class="danger">Delete</button>
+            </div>` : ""}
         </article>
     `;
 }
@@ -1324,6 +1357,226 @@ function openGatewayForm() {
             status.textContent = `failed: ${e.message}`;
         }
     });
+}
+
+async function openCapForm(existingName) {
+    // Fetch backends to populate the dropdown + the existing manifest
+    // (if editing) in parallel.
+    let backends = [];
+    let prefill = null;
+    try {
+        const b = await api("GET", "/api/v0/backends");
+        backends = (b.backends || []).filter(x => !x.error);
+    } catch { /* leave empty */ }
+    if (existingName) {
+        try {
+            const list = await api("GET", "/api/v0/caps");
+            const cap = (list.caps || []).find(c => c.name === existingName);
+            if (cap) {
+                prefill = {
+                    name: cap.name,
+                    version: cap.version || "0.1.0",
+                    description: cap.description || "",
+                    mode: cap.mode || "free",
+                    tags: (cap.tags || []).join(", "),
+                    languages: (cap.languages || []).join(", "),
+                    countries: (cap.countries || []).join(", "),
+                    disambiguation: cap.disambiguation || "",
+                    output_semantic: cap.output_semantic || "",
+                    schema_in: JSON.stringify(cap.schema_in || {}, null, 2),
+                    schema_out: JSON.stringify(cap.schema_out || {}, null, 2),
+                    example_intent: (cap.examples && cap.examples[0]?.user_intent) || "",
+                    example_args: JSON.stringify((cap.examples && cap.examples[0]?.args) || {}, null, 2),
+                    example_output: JSON.stringify((cap.examples && cap.examples[0]?.expected_output) || {}, null, 2),
+                };
+            }
+        } catch { /* ignore */ }
+    }
+    if (!prefill) {
+        prefill = {
+            name: "", version: "0.1.0", description: "", mode: "free",
+            tags: "", languages: "", countries: "",
+            disambiguation: "", output_semantic: "",
+            schema_in: `{
+  "type": "object",
+  "required": ["text"],
+  "properties": { "text": { "type": "string" } }
+}`,
+            schema_out: `{
+  "type": "object",
+  "required": ["result"],
+  "properties": { "result": { "type": "string" } }
+}`,
+            example_intent: "", example_args: '{"text":"hello"}', example_output: '{"result":"…"}',
+        };
+    }
+
+    const backendOptions = backends.length
+        ? backends.map(b => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)} · ${escapeHtml(b.kind)}</option>`).join("")
+        : `<option value="" disabled>no backends — add one first</option>`;
+
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent =
+        existingName ? `Edit skill · ${existingName}` : "Add skill";
+    document.getElementById("inspector-body").innerHTML = `
+        <section class="section">
+            <h3>basics</h3>
+            <form class="kv" onsubmit="return false;">
+                <label for="cf-name">name</label>
+                <input id="cf-name" type="text" required pattern="[a-zA-Z0-9_-]+"
+                       value="${escapeHtml(prefill.name)}"
+                       ${existingName ? "readonly" : ""}
+                       placeholder="translator-fr-en, weather-now, legal-summarizer-fr…" />
+                <label for="cf-version">version</label>
+                <input id="cf-version" type="text" required value="${escapeHtml(prefill.version)}"
+                       placeholder="semver: 0.1.0" />
+                <label for="cf-desc">description</label>
+                <input id="cf-desc" type="text" required value="${escapeHtml(prefill.description)}"
+                       placeholder="One sentence: what does this skill do?" />
+                <label for="cf-mode">access mode</label>
+                <select id="cf-mode">
+                    <option value="free"${prefill.mode === "free" ? " selected" : ""}>free</option>
+                    <option value="restricted"${prefill.mode === "restricted" ? " selected" : ""}>restricted</option>
+                </select>
+                <label for="cf-langs">languages</label>
+                <input id="cf-langs" type="text" value="${escapeHtml(prefill.languages)}"
+                       placeholder="fr, en  (BCP 47, comma-separated)" />
+                <label for="cf-countries">countries</label>
+                <input id="cf-countries" type="text" value="${escapeHtml(prefill.countries)}"
+                       placeholder="FR, BE, CH  (ISO 3166-1 alpha-2)" />
+                <label for="cf-tags">tags</label>
+                <input id="cf-tags" type="text" value="${escapeHtml(prefill.tags)}"
+                       placeholder="translation, language, fr…" />
+            </form>
+        </section>
+        <section class="section">
+            <h3>disambiguation (recommended)</h3>
+            <textarea id="cf-disambig" class="form-textarea" rows="3"
+                      placeholder="When to prefer this skill vs others. When NOT to use it.">${escapeHtml(prefill.disambiguation)}</textarea>
+        </section>
+        <section class="section">
+            <h3>binding · prompt (LLM-backed)</h3>
+            <form class="kv" onsubmit="return false;">
+                <label for="cf-backend">backend</label>
+                <select id="cf-backend" required>${backendOptions}</select>
+                <label for="cf-parser">output parser</label>
+                <select id="cf-parser">
+                    <option value="text">text (returns {text: "..."})</option>
+                    <option value="json">json (parsed, must match schema_out)</option>
+                </select>
+                <label for="cf-temp">temperature</label>
+                <input id="cf-temp" type="number" step="0.1" min="0" max="2" value="0.0" />
+                <label for="cf-model">model override</label>
+                <input id="cf-model" type="text" placeholder="(leave empty to use backend default)" />
+            </form>
+            <label for="cf-sysprompt" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">system prompt (required)</label>
+            <textarea id="cf-sysprompt" class="form-textarea" rows="6"
+                      placeholder="You are a French→English translator. Respond strictly as JSON: {&quot;result&quot;: &quot;...&quot;}."></textarea>
+            <label for="cf-usertpl" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">user template (optional)</label>
+            <textarea id="cf-usertpl" class="form-textarea" rows="3"
+                      placeholder="Translate to English: {{args.text}}"></textarea>
+        </section>
+        <section class="section">
+            <h3>schemas (JSON Schema, draft 7)</h3>
+            <label for="cf-schemain" style="color: var(--muted); font-size: 0.72rem;">schema_in</label>
+            <textarea id="cf-schemain" class="form-textarea code" rows="7">${escapeHtml(prefill.schema_in)}</textarea>
+            <label for="cf-schemaout" style="color: var(--muted); font-size: 0.72rem; margin-top: 10px; display: block;">schema_out</label>
+            <textarea id="cf-schemaout" class="form-textarea code" rows="7">${escapeHtml(prefill.schema_out)}</textarea>
+        </section>
+        <section class="section">
+            <h3>example (at least one required)</h3>
+            <form class="kv" onsubmit="return false;">
+                <label for="cf-ex-intent">user_intent</label>
+                <input id="cf-ex-intent" type="text" value="${escapeHtml(prefill.example_intent)}"
+                       placeholder="translate 'bonjour' to English" />
+            </form>
+            <label for="cf-ex-args" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 8px;">args (JSON)</label>
+            <textarea id="cf-ex-args" class="form-textarea code" rows="3">${escapeHtml(prefill.example_args)}</textarea>
+            <label for="cf-ex-out" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 8px;">expected_output (JSON)</label>
+            <textarea id="cf-ex-out" class="form-textarea code" rows="3">${escapeHtml(prefill.example_output)}</textarea>
+        </section>
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+            <button id="cf-cancel" type="button" class="icon-btn">Cancel</button>
+            <button id="cf-save" type="button" class="primary" style="margin: 0;">${existingName ? "Save changes" : "Create skill"}</button>
+        </div>
+        <div id="cf-status" class="row-sub" style="margin-top: 8px;"></div>
+    `;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+
+    document.getElementById("cf-cancel")?.addEventListener("click", closeInspector);
+    document.getElementById("cf-save")?.addEventListener("click", async () => {
+        const status = document.getElementById("cf-status");
+        const name = document.getElementById("cf-name").value.trim();
+        const version = document.getElementById("cf-version").value.trim();
+        const description = document.getElementById("cf-desc").value.trim();
+        const mode = document.getElementById("cf-mode").value;
+        const languages = csvList(document.getElementById("cf-langs").value);
+        const countries = csvList(document.getElementById("cf-countries").value);
+        const tags = csvList(document.getElementById("cf-tags").value);
+        const disambig = document.getElementById("cf-disambig").value.trim();
+        const backend = document.getElementById("cf-backend").value;
+        const parser = document.getElementById("cf-parser").value;
+        const temperature = parseFloat(document.getElementById("cf-temp").value || "0");
+        const model = document.getElementById("cf-model").value.trim();
+        const systemPrompt = document.getElementById("cf-sysprompt").value.trim();
+        const userTemplate = document.getElementById("cf-usertpl").value;
+
+        if (!name || !version || !description || !backend || !systemPrompt) {
+            status.textContent = "name, version, description, backend, system_prompt are all required";
+            return;
+        }
+
+        let schemaIn, schemaOut, exArgs, exOutput;
+        try {
+            schemaIn = JSON.parse(document.getElementById("cf-schemain").value);
+            schemaOut = JSON.parse(document.getElementById("cf-schemaout").value);
+        } catch (e) {
+            status.textContent = `schemas must be valid JSON: ${e.message}`;
+            return;
+        }
+        try {
+            exArgs = JSON.parse(document.getElementById("cf-ex-args").value);
+            exOutput = JSON.parse(document.getElementById("cf-ex-out").value);
+        } catch (e) {
+            status.textContent = `example args/output must be valid JSON: ${e.message}`;
+            return;
+        }
+        const exIntent = document.getElementById("cf-ex-intent").value.trim();
+        if (!exIntent) { status.textContent = "example user_intent required"; return; }
+
+        const payload = {
+            name, version, description, mode,
+            languages, countries, tags, lobe_ids: [],
+            disambiguation: disambig || null,
+            output_semantic: null,
+            schema_in: schemaIn,
+            schema_out: schemaOut,
+            examples: [{ user_intent: exIntent, args: exArgs, expected_output: exOutput }],
+            binding: {
+                type: "prompt",
+                backend,
+                system_prompt: systemPrompt,
+                user_template: userTemplate.trim() ? userTemplate : null,
+                parameters: temperature ? { temperature } : {},
+                output_parser: parser,
+                model: model || null,
+            },
+        };
+        status.textContent = "saving…";
+        try {
+            await api("POST", "/api/v0/caps/manifests", payload);
+            status.textContent = "saved. restart required.";
+            await renderCapsCards();
+            setTimeout(closeInspector, 700);
+        } catch (e) {
+            status.textContent = `save failed: ${e.message}`;
+        }
+    });
+}
+
+function csvList(s) {
+    return (s || "").split(",").map(x => x.trim()).filter(Boolean);
 }
 
 function openBackendForm() {

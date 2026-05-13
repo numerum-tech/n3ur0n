@@ -219,6 +219,14 @@ async fn start_server() -> Result<u16> {
     let settings_router = Router::new()
         .route("/api/v0/backends", get(list_backends).post(create_backend))
         .route("/api/v0/backends/:name", delete(delete_backend))
+        .route(
+            "/api/v0/caps/manifests",
+            get(list_cap_manifests).post(upsert_cap_manifest),
+        )
+        .route(
+            "/api/v0/caps/manifests/:name",
+            get(get_cap_manifest).delete(delete_cap_manifest),
+        )
         .with_state(settings_state);
 
     let app = http::app(node, runtime).merge(settings_router);
@@ -442,4 +450,331 @@ async fn delete_backend(
         "requires_restart": true,
     }))
     .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Capability manifest CRUD
+// ---------------------------------------------------------------------------
+//
+// The Skills tab needs a richer surface than `/api/v0/caps` (which is the
+// runtime-registry view, stripped of binding details). These endpoints
+// CRUD the raw `caps/*.toml` files: list all manifests, read one's raw
+// TOML, write a new one, delete one. The composer form posts a JSON body
+// describing the cap; the server serialises it to TOML on disk.
+
+#[derive(Debug, Deserialize)]
+struct UpsertCapRequest {
+    name: String,
+    version: String,
+    description: String,
+    #[serde(default = "default_mode")]
+    mode: String,
+    #[serde(default)]
+    languages: Vec<String>,
+    #[serde(default)]
+    countries: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    lobe_ids: Vec<String>,
+    #[serde(default)]
+    disambiguation: Option<String>,
+    #[serde(default)]
+    output_semantic: Option<String>,
+    schema_in: Value,
+    schema_out: Value,
+    examples: Vec<CapExampleReq>,
+    binding: CapBindingReq,
+}
+
+fn default_mode() -> String { "free".into() }
+
+#[derive(Debug, Deserialize)]
+struct CapExampleReq {
+    user_intent: String,
+    args: Value,
+    expected_output: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum CapBindingReq {
+    Prompt {
+        backend: String,
+        system_prompt: String,
+        #[serde(default)]
+        user_template: Option<String>,
+        #[serde(default)]
+        parameters: std::collections::HashMap<String, Value>,
+        #[serde(default = "default_parser")]
+        output_parser: String,
+        #[serde(default)]
+        model: Option<String>,
+    },
+}
+
+fn default_parser() -> String { "text".into() }
+
+async fn list_cap_manifests(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
+    use n3ur0n_node::manifest::load_cap_dir;
+    let dir = state.config_dir.join("caps");
+    let mut out: Vec<Value> = Vec::new();
+    for result in load_cap_dir(&dir) {
+        match result {
+            Ok(m) => out.push(json!({
+                "name": m.descriptor.name,
+                "version": m.descriptor.version,
+                "description": m.descriptor.description,
+                "binding_type": binding_type_str(&m.binding),
+                "binding_backend": m.binding.backend(),
+            })),
+            Err(e) => out.push(json!({"name": null, "error": e.to_string()})),
+        }
+    }
+    Json(json!({ "caps": out, "dir": dir.display().to_string() })).into_response()
+}
+
+fn binding_type_str(spec: &n3ur0n_node::manifest::BindingSpec) -> &'static str {
+    use n3ur0n_node::manifest::BindingSpec as BS;
+    match spec {
+        BS::Prompt { .. } => "prompt",
+        BS::Mcp { .. } => "mcp",
+        BS::Http { .. } => "http",
+    }
+}
+
+async fn get_cap_manifest(
+    AxumState(state): AxumState<SettingsState>,
+    AxumPath(name): AxumPath<String>,
+) -> impl IntoResponse {
+    let target = state.config_dir.join("caps").join(format!("{name}.toml"));
+    if !target.exists() {
+        return settings_error(StatusCode::NOT_FOUND, "cap manifest not found");
+    }
+    match std::fs::read_to_string(&target) {
+        Ok(raw) => Json(json!({"name": name, "toml": raw})).into_response(),
+        Err(e) => settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+async fn delete_cap_manifest(
+    AxumState(state): AxumState<SettingsState>,
+    AxumPath(name): AxumPath<String>,
+) -> impl IntoResponse {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return settings_error(StatusCode::BAD_REQUEST, "invalid name");
+    }
+    let target = state.config_dir.join("caps").join(format!("{name}.toml"));
+    if !target.exists() {
+        return settings_error(StatusCode::NOT_FOUND, "cap manifest not found");
+    }
+    if let Err(e) = std::fs::remove_file(&target) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    Json(json!({"ok": true, "name": name, "requires_restart": true})).into_response()
+}
+
+async fn upsert_cap_manifest(
+    AxumState(state): AxumState<SettingsState>,
+    Json(req): Json<UpsertCapRequest>,
+) -> impl IntoResponse {
+    let name = req.name.trim();
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return settings_error(
+            StatusCode::BAD_REQUEST,
+            "name must be non-empty and match [a-zA-Z0-9_-]",
+        );
+    }
+    if semver::Version::parse(&req.version).is_err() {
+        return settings_error(StatusCode::BAD_REQUEST, "version must be valid semver (e.g. 0.1.0)");
+    }
+    if req.description.trim().is_empty() {
+        return settings_error(StatusCode::BAD_REQUEST, "description is required");
+    }
+    if req.examples.is_empty() {
+        return settings_error(
+            StatusCode::BAD_REQUEST,
+            "at least one example is required (the planner refuses caps with no examples)",
+        );
+    }
+
+    // Build the TOML body explicitly: toml::to_string preserves field
+    // ordering oddly for inline tables — manual emission keeps the file
+    // readable and matches the spec format.
+    let toml_body = match build_cap_toml(name, &req) {
+        Ok(s) => s,
+        Err(e) => return settings_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    };
+
+    let caps_dir = state.config_dir.join("caps");
+    if let Err(e) = std::fs::create_dir_all(&caps_dir) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    let target = caps_dir.join(format!("{name}.toml"));
+    if let Err(e) = std::fs::write(&target, toml_body) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    Json(json!({
+        "ok": true,
+        "name": name,
+        "path": target.display().to_string(),
+        "requires_restart": true,
+    }))
+    .into_response()
+}
+
+/// Render the JSON-shaped request as a cap.toml that the loader will
+/// accept. Done manually (vs `toml::to_string`) so the output stays
+/// readable and ordered like the hand-written examples in the spec.
+fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> {
+    use std::fmt::Write;
+
+    fn json_to_toml_value(v: &Value) -> String {
+        // Re-emit a JSON value as a TOML inline expression. For our use
+        // case (schema fragments, args, expected_output) inline form is
+        // the cleanest match.
+        match v {
+            Value::Null => "\"\"".into(),
+            Value::Bool(b) => b.to_string(),
+            Value::Number(n) => n.to_string(),
+            Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+            Value::Array(arr) => format!(
+                "[{}]",
+                arr.iter().map(json_to_toml_value).collect::<Vec<_>>().join(", ")
+            ),
+            Value::Object(obj) => format!(
+                "{{ {} }}",
+                obj.iter()
+                    .map(|(k, v)| format!("{} = {}", toml_key(k), json_to_toml_value(v)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+    fn toml_key(k: &str) -> String {
+        if k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            k.to_string()
+        } else {
+            format!("\"{}\"", k.replace('"', "\\\""))
+        }
+    }
+    fn toml_str(s: &str) -> String {
+        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+    fn toml_multiline(s: &str) -> String {
+        // Triple-quoted basic string for prompts with newlines.
+        if s.contains('\n') {
+            format!("\"\"\"\n{}\n\"\"\"", s.replace("\"\"\"", "\\\"\\\"\\\""))
+        } else {
+            toml_str(s)
+        }
+    }
+
+    let mut out = String::new();
+    let _ = writeln!(out, "[manifest]");
+    let _ = writeln!(out, "version = \"0.1\"\n");
+    let _ = writeln!(out, "[descriptor]");
+    let _ = writeln!(out, "name = {}", toml_str(name));
+    let _ = writeln!(out, "version = {}", toml_str(&req.version));
+    let _ = writeln!(out, "description = {}", toml_str(&req.description));
+    let _ = writeln!(out, "mode = {}", toml_str(&req.mode));
+    if !req.tags.is_empty() {
+        let _ = writeln!(
+            out,
+            "tags = [{}]",
+            req.tags.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+        );
+    }
+    if !req.lobe_ids.is_empty() {
+        let _ = writeln!(
+            out,
+            "lobe_ids = [{}]",
+            req.lobe_ids.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+        );
+    }
+    if !req.languages.is_empty() {
+        let _ = writeln!(
+            out,
+            "languages = [{}]",
+            req.languages.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+        );
+    }
+    if !req.countries.is_empty() {
+        let _ = writeln!(
+            out,
+            "countries = [{}]",
+            req.countries.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+        );
+    }
+    if let Some(d) = &req.disambiguation {
+        if !d.trim().is_empty() {
+            let _ = writeln!(out, "disambiguation = {}", toml_multiline(d));
+        }
+    }
+    if let Some(o) = &req.output_semantic {
+        if !o.trim().is_empty() {
+            let _ = writeln!(out, "output_semantic = {}", toml_multiline(o));
+        }
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(out, "[descriptor.schema_in]");
+    if let Value::Object(map) = &req.schema_in {
+        for (k, v) in map {
+            let _ = writeln!(out, "{} = {}", toml_key(k), json_to_toml_value(v));
+        }
+    } else {
+        return Err("schema_in must be a JSON object".into());
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(out, "[descriptor.schema_out]");
+    if let Value::Object(map) = &req.schema_out {
+        for (k, v) in map {
+            let _ = writeln!(out, "{} = {}", toml_key(k), json_to_toml_value(v));
+        }
+    } else {
+        return Err("schema_out must be a JSON object".into());
+    }
+
+    for ex in &req.examples {
+        let _ = writeln!(out, "\n[[descriptor.examples]]");
+        let _ = writeln!(out, "user_intent = {}", toml_str(&ex.user_intent));
+        let _ = writeln!(out, "args = {}", json_to_toml_value(&ex.args));
+        let _ = writeln!(out, "expected_output = {}", json_to_toml_value(&ex.expected_output));
+    }
+
+    match &req.binding {
+        CapBindingReq::Prompt {
+            backend,
+            system_prompt,
+            user_template,
+            parameters,
+            output_parser,
+            model,
+        } => {
+            let _ = writeln!(out, "\n[binding]");
+            let _ = writeln!(out, "type = \"prompt\"");
+            let _ = writeln!(out, "backend = {}", toml_str(backend));
+            let _ = writeln!(out, "\n[binding.prompt]");
+            let _ = writeln!(out, "system_prompt = {}", toml_multiline(system_prompt));
+            if let Some(t) = user_template {
+                if !t.trim().is_empty() {
+                    let _ = writeln!(out, "user_template = {}", toml_multiline(t));
+                }
+            }
+            if !parameters.is_empty() {
+                let pairs: Vec<String> = parameters
+                    .iter()
+                    .map(|(k, v)| format!("{} = {}", toml_key(k), json_to_toml_value(v)))
+                    .collect();
+                let _ = writeln!(out, "parameters = {{ {} }}", pairs.join(", "));
+            }
+            let _ = writeln!(out, "output_parser = {}", toml_str(output_parser));
+            if let Some(m) = model {
+                if !m.trim().is_empty() {
+                    let _ = writeln!(out, "model = {}", toml_str(m));
+                }
+            }
+        }
+    }
+    Ok(out)
 }
