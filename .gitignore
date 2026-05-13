@@ -1,21 +1,72 @@
-# Rust
+# ---- Rust ----
 /target/
+**/target/
 **/*.rs.bk
 Cargo.lock.bak
+*.profraw
+coverage/
+tarpaulin-report.*
 
-# Frontend
+# ---- Frontend ----
 frontend/node_modules/
 frontend/.svelte-kit/
 frontend/build/
 frontend/.vite/
-.DS_Store
+node_modules/
+dist/
+out/
 
-# Local config
+# ---- Tauri build artefacts (CI emits installers; never check them in) ----
+crates/desktop/target/
+crates/desktop/gen/schemas/
+crates/desktop/gen/apple/
+crates/desktop/gen/android/
+
+# ---- Local runtime + identity (must NEVER ship) ----
 *.sqlite
 *.sqlite-journal
 keys.json
+.config/
+config/local/
 
-# OpenWolf runtime artifacts
+# ---- Secrets / signing material ----
+.env
+.env.*
+!.env.example
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+*.keystore
+*.mobileprovision
+.tauri-signing-key
+*.tauri-key
+*.tauri-pub
+secrets/
+
+# ---- Editor / OS junk ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.iml
+.vscode/*
+!.vscode/settings.json.example
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+
+# ---- Logs / temp ----
+*.log
+logs/
+tmp/
+.tmp/
+
+# ---- OpenWolf runtime artifacts (local-only state) ----
 .wolf/daemon.log
 .wolf/token-ledger.json
 .wolf/cron-state.json
@@ -23,7 +74,3 @@ keys.json
 .wolf/designqc-report.json
 .wolf/designqc-captures/
 .wolf/hooks/_session.json
-
-# Tauri build artefacts (CI emits installers; never check them in)
-crates/desktop/target/
-crates/desktop/gen/schemas/
