@@ -343,6 +343,27 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
     padding-top: 2px;
 }
 .inspector-body .kv dd { margin: 0; word-break: break-word; }
+.inspector-body .kv input,
+.inspector-body .kv label {
+    font: inherit;
+}
+.inspector-body .kv label {
+    color: var(--muted);
+    font-size: 0.72rem;
+    align-self: center;
+    padding-top: 2px;
+}
+.inspector-body .kv input {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    width: 100%;
+}
+.inspector-body .kv input:focus { outline: none; border-color: var(--accent); }
+
+.compact-list li.error-row { border-color: var(--warn); }
 .inspector-body code, .inspector-body pre {
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }

@@ -27,11 +27,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use axum::extract::{Path as AxumPath, State as AxumState};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::{delete, get};
+use axum::{Json, Router};
 use n3ur0n_adapters::openai::OpenAIConfig;
 use n3ur0n_node::manifest::{load_backend_dir, BackendKind as MfBackendKind};
 use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_server::bootstrap::{self, BackendKind, PlannerKind};
 use n3ur0n_server::http;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
@@ -202,7 +209,19 @@ async fn start_server() -> Result<u16> {
             }
         };
 
-    let app = http::app(node, runtime);
+    // The headless server's router + our desktop-specific Settings
+    // routes merged on the same listener. Settings endpoints CRUD the
+    // manifest files on disk so the UI can configure backends without
+    // shell access.
+    let settings_state = SettingsState {
+        config_dir: config_dir.clone(),
+    };
+    let settings_router = Router::new()
+        .route("/api/v0/backends", get(list_backends).post(create_backend))
+        .route("/api/v0/backends/:name", delete(delete_backend))
+        .with_state(settings_state);
+
+    let app = http::app(node, runtime).merge(settings_router);
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!(error = %e, "embedded server stopped");
@@ -248,4 +267,179 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running n3ur0n desktop");
+}
+
+// ---------------------------------------------------------------------------
+// Settings API — desktop-only routes for manifest CRUD over the local fs.
+// ---------------------------------------------------------------------------
+//
+// Headless deployments use the file system directly (or a config-management
+// tool). The desktop shell exposes a small REST surface so the bundled UI
+// can offer a Settings tab without shell access.
+//
+// Endpoints (all bound to 127.0.0.1 — never accept remote connections):
+//
+//   GET    /api/v0/backends           — list parsed backend manifests
+//   POST   /api/v0/backends           — create/overwrite a backend.toml
+//   DELETE /api/v0/backends/:name     — remove a backend.toml
+//
+// CRUD operations write directly to `<config>/backends/<name>.toml`. A
+// background watcher (Phase 4 of the manifest plan) will pick up the
+// change and re-load the registry; until then the desktop app must be
+// restarted for changes to take effect (we expose a `requires_restart`
+// flag in responses so the UI can warn the user).
+
+#[derive(Clone)]
+struct SettingsState {
+    config_dir: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateBackendRequest {
+    name: String,
+    kind: String,
+    base_url: Option<String>,
+    default_model: Option<String>,
+    api_key: Option<String>,
+}
+
+fn settings_error(status: StatusCode, message: &str) -> axum::response::Response {
+    (status, Json(json!({"error": message}))).into_response()
+}
+
+async fn list_backends(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
+    let dir = state.config_dir.join("backends");
+    let mut out: Vec<Value> = Vec::new();
+    for result in load_backend_dir(&dir) {
+        match result {
+            Ok(m) => {
+                let (kind, details) = match &m.kind {
+                    MfBackendKind::OpenAICompat(cfg) => (
+                        "openai_compat",
+                        json!({
+                            "base_url": cfg.base_url,
+                            "default_model": cfg.default_model,
+                            "has_api_key": !cfg.api_key.is_empty(),
+                        }),
+                    ),
+                    MfBackendKind::McpServer(cfg) => (
+                        "mcp_server",
+                        json!({
+                            "transport": format!("{:?}", cfg.transport).to_lowercase(),
+                            "command": cfg.command,
+                            "args_count": cfg.args.len(),
+                        }),
+                    ),
+                    MfBackendKind::HttpBase(cfg) => (
+                        "http_base",
+                        json!({
+                            "base_url": cfg.base_url,
+                            "header_count": cfg.headers.len(),
+                        }),
+                    ),
+                };
+                out.push(json!({
+                    "name": m.name,
+                    "kind": kind,
+                    "details": details,
+                }));
+            }
+            Err(e) => {
+                out.push(json!({
+                    "name": null,
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+    Json(json!({
+        "backends": out,
+        "dir": dir.display().to_string(),
+    }))
+    .into_response()
+}
+
+async fn create_backend(
+    AxumState(state): AxumState<SettingsState>,
+    Json(req): Json<CreateBackendRequest>,
+) -> impl IntoResponse {
+    let name = req.name.trim();
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return settings_error(
+            StatusCode::BAD_REQUEST,
+            "name must be non-empty and match [a-zA-Z0-9_-]",
+        );
+    }
+    if req.kind != "openai_compat" {
+        return settings_error(
+            StatusCode::BAD_REQUEST,
+            "v0.3.0 Settings UI only supports kind=openai_compat; edit TOML directly for mcp_server/http_base",
+        );
+    }
+    let Some(base_url) = req.base_url else {
+        return settings_error(StatusCode::BAD_REQUEST, "base_url required for openai_compat");
+    };
+    let Some(default_model) = req.default_model else {
+        return settings_error(
+            StatusCode::BAD_REQUEST,
+            "default_model required for openai_compat",
+        );
+    };
+    let api_key = req.api_key.unwrap_or_default();
+
+    let backends_dir = state.config_dir.join("backends");
+    if let Err(e) = std::fs::create_dir_all(&backends_dir) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    let target = backends_dir.join(format!("{name}.toml"));
+    let body = format!(
+        r#"[manifest]
+version = "0.1"
+
+[backend]
+name = "{name}"
+kind = "openai_compat"
+
+[openai_compat]
+base_url      = "{base_url}"
+default_model = "{default_model}"
+api_key       = "{api_key}"
+"#,
+        name = name,
+        base_url = base_url.replace('"', "\\\""),
+        default_model = default_model.replace('"', "\\\""),
+        api_key = api_key.replace('"', "\\\""),
+    );
+    if let Err(e) = std::fs::write(&target, body) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    Json(json!({
+        "ok": true,
+        "name": name,
+        "path": target.display().to_string(),
+        "requires_restart": true,
+    }))
+    .into_response()
+}
+
+async fn delete_backend(
+    AxumState(state): AxumState<SettingsState>,
+    AxumPath(name): AxumPath<String>,
+) -> impl IntoResponse {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return settings_error(StatusCode::BAD_REQUEST, "invalid name");
+    }
+    let target = state.config_dir.join("backends").join(format!("{name}.toml"));
+    if !target.exists() {
+        return settings_error(StatusCode::NOT_FOUND, "backend manifest not found");
+    }
+    if let Err(e) = std::fs::remove_file(&target) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    Json(json!({
+        "ok": true,
+        "name": name,
+        "requires_restart": true,
+    }))
+    .into_response()
 }

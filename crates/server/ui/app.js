@@ -959,7 +959,124 @@ function activateTab(name) {
     if (name === "chats") closeInspector();
     if (name === "network") refreshNetwork();
     if (name === "skills") refreshSkills();
+    if (name === "settings") refreshSettings();
 }
+
+// ---------------------------------------------------------------------------
+// Settings tab — backend manifests CRUD
+// ---------------------------------------------------------------------------
+
+async function refreshSettings() {
+    const list = document.getElementById("settings-list");
+    const stats = document.getElementById("settings-stats");
+    if (!list) return;
+    list.innerHTML = '<li class="empty">loading…</li>';
+    let data;
+    try {
+        data = await api("GET", "/api/v0/backends");
+    } catch (e) {
+        stats.textContent = `error: ${e.message}`;
+        list.innerHTML = '<li class="empty">/api/v0/backends not available on this node (desktop-only endpoint)</li>';
+        return;
+    }
+    const backends = data.backends || [];
+    stats.textContent = `${backends.length} backend${backends.length !== 1 ? "s" : ""} in ${data.dir || "?"}`;
+    if (backends.length === 0) {
+        list.innerHTML = '<li class="empty">no backends. + Backend to add one.</li>';
+        return;
+    }
+    list.innerHTML = backends.map(b => {
+        if (b.error) {
+            return `<li class="error-row"><div class="row-main"><span class="name">⚠ malformed</span><span class="row-sub">${escapeHtml(b.error)}</span></div></li>`;
+        }
+        const d = b.details || {};
+        const sub = b.kind === "openai_compat"
+            ? `${escapeHtml(d.base_url || "")} · ${escapeHtml(d.default_model || "")}${d.has_api_key ? " · 🔑" : ""}`
+            : b.kind === "mcp_server"
+                ? `${escapeHtml(d.transport || "")} · ${escapeHtml(d.command || "")}`
+                : b.kind === "http_base"
+                    ? `${escapeHtml(d.base_url || "")}`
+                    : "";
+        return `
+            <li data-backend="${escapeHtml(b.name)}">
+                <div class="row-main">
+                    <span class="name">${escapeHtml(b.name)}</span>
+                    <span class="row-sub">${escapeHtml(b.kind)} · ${sub}</span>
+                </div>
+                <button class="icon-btn" data-action="delete" title="Delete">✕</button>
+            </li>
+        `;
+    }).join("");
+    list.querySelectorAll('li[data-backend] [data-action="delete"]').forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const name = btn.closest("li").dataset.backend;
+            if (!window.confirm(`Delete backend "${name}"? Restart required to take effect.`)) return;
+            try {
+                await api("DELETE", `/api/v0/backends/${encodeURIComponent(name)}`);
+                await refreshSettings();
+            } catch (err) {
+                window.alert(`delete failed: ${err.message}`);
+            }
+        });
+    });
+}
+
+function openBackendForm() {
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent = "Add backend (openai_compat)";
+    document.getElementById("inspector-body").innerHTML = `
+        <section class="section">
+            <p>Declare an OpenAI-compatible backend (Ollama, llama.cpp, vLLM, OpenAI, etc).
+            The file is written to <code>backends/&lt;name&gt;.toml</code> in your config dir.
+            A <strong>restart is required</strong> for it to be picked up by the runtime.</p>
+            <form id="backend-form" class="kv" onsubmit="return false;">
+                <label for="bf-name">name</label>
+                <input id="bf-name" type="text" required pattern="[a-zA-Z0-9_-]+" placeholder="e.g. openai_main, llama_cpp_local" />
+                <label for="bf-base">base_url</label>
+                <input id="bf-base" type="url" required placeholder="https://api.openai.com or http://localhost:11434" />
+                <label for="bf-model">default_model</label>
+                <input id="bf-model" type="text" required placeholder="gpt-4o-mini · llama3.1:8b · …" />
+                <label for="bf-key">api_key</label>
+                <input id="bf-key" type="password" placeholder="(leave empty for Ollama / local endpoints)" />
+            </form>
+            <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
+                <button id="bf-cancel" type="button" class="icon-btn">Cancel</button>
+                <button id="bf-save" type="button" class="primary" style="margin: 0;">Save</button>
+            </div>
+            <div id="bf-status" class="row-sub" style="margin-top: 8px;"></div>
+        </section>
+    `;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.getElementById("bf-cancel")?.addEventListener("click", closeInspector);
+    document.getElementById("bf-save")?.addEventListener("click", async () => {
+        const name = document.getElementById("bf-name").value.trim();
+        const base = document.getElementById("bf-base").value.trim();
+        const model = document.getElementById("bf-model").value.trim();
+        const key = document.getElementById("bf-key").value;
+        const status = document.getElementById("bf-status");
+        if (!name || !base || !model) {
+            status.textContent = "name, base_url, default_model are all required";
+            return;
+        }
+        status.textContent = "saving…";
+        try {
+            await api("POST", "/api/v0/backends", {
+                name, kind: "openai_compat",
+                base_url: base, default_model: model, api_key: key,
+            });
+            status.textContent = "saved. restart required.";
+            await refreshSettings();
+            setTimeout(closeInspector, 600);
+        } catch (e) {
+            status.textContent = `save failed: ${e.message}`;
+        }
+    });
+}
+
+document.getElementById("settings-refresh")?.addEventListener("click", refreshSettings);
+document.getElementById("settings-add")?.addEventListener("click", openBackendForm);
 
 document.querySelectorAll(".sidebar-tabs .tab").forEach(t => {
     t.addEventListener("click", () => activateTab(t.dataset.tab));
