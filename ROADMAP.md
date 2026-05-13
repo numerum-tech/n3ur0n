@@ -69,7 +69,65 @@ See [CHANGELOG.md](CHANGELOG.md) for what has shipped.
 - HITL approval gate before sensitive `invoke` execution
 - Brand-handle resolution semantics (`@google`, `@adobe` — legal review first)
 - Anti-free-riding signal for community lobes
-- Public bootstrap registry (governance TBD)
+- **Registry-as-capability** (see reflection below)
+
+---
+
+## Reflection — registry as a capability
+
+**Premise.** The spec rejects a central registry. But "discover a capability"
+is itself a useful operation, and the network needs *some* answer to
+"where can I find a French→English translator I haven't seen before?".
+
+**Proposal.** Don't bake a registry into the protocol. Expose registries
+as ordinary capabilities, invoked through the same signed `invoke` verb
+that any other capability uses. A registry is just a peer that publishes
+caps like:
+
+```
+[descriptor]
+name        = "registry.search"
+description = "Search a capability index by name, tag, language, country."
+schema_in   = { query: string, tags?: [string], languages?: [string], limit?: int }
+schema_out  = { results: [{ instance_id, endpoint, cap_name, score }] }
+```
+
+```
+[descriptor]
+name        = "registry.announce"
+description = "Submit this peer's describe_self for indexing."
+schema_in   = { describe_self: object, signature: string }
+schema_out  = { accepted: bool, ttl_seconds: int }
+```
+
+**What this buys.**
+- Zero protocol delta. Four verbs, same envelope, same signature path.
+  A "registry" is a peer with a few opinionated caps.
+- Pluggable trust. Each user picks which registry peers they trust the
+  way they pick which gateways to bootstrap from. Operate without one
+  works fine — peer gossip remains the default.
+- Competing registries are natural. A privacy-focused registry can
+  expose `registry.search` over Tor; a curated lobe registry can refuse
+  to index uncertified caps; a search engine can aggregate from
+  multiple registry peers.
+- Same signing + auditability story as everything else. No new
+  authentication surface, no new attack class.
+
+**Open questions before commit.**
+- Reserved name prefix (`registry.*`?) or pure convention? Reserved is
+  more discoverable; convention keeps the spec smaller.
+- Index TTL — pull (registry refreshes by polling `describe_self`)
+  vs push (peers re-announce). Pull is more honest; push scales better.
+- Anti-spam: do we require the announcing peer to also respond to
+  `ping` from the registry within the TTL? Probably yes.
+- Does the planner get to call `registry.search` autonomously, or only
+  when the user opts in? Privacy-relevant — registries can fingerprint
+  queries.
+- Default registry peers in the binary: zero, one curated, or a small
+  bootstrap list under community governance? Decision blocks v1.0.
+
+**Status.** Thinking-out-loud, not committed. Will graduate to a 🧭
+item under v0.5 once the open questions narrow.
 
 ## v1.0 — protocol freeze 💭
 
@@ -85,7 +143,8 @@ See [CHANGELOG.md](CHANGELOG.md) for what has shipped.
 
 These have been considered and rejected for the foreseeable future. Re-open only with a new use case the spec cannot already serve.
 
-- Central registry of capabilities (peer gossip is the model)
+- Central registry baked into the protocol (peer gossip is the default;
+  optional registries are themselves capabilities — see reflection above)
 - Streaming inside the protocol (use the local SSE bridge, not the wire)
 - Pipeline orchestration as a protocol verb (planner composes locally)
 - Session state at the protocol layer (every `invoke` is independent)
