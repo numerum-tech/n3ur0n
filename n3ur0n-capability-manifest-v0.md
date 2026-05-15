@@ -1,10 +1,31 @@
 # N3UR0N — Capability Manifest v0.1 (brouillon)
 
 **Date** : 2026-05-12
-**Statut** : brouillon de spec, non implémenté. À discuter avant gel.
-**Objet** : définir le format `cap.toml` qui déclare une capacité exposée par une instance n3uron.
+**Statut** : ~~brouillon de spec, non implémenté~~ → **partiellement obsolète**. La release 0.3.0 a implémenté un format proche mais avec une décomposition différente. Ce document reste utile comme *spec conceptuelle* (champs, principes, validation, secrets) mais le **layout effectif diverge**.
+**Objet** : définir le format de déclaration de capacité côté instance n3uron.
 **Périmètre** : v0.1 — couvre les bindings MCP, prompted-LLM, HTTP-forward. WASM, subprocess générique et binding composé sont hors-périmètre.
 **Lecteur** : implémenteur de la v0.2, publisher écrivant sa première cap, reviewer du format.
+
+---
+
+## ⚠ Écart docs ↔ code (2026-05-12)
+
+Le code 0.3.0 a séparé ce qui était proposé comme un seul fichier `cap.toml` en **deux fichiers distincts** :
+
+- `backends/<name>.toml` — déclare un *backend* (mcp server, prompted-LLM endpoint, http target). Réutilisable par N capacités.
+- `caps/<name>.toml` — déclare une *capacité* avec descriptor public + binding qui *référence* un backend par nom (`binding.backend = "<name>"`).
+
+Justification du split (validée à l'implémentation) : 90% des prompted-LLM caps réelles pointent vers le même endpoint Ollama local. Mettre la config de connexion dans chaque cap.toml dupliquait l'effort éditorial. Le split rend la config du backend mutualisée, et la cap devient un fin descriptif + un prompt.
+
+Sections du présent document qui restent valides :
+- §1 (principe directeur), §2 (référence par section, sauf §2.5–2.8 binding nested), §4 (validation), §5 (secrets), §6 (templating), §7 (hot-reload), §8 (questions ouvertes), §10 (hors-périmètre).
+
+Sections du présent document qui sont **divergentes** :
+- §1 structure générale — un seul fichier proposé, deux dans la réalité. Lire les détails de binding dans `backends/*.toml`, pas dans `caps/*.toml`.
+- §3 exemples complets — montre des bindings inline ; la réalité a `[binding]\nbackend = "<name>"` qui pointe vers un backend défini ailleurs.
+- §9 implications runtime — code-vérité dans `crates/node/src/manifest/types.rs`.
+
+Reformulation propre attendue en v0.2 du présent document. En attendant, prendre le code comme référence.
 
 ---
 

@@ -4,6 +4,14 @@
 
 **Amendement 2026-05-08** : §5.2 — la structure du message inclut désormais explicitement le champ `sender_public_key` à côté de `signature`. Le hash du `sender_public_key` doit correspondre à `sender_id` (auto-vérification). Sans ce champ sur le fil, le destinataire ne peut pas matérialiser la clé publique pour vérifier la signature en l'absence de registre id→pk. Le reste de §5.2 reste valide.
 
+**Amendement 2026-05-12** : alignement docs ↔ code après les releases 0.2.0 et 0.3.0. Trois écarts à connaître avant lecture :
+
+1. **`AccessMode` est ternaire**, pas binaire. Wire literals : `"free" | "restricted" | "private"`. UI labels : `Public | Restricted | Private`. `Private` = local-only, jamais annoncé via `describe_self`, jamais invokable réseau. Voir §6.1 (à lire avec cet amendement).
+2. **`CapabilityDecl` étendu en v0.2** (`PROTOCOL_VERSION = "n3ur0n/0.2"`). Nouveaux champs (tous `#[serde(default)]` pour rétrocompat) : `examples`, `disambiguation`, `negative_examples`, `output_semantic`, `version` (semver de la cap), `languages` (BCP 47), `countries` (ISO 3166-1 alpha-2). Voir §9.4 (à lire avec cet amendement).
+3. **Le planning multi-étapes existe désormais côté instance** (release 0.2.0, `PlanExecPlanner` + `PlanCompiler` cascade). §10 affirme « pas de pipelines orchestrés v0.1 » — cette limite est levée. La planification reste *locale à l'instance du consumer*, le protocole pair lui-même n'a pas changé.
+
+Le code prime sur les docs. Cf. règle de précédence CLAUDE.md.
+
 ---
 
 ## 1. Préambule
@@ -130,16 +138,21 @@ Conséquence pratique : à v0.1, l'identité de l'opérateur humain et l'identit
 
 ## 6. Autorisation et souscription
 
-### 6.1 Mode libre vs mode restreint
+### 6.1 Modes d'accès (mis à jour 2026-05-12)
 
-Pour chaque capacité qu'elle expose, une instance déclare son **mode d'accès** :
+Pour chaque capacité qu'elle expose, une instance déclare son **mode d'accès** parmi trois valeurs :
 
-- *Libre* — toute invocation correctement signée est acceptée, sans vérification de relation préalable.
-- *Restreint* — l'invocation n'est acceptée que si l'identifiant de l'émetteur est dans la whitelist du destinataire, ou si le payload contient un `subscription_token` valide.
+- *Public* (wire literal `"free"`) — toute invocation correctement signée est acceptée, sans vérification de relation préalable.
+- *Restricted* (wire `"restricted"`) — l'invocation n'est acceptée que si l'identifiant de l'émetteur est dans la whitelist du destinataire, ou si le payload contient un `subscription_token` valide.
+- *Private* (wire `"private"`) — capacité **local-only**, jamais annoncée dans `describe_self`, jamais invokable via le protocole pair. Reste accessible à l'API locale, au planner local et à l'UI embarquée. Sert aux capacités qui ne doivent jamais quitter la machine (accès filesystem, secrets utilisateur, planners spécialisés).
 
-Le mode est déclaré par capacité, pas par instance. Une même instance peut exposer une capacité en mode libre et une autre en mode restreint.
+Note de migration : le wire literal `"free"` est conservé pour rétrocompatibilité avec les peers en `n3ur0n/0.1`. La paire `Free` (code) / `Public` (UI) désigne le même mode.
 
-Les trois opérations méta de découverte (cf. section 8) sont **toujours en mode libre**. La méta-couche est publique par construction.
+Le mode est déclaré par capacité, pas par instance. Une même instance peut exposer une capacité en mode Public, une en mode Restricted et une en mode Private.
+
+Les trois opérations méta de découverte (cf. section 8) sont **toujours en mode Public**. La méta-couche est publique par construction.
+
+Conséquence pour le réseau : le filtrage des capacités `Private` doit se faire à *deux* niveaux côté node — exclusion de `describe_self` (jamais annoncées) ET rejet des invokes entrants comme `UnknownCapability` (jamais routables réseau, même si un attaquant connaît le nom).
 
 ### 6.2 Modèle économique
 
@@ -272,19 +285,44 @@ Encodé en JSON. La signature couvre la concaténation canonique des cinq champs
 
 Aucun autre verbe n'est requis à v0.1. Toute fonction supplémentaire (gestion de souscriptions, gouvernance de lobe, paiement, etc.) est hors-protocole et passe par des canaux hors-bande définis par chaque opérateur.
 
-### 9.4 Format de déclaration de capacité
+### 9.4 Format de déclaration de capacité (mis à jour 2026-05-12)
 
 Pour chaque capacité exposée, l'instance déclare dans son `describe_self()` :
+
+**Champs `n3ur0n/0.1` (toujours présents) :**
 
 - Un nom court unique au sein de l'instance.
 - Un schéma d'entrée et un schéma de sortie au format JSON Schema.
 - Une description en langage naturel pour les humains.
-- Un mode d'accès (`free` ou `restricted`).
+- Un mode d'accès (`free` | `restricted` | `private` — cf. §6.1).
 - Une indication tarifaire optionnelle (chaîne libre à v0.1, à structurer en v0.2).
 - Un ou plusieurs tags pour la découverte.
 - Optionnellement, l'identifiant du ou des lobes auxquels cette capacité est rattachée.
 
-La compatibilité avec le format de tools de MCP est recherchée. Un mapping bidirectionnel doit pouvoir être implémenté trivialement, pour que les serveurs MCP existants puissent être encapsulés dans une instance n3ur0n sans réécriture.
+**Champs ajoutés en `n3ur0n/0.2`** (tous optionnels, `#[serde(default)]` côté Rust, donc rétrocompatibles avec les peers `n3ur0n/0.1` qui ne les émettent pas) :
+
+- `examples` — liste d'exemples canoniques `{user_intent, args, expected_output}`. Le planner injecte ces exemples dans son compile prompt pour aider les petits modèles (7–13B) à matcher intention → (capability, args). Les planners v0.2 exigent `examples.len() >= 1` pour inclure la cap dans leur catalogue.
+- `disambiguation` — texte libre expliquant quand préférer / éviter cette cap face à des caps voisines.
+- `negative_examples` — liste d'intentions `{user_intent, why_not}` qui *semblent* matcher mais ne doivent pas déclencher cette cap.
+- `output_semantic` — prose courte décrivant ce que la sortie *signifie* (pas sa structure JSON), pour le step de reflection.
+- `version` — semver de la cap elle-même, indépendante du `PROTOCOL_VERSION`. Permet aux consumers de détecter les changements de contenu chez un publisher. Default `"0.0.0"` pour les legacy.
+- `languages` — codes BCP 47 (`["fr", "en"]`). Liste vide = language-agnostic.
+- `countries` — codes ISO 3166-1 alpha-2 (`["FR", "BE"]`). Liste vide = non restreint.
+
+**Convention `x-n3uron-type: "blob"`** (introduite par `n3ur0n-blob-protocol-v0.md`) : un champ de schéma marqué ainsi désigne une référence à un blob (fichier binaire) transporté hors-bande via `/n3ur0n/v0/blobs`. Ne modifie pas le wire format du `describe_self` — c'est une convention sur le contenu du JSON Schema.
+
+La compatibilité avec le format de tools de MCP est recherchée. Un mapping bidirectionnel doit pouvoir être implémenté trivialement, pour que les serveurs MCP existants puissent être encapsulés dans une instance n3ur0n sans réécriture. Implémenté en release 0.3.0 : binding type `mcp` dans le manifeste TOML (cf. §9.5).
+
+### 9.5 Manifeste de capacité côté instance (ajouté 2026-05-12)
+
+Depuis la release 0.3.0, les capacités exposées par une instance ne sont plus câblées en Rust (`impl Backend`) ; elles sont déclarées par fichiers TOML dans `<config_dir>` :
+
+- `backends/<name>.toml` — déclare un *backend* (mcp server, prompted-LLM endpoint, http forward). Réutilisable par N capacités.
+- `caps/<name>.toml` — déclare une *capacité* (descripteur public + binding qui référence un backend par nom).
+
+Trois types de binding implémentés v0.3 : `prompt` (prompted LLM), `mcp` (tool d'un MCP server), `http` (forward générique). Hot-reload du registre via `ArcSwap` — pas de redémarrage pour CRUD sur les caps.
+
+Le brouillon `n3ur0n-capability-manifest-v0.md` décrit le format en détail (avec note d'écart vis-à-vis du split caps/backends effectif).
 
 ---
 
@@ -306,7 +344,7 @@ Les compromis suivants sont délibérés et documentés. Ils ne sont pas des oub
 
 **Pas de gestion d'état riche.** Une invocation est une requête-réponse. Pas de session, pas de streaming, pas de subscription temps-réel. Les capacités stateful doivent gérer leur propre état hors-protocole.
 
-**Pas de pipelines orchestrés.** À v0.1, une invocation appelle une seule capacité. La composition multi-étapes (`ask X then ask Y then show with Z`) est entièrement de la responsabilité du client appelant — typiquement, le backend IA orchestrateur de l'utilisateur. Le protocole ne formalise pas la planification.
+**Pas de pipelines orchestrés** *(limite levée en 0.2.0 côté instance, pas côté protocole)*. À v0.1, une invocation appelle une seule capacité. La composition multi-étapes (`ask X then ask Y then show with Z`) est entièrement de la responsabilité du client appelant. Depuis la release 0.2.0, une instance consumer embarque un planner (`PlanExecPlanner`) qui peut compiler un plan multi-étapes et l'exécuter en parallèle au-dessus des capacités du réseau — mais ce planning reste *local au consumer*. Le protocole pair lui-même n'orchestre toujours rien et ne connaît qu'une invocation simple par envelope. La cap `plan` peut être exposée comme capacité réseau (`PlanCompiler` cascade) pour escalader le planning à un peer plus puissant ; côté protocole pair, c'est juste un `invoke` ordinaire.
 
 **Pas de visualisation cartographique cérébrale.** L'UX cartographique, qui est pourtant un différenciateur stratégique, est explicitement reportée. À v0.1, les opérations passent par CLI ou API REST. La couche visuelle est un projet à part qui consommera ce protocole.
 

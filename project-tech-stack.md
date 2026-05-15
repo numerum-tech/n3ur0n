@@ -4,6 +4,15 @@
 
 **Changements depuis draft 0** : introduction de deux profils utilisateur (consumer / publisher), adoption de Tauri 2 comme shell desktop dès v0.1, factorisation de la frontend en codebase unique alimentant trois cibles, refactor du core Rust en lib + binaires.
 
+**Amendement 2026-05-12** : alignement docs ↔ code après releases 0.2.0 et 0.3.0. Quatre écarts à connaître :
+
+1. **Crate `node`** ajouté au workspace (§10.1). Layout effectif : `core`, `storage`, `adapters`, `node`, `server`, `desktop`. `node` est la couche orchestration (registry, handler, planner, runtime) entre `core` et `server`/`desktop`.
+2. **Backend instantiation runtime, pas compile-time** (release 0.3.0). Le trait `Backend` reste tel quel mais les `impl` ne sont plus câblés en dur — un scan TOML produit la liste des backends actifs au boot. Cf. §7.1 (à lire avec cet amendement) et `n3ur0n-capability-manifest-v0.md`.
+3. **Trois bindings de capacité implémentés v0.3** : `prompt` (prompted-LLM), `mcp` (tool MCP), `http` (forward générique). §7.2 listait `MCPBackend`, `OpenAIBackend`, `HTTPBackend`, `ProcessBackend` comme aspirations v0.1 ; la réalité est plus propre — les bindings remplacent les backends figés, et le `OpenAIBackend` historique est devenu le sous-jacent du binding `prompt`. `ProcessBackend` non implémenté (reporté, le besoin est en grande partie absorbé par `mcp` stdio).
+4. **Hot-reload du registry via `ArcSwap`** (release 0.3.0). `Node.registry` est `Arc<ArcSwap<CapabilityRegistry>>`. Permet la CRUD de caps sans redémarrer le serveur.
+
+Le code prime sur les docs. Cf. règle de précédence CLAUDE.md.
+
 ---
 
 ## 1. Préambule
@@ -184,13 +193,16 @@ Embarqué (pas de service externe), single-file, transactions ACID, performance 
 
 Pool de connexions via `r2d2` ou approche "connection per task" simple. Migrations via `refinery` ou SQL plat versionné.
 
-### 6.2 Schéma minimal v0.1
+### 6.2 Schéma minimal v0.1 (mis à jour 2026-05-12)
 
 - `peers(id, endpoint, alias, last_seen, tls_fingerprint, describe_self_cached, describe_self_fetched_at, source)` — répertoire local, plafond 1000 entrées, éviction LRU.
 - `nonces(sender_id, nonce, seen_at)` — anti-replay, TTL 1h, cleanup périodique. Index unique sur `(sender_id, nonce)`. **Publisher uniquement** (consumer ne reçoit pas de messages signés entrants v0.1).
-- `subscriptions(peer_id, capability_name, token, granted_at, expires_at)` — souscriptions sortantes actives.
-- `capabilities(name, mode, schema_in, schema_out, description, tags, lobe_ids, backend_ref)` — capacités exposées par l'instance locale (publisher uniquement).
-- `audit_log(timestamp, direction, peer_id, capability, status, latency_ms)` — invocations, pour rate-limit et debug.
+- `conversations(id, client_id, title, created_at, ...)` + `conversation_turns(...)` — historique de chat côté consumer (ajouté en 0.2.0 avec le planner). Cookie `n3ur0n_client_id` pour isolation multi-client local.
+
+**Tables planifiées draft 1 mais finalement déplacées hors SQLite** :
+- `subscriptions` — pas encore implémentée (les modes `restricted` v0.3 fonctionnent par whitelist en mémoire / config).
+- `capabilities` — **supprimée du schéma**. Les caps sont désormais déclarées par fichiers TOML (`caps/*.toml` + `backends/*.toml`) scannés au boot et hot-reloadés via `ArcSwap`. SQLite n'est plus la source de vérité du registre.
+- `audit_log` — pas encore implémentée v0.3 ; `tracing` + sortie JSON couvre les besoins immédiats.
 
 ### 6.3 Refus
 
@@ -200,25 +212,33 @@ Postgres, MySQL, Redis : exclus v0.1. Service externe = dépendance opérateur, 
 
 ## 7. Adaptateurs backend (publisher uniquement)
 
-### 7.1 Trait
+### 7.1 Trait (mis à jour 2026-05-12)
 
-```rust
-#[async_trait]
-trait Backend: Send + Sync {
-    async fn invoke(&self, capability: &str, args: Value) -> Result<Value>;
-    async fn describe(&self) -> Result<Vec<CapabilityDecl>>;
-    async fn health(&self) -> Result<HealthStatus>;
-}
-```
+Le trait `Backend` reste le contrat d'adaptation, mais depuis la release 0.3.0 les implémentations ne sont plus *câblées en dur dans le binaire* — elles sont **instanciées au runtime à partir d'un scan TOML** :
 
-Backend pluggable via `Box<dyn Backend>`, sélection par config.
+- `backends/<name>.toml` déclare un backend (type, endpoint, modèle, secrets référencés).
+- `caps/<name>.toml` déclare une capacité avec son `binding.backend = "<name>"`.
 
-### 7.2 Implémentations v0.1
+Conséquence : un opérateur ajoute / retire / reconfigure des backends sans recompiler n3uron. Le registre est rechargé à chaud (`ArcSwap`) sur événement filesystem ou sur commande API.
 
-- **`MCPBackend`** — client MCP (stdio ou HTTP). Bridge bidirectionnel : capacités MCP exposées comme capacités n3ur0n, et inversement. Priorité v0.1 (compat affichée par architecture §9.4).
-- **`OpenAIBackend`** — endpoints compatibles OpenAI (OpenAI, Anthropic via shim, Ollama, vLLM, llama.cpp server). Couvre 80% des cas d'usage actuels.
-- **`HTTPBackend`** — webhook générique. Schéma JSON arbitraire, l'opérateur déclare manuellement les capacités.
-- **`ProcessBackend`** — exécution d'un binaire/script local avec stdin/stdout JSON. Pour glue rapide.
+Trois types de binding supportés v0.3 : `prompt` (prompted LLM), `mcp` (tool d'un MCP server), `http` (forward HTTP générique).
+
+### 7.2 Implémentations effectives v0.3 (corrige version draft 1)
+
+Le draft 1 listait quatre backends figés (`MCPBackend`, `OpenAIBackend`, `HTTPBackend`, `ProcessBackend`). L'implémentation réelle s'est restructurée :
+
+- **Binding `prompt`** — prompted-LLM. S'appuie sur `OpenAIBackend` sous-jacent (couvre OpenAI, Ollama, vLLM, llama.cpp server). Une cap = un system prompt + une référence à un backend `openai-compatible`. Couvre 80% des cas d'usage attendus.
+- **Binding `mcp`** — connexion à un MCP server (stdio ou HTTP), un tool MCP par cap. Couvre la compat MCP recherchée par architecture §9.4.
+- **Binding `http`** — forward HTTP générique avec templating d'args et résolution de secrets. Pour wrap rapide d'API existantes.
+
+Backends de support disponibles en `crates/adapters/` :
+- `EchoBackend` — identité, pour tests + smoke.
+- `OpenAIBackend` — implémentation concrète sous-jacente au binding `prompt`.
+- `UtilityBackend` — capacités utilitaires locales (typiquement déclarées `Private`).
+
+**Non implémenté v0.3, reporté** :
+- Binding `subprocess` générique (besoin largement absorbé par `mcp` stdio, à reconsidérer si retour utilisateur).
+- Binding `wasm` (sandbox WASM pour caps locales sécurisées, cible v0.4+).
 
 ### 7.3 Note sur consumer
 

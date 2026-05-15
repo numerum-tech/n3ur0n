@@ -1,10 +1,34 @@
 # Recommandations Planner — N3UR0N v0.1 → v0.2
 
 **Date** : 2026-05-12
-**Statut** : input pour la prochaine itération. Pas une décision actée.
+**Statut** : ~~input pour la prochaine itération~~ → **largement absorbé par les releases 0.2.0 et 0.3.0**. Conservé comme trace de raisonnement et pour les sous-chantiers non encore livrés.
 **Portée** : qualité de planification du `LocalPlanner` quand le backend LLM est un modèle local de classe 3B–13B.
 **Méthode** : analyse statique du code (`crates/node/src/planner/*`, `crates/core/src/capability.rs`, `crates/adapters/src/openai.rs`) confrontée à la doxa industrielle sur le tool-use avec petits modèles.
 **Lecteur cible** : implémenteur de la v0.2, mainteneur de l'archi v0 et reviewer technique.
+
+---
+
+## ⚠ État d'implémentation (2026-05-12)
+
+Confrontation rapide aux releases 0.2.0 + 0.3.0 :
+
+| Reco | Statut | Livré dans |
+|---|---|---|
+| §4.1 enrichissement `CapabilityDecl` (`examples`, `disambiguation`, `negative_examples`, `output_semantic`) | ✅ Livré | 0.2.0 (`PROTOCOL_VERSION = "n3ur0n/0.2"`) |
+| §4.2 retrieval BM25 sur le catalogue | ✅ Livré | 0.2.0 (`crates/node/src/planner/retrieval.rs`) |
+| §4.3 constrained decoding (GBNF / JSON Schema) | ✅ Livré | 0.2.0 (quand backend supporte) |
+| §4.4 escalade planner→planner | ✅ Livré | 0.2.0 (`PlanCompiler` cascade across known peers) |
+| §4.5 trancher `LLMPlanner` vs `PlanExecPlanner` | ✅ Tranché | `PlanExecPlanner` est le planner v2 (cf. CHANGELOG 0.2.0) |
+| Itération E "capability binding & wiring UX" (suggérée dans les échanges ultérieurs) | ✅ Livré | 0.3.0 (TOML manifest + master-detail Settings UI + composer) |
+
+Sous-chantiers **non livrés** et toujours pertinents :
+
+- §5.1 versioning métadonnée (`cap.version` ajouté en v0.2 mais sans politique de bump documentée).
+- §5.5 obligation `examples` non-vide (en v0.2 le planner *skip* les caps sans exemples — soft enforcement, pas hard).
+- §7 jeu d'évaluation canonique 50-prompts + métriques formelles — pas formalisé.
+- §6 itération D Cascading detailed thresholds — implémentée mais pas mesurée.
+
+Les sections du document qui *prescrivent* du travail futur restent lisibles mais doivent être interprétées comme historiques. Les sections de *diagnostic* (§3 gaps, §4 reco) gardent leur valeur explicative.
 
 ---
 
