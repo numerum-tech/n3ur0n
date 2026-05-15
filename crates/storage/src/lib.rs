@@ -28,6 +28,7 @@ pub type StorageResult<T> = Result<T, StorageError>;
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_conversations.sql"),
+    include_str!("../migrations/0003_users_sessions.sql"),
 ];
 
 pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Db> {
@@ -73,6 +74,7 @@ fn migrate(pool: &Db) -> StorageResult<()> {
     Ok(())
 }
 
+pub mod auth;
 pub mod conversations;
 pub mod peers;
 pub mod nonces;

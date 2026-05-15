@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use axum::extract::{Path as AxumPath, State as AxumState};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{delete, get};
+use axum::routing::get;
 use axum::{Json, Router};
 use n3ur0n_node::manifest::{load_backend_dir, BackendKind as MfBackendKind};
 use serde::Deserialize;
@@ -40,23 +40,55 @@ pub struct SettingsState {
 }
 
 pub fn router(config_dir: PathBuf, node: n3ur0n_node::Node) -> Router {
+    use crate::auth::perm;
+    use crate::require_perm;
     let state = SettingsState { config_dir, node };
+
+    // Mutating backend routes — admin-only.
+    let backends_write = Router::new()
+        .route("/backends", axum::routing::post(create_backend))
+        .route(
+            "/backends/:name",
+            axum::routing::delete(delete_backend),
+        )
+        .route_layer(require_perm!(perm::BACKENDS_WRITE))
+        .with_state(state.clone());
+    // Read-only backend routes — any authenticated user (BACKENDS_READ).
+    let backends_read = Router::new()
+        .route("/backends", get(list_backends))
+        .route("/backends/:name", get(get_backend))
+        .route_layer(require_perm!(perm::BACKENDS_READ))
+        .with_state(state.clone());
+
+    // Mutating cap manifest routes — operator or admin (CAPS_WRITE).
+    let caps_write = Router::new()
+        .route("/caps/manifests", axum::routing::post(upsert_cap_manifest))
+        .route(
+            "/caps/manifests/:name",
+            axum::routing::delete(delete_cap_manifest),
+        )
+        .route_layer(require_perm!(perm::CAPS_WRITE))
+        .with_state(state.clone());
+    // Read-only cap manifest routes — any authenticated user.
+    let caps_read = Router::new()
+        .route("/caps/manifests", get(list_cap_manifests))
+        .route("/caps/manifests/:name", get(get_cap_manifest))
+        .route_layer(require_perm!(perm::CAPS_READ))
+        .with_state(state);
+
     Router::new()
-        .route("/api/v0/backends", get(list_backends).post(create_backend))
-        .route("/api/v0/backends/:name", delete(delete_backend))
-        .route(
-            "/api/v0/caps/manifests",
-            get(list_cap_manifests).post(upsert_cap_manifest),
-        )
-        .route(
-            "/api/v0/caps/manifests/:name",
-            get(get_cap_manifest).delete(delete_cap_manifest),
-        )
-        .with_state(state)
+        .merge(backends_write)
+        .merge(backends_read)
+        .merge(caps_write)
+        .merge(caps_read)
 }
 
 fn settings_error(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(json!({"error": message}))).into_response()
+}
+
+fn toml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 // ---------------------------------------------------------------------------
@@ -67,9 +99,25 @@ fn settings_error(status: StatusCode, message: &str) -> axum::response::Response
 struct CreateBackendRequest {
     name: String,
     kind: String,
+    // openai_compat fields
     base_url: Option<String>,
     default_model: Option<String>,
     api_key: Option<String>,
+    /// Edit-mode flag: if true and `api_key` is None, the server preserves
+    /// the existing on-disk api_key rather than blanking it. Lets the UI
+    /// show a masked field that the user can leave empty to keep.
+    #[serde(default)]
+    api_key_keep: bool,
+    // mcp_server fields
+    transport: Option<String>,
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: std::collections::HashMap<String, String>,
+    // http_base fields (base_url shared with openai_compat above)
+    #[serde(default)]
+    headers: std::collections::HashMap<String, String>,
 }
 
 async fn list_backends(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
@@ -135,30 +183,32 @@ async fn create_backend(
             "name must be non-empty and match [a-zA-Z0-9_-]",
         );
     }
-    if req.kind != "openai_compat" {
-        return settings_error(
-            StatusCode::BAD_REQUEST,
-            "v0.3.0 Settings UI only supports kind=openai_compat; edit TOML directly for mcp_server/http_base",
-        );
-    }
-    let Some(base_url) = req.base_url else {
-        return settings_error(StatusCode::BAD_REQUEST, "base_url required for openai_compat");
-    };
-    let Some(default_model) = req.default_model else {
-        return settings_error(
-            StatusCode::BAD_REQUEST,
-            "default_model required for openai_compat",
-        );
-    };
-    let api_key = req.api_key.unwrap_or_default();
-
-    let backends_dir = state.config_dir.join("backends");
-    if let Err(e) = std::fs::create_dir_all(&backends_dir) {
-        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
-    }
-    let target = backends_dir.join(format!("{name}.toml"));
-    let body = format!(
-        r#"[manifest]
+    let body = match req.kind.as_str() {
+        "openai_compat" => {
+            let Some(base_url) = req.base_url.as_deref() else {
+                return settings_error(StatusCode::BAD_REQUEST, "base_url required for openai_compat");
+            };
+            let Some(default_model) = req.default_model.as_deref() else {
+                return settings_error(StatusCode::BAD_REQUEST, "default_model required for openai_compat");
+            };
+            // Edit-mode preservation: when `api_key_keep` is set + no
+            // explicit key supplied, re-read the existing file rather than
+            // blanking the field on disk.
+            let api_key = if req.api_key.is_none() && req.api_key_keep {
+                let existing = state.config_dir.join("backends").join(format!("{name}.toml"));
+                match n3ur0n_node::manifest::parse_backend_file(&existing) {
+                    Ok(m) => match m.kind {
+                        MfBackendKind::OpenAICompat(cfg) => cfg.api_key,
+                        _ => String::new(),
+                    },
+                    Err(_) => String::new(),
+                }
+            } else {
+                req.api_key.clone().unwrap_or_default()
+            };
+            let api_key = api_key.as_str();
+            format!(
+                r#"[manifest]
 version = "0.1"
 
 [backend]
@@ -170,21 +220,169 @@ base_url      = "{base_url}"
 default_model = "{default_model}"
 api_key       = "{api_key}"
 "#,
-        name = name,
-        base_url = base_url.replace('"', "\\\""),
-        default_model = default_model.replace('"', "\\\""),
-        api_key = api_key.replace('"', "\\\""),
-    );
+                name = name,
+                base_url = toml_escape(base_url),
+                default_model = toml_escape(default_model),
+                api_key = toml_escape(api_key),
+            )
+        }
+        "mcp_server" => {
+            let transport = req.transport.as_deref().unwrap_or("stdio");
+            if !matches!(transport, "stdio" | "http_sse") {
+                return settings_error(StatusCode::BAD_REQUEST, "transport must be stdio|http_sse");
+            }
+            let Some(command) = req.command.as_deref() else {
+                return settings_error(StatusCode::BAD_REQUEST, "command required for mcp_server");
+            };
+            if command.trim().is_empty() {
+                return settings_error(StatusCode::BAD_REQUEST, "command required for mcp_server");
+            }
+            let args_toml = if req.args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "args = [{}]\n",
+                    req.args.iter()
+                        .map(|a| format!("\"{}\"", toml_escape(a)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            let env_toml = if req.env.is_empty() {
+                String::new()
+            } else {
+                let mut s = String::from("\n[mcp_server.env]\n");
+                for (k, v) in &req.env {
+                    s.push_str(&format!("{} = \"{}\"\n", k, toml_escape(v)));
+                }
+                s
+            };
+            format!(
+                r#"[manifest]
+version = "0.1"
+
+[backend]
+name = "{name}"
+kind = "mcp_server"
+
+[mcp_server]
+transport = "{transport}"
+command   = "{command}"
+{args_toml}{env_toml}"#,
+                name = name,
+                transport = transport,
+                command = toml_escape(command),
+            )
+        }
+        "http_base" => {
+            let Some(base_url) = req.base_url.as_deref() else {
+                return settings_error(StatusCode::BAD_REQUEST, "base_url required for http_base");
+            };
+            let headers_toml = if req.headers.is_empty() {
+                String::new()
+            } else {
+                let mut s = String::from("\n[http_base.headers]\n");
+                for (k, v) in &req.headers {
+                    s.push_str(&format!("\"{}\" = \"{}\"\n", k.replace('"', "\\\""), toml_escape(v)));
+                }
+                s
+            };
+            format!(
+                r#"[manifest]
+version = "0.1"
+
+[backend]
+name = "{name}"
+kind = "http_base"
+
+[http_base]
+base_url = "{base_url}"
+{headers_toml}"#,
+                name = name,
+                base_url = toml_escape(base_url),
+            )
+        }
+        other => {
+            return settings_error(
+                StatusCode::BAD_REQUEST,
+                &format!("unknown kind `{other}` (expected openai_compat|mcp_server|http_base)"),
+            );
+        }
+    };
+
+    let backends_dir = state.config_dir.join("backends");
+    if let Err(e) = std::fs::create_dir_all(&backends_dir) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    let target = backends_dir.join(format!("{name}.toml"));
+    let existed = target.exists();
     if let Err(e) = std::fs::write(&target, body) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
+    let (backends_len, caps_len, reload_warning) =
+        match state.node.reload_backends_from_manifest_dir() {
+            Ok((b, c)) => (b, c, None),
+            Err(e) => {
+                tracing::warn!(error = %e, "backend reload after upsert failed");
+                (0, 0, Some(e.to_string()))
+            }
+        };
     Json(json!({
         "ok": true,
         "name": name,
         "path": target.display().to_string(),
-        "requires_restart": true,
+        "updated": existed,
+        "backends_loaded": backends_len,
+        "caps_loaded": caps_len,
+        "reload_warning": reload_warning,
     }))
     .into_response()
+}
+
+async fn get_backend(
+    AxumState(state): AxumState<SettingsState>,
+    AxumPath(name): AxumPath<String>,
+) -> impl IntoResponse {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return settings_error(StatusCode::BAD_REQUEST, "invalid name");
+    }
+    let target = state.config_dir.join("backends").join(format!("{name}.toml"));
+    if !target.exists() {
+        return settings_error(StatusCode::NOT_FOUND, "backend manifest not found");
+    }
+    // Re-parse the file so we return a structured shape rather than raw
+    // TOML; the UI prefill is the only caller and it wants typed fields.
+    let parsed = match n3ur0n_node::manifest::parse_backend_file(&target) {
+        Ok(m) => m,
+        Err(e) => return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let body = match &parsed.kind {
+        MfBackendKind::OpenAICompat(cfg) => json!({
+            "name": parsed.name,
+            "kind": "openai_compat",
+            "base_url": cfg.base_url,
+            "default_model": cfg.default_model,
+            // api_key returned masked. Edit form lets the user re-enter
+            // (or leave blank to preserve the existing value — handled
+            // client-side).
+            "has_api_key": !cfg.api_key.is_empty(),
+        }),
+        MfBackendKind::McpServer(cfg) => json!({
+            "name": parsed.name,
+            "kind": "mcp_server",
+            "transport": format!("{:?}", cfg.transport).to_lowercase(),
+            "command": cfg.command,
+            "args": cfg.args,
+            "env": cfg.env,
+        }),
+        MfBackendKind::HttpBase(cfg) => json!({
+            "name": parsed.name,
+            "kind": "http_base",
+            "base_url": cfg.base_url,
+            "headers": cfg.headers,
+        }),
+    };
+    Json(body).into_response()
 }
 
 async fn delete_backend(
@@ -201,10 +399,20 @@ async fn delete_backend(
     if let Err(e) = std::fs::remove_file(&target) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
+    let (backends_len, caps_len, reload_warning) =
+        match state.node.reload_backends_from_manifest_dir() {
+            Ok((b, c)) => (b, c, None),
+            Err(e) => {
+                tracing::warn!(error = %e, "backend reload after delete failed");
+                (0, 0, Some(e.to_string()))
+            }
+        };
     Json(json!({
         "ok": true,
         "name": name,
-        "requires_restart": true,
+        "backends_loaded": backends_len,
+        "caps_loaded": caps_len,
+        "reload_warning": reload_warning,
     }))
     .into_response()
 }
@@ -261,6 +469,27 @@ enum CapBindingReq {
         output_parser: String,
         #[serde(default)]
         model: Option<String>,
+    },
+    Mcp {
+        backend: String,
+        tool_name: String,
+        #[serde(default)]
+        arg_mapping: std::collections::HashMap<String, Value>,
+        #[serde(default)]
+        result_mapping: std::collections::HashMap<String, Value>,
+    },
+    Http {
+        backend: String,
+        url_template: String,
+        method: String,
+        #[serde(default)]
+        headers: std::collections::HashMap<String, String>,
+        #[serde(default)]
+        body_template: Option<Value>,
+        #[serde(default)]
+        response_path: Option<String>,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
     },
 }
 
@@ -399,7 +628,14 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
             Value::Null => "\"\"".into(),
             Value::Bool(b) => b.to_string(),
             Value::Number(n) => n.to_string(),
-            Value::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+            Value::String(s) => format!(
+                "\"{}\"",
+                s.replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+                    .replace('\t', "\\t"),
+            ),
             Value::Array(arr) => format!(
                 "[{}]",
                 arr.iter().map(json_to_toml_value).collect::<Vec<_>>().join(", ")
@@ -421,7 +657,14 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
         }
     }
     fn toml_str(s: &str) -> String {
-        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+        format!(
+            "\"{}\"",
+            s.replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t"),
+        )
     }
     fn toml_multiline(s: &str) -> String {
         if s.contains('\n') {
@@ -533,6 +776,75 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
             if let Some(m) = model {
                 if !m.trim().is_empty() {
                     let _ = writeln!(out, "model = {}", toml_str(m));
+                }
+            }
+        }
+        CapBindingReq::Mcp {
+            backend,
+            tool_name,
+            arg_mapping,
+            result_mapping,
+        } => {
+            if tool_name.trim().is_empty() {
+                return Err("binding.mcp.tool_name is required".into());
+            }
+            let _ = writeln!(out, "\n[binding]");
+            let _ = writeln!(out, "type = \"mcp\"");
+            let _ = writeln!(out, "backend = {}", toml_str(backend));
+            let _ = writeln!(out, "\n[binding.mcp]");
+            let _ = writeln!(out, "tool_name = {}", toml_str(tool_name));
+            if !arg_mapping.is_empty() {
+                let pairs: Vec<String> = arg_mapping
+                    .iter()
+                    .map(|(k, v)| format!("{} = {}", toml_key(k), json_to_toml_value(v)))
+                    .collect();
+                let _ = writeln!(out, "arg_mapping = {{ {} }}", pairs.join(", "));
+            }
+            if !result_mapping.is_empty() {
+                let pairs: Vec<String> = result_mapping
+                    .iter()
+                    .map(|(k, v)| format!("{} = {}", toml_key(k), json_to_toml_value(v)))
+                    .collect();
+                let _ = writeln!(out, "result_mapping = {{ {} }}", pairs.join(", "));
+            }
+        }
+        CapBindingReq::Http {
+            backend,
+            url_template,
+            method,
+            headers,
+            body_template,
+            response_path,
+            timeout_ms,
+        } => {
+            if url_template.trim().is_empty() {
+                return Err("binding.http.url_template is required".into());
+            }
+            let m = method.to_ascii_uppercase();
+            if !matches!(m.as_str(), "GET" | "POST" | "PUT" | "DELETE") {
+                return Err(format!("binding.http.method `{method}` invalid (GET|POST|PUT|DELETE)"));
+            }
+            let _ = writeln!(out, "\n[binding]");
+            let _ = writeln!(out, "type = \"http\"");
+            let _ = writeln!(out, "backend = {}", toml_str(backend));
+            let _ = writeln!(out, "\n[binding.http]");
+            let _ = writeln!(out, "url_template = {}", toml_str(url_template));
+            let _ = writeln!(out, "method = {}", toml_str(&m));
+            if let Some(t) = timeout_ms {
+                let _ = writeln!(out, "timeout_ms = {t}");
+            }
+            if let Some(p) = response_path {
+                if !p.trim().is_empty() {
+                    let _ = writeln!(out, "response_path = {}", toml_str(p));
+                }
+            }
+            if let Some(b) = body_template {
+                let _ = writeln!(out, "body_template = {}", json_to_toml_value(b));
+            }
+            if !headers.is_empty() {
+                let _ = writeln!(out, "\n[binding.http.headers]");
+                for (k, v) in headers {
+                    let _ = writeln!(out, "{} = {}", toml_key(k), toml_str(v));
                 }
             }
         }

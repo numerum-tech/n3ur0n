@@ -92,6 +92,16 @@ impl CapabilityRegistry {
         self.by_name.values().map(|e| e.decl.clone()).collect()
     }
 
+    /// Subset of declarations that are network-visible (mode != Private).
+    /// `describe_self` returns exactly this set; Private caps remain local.
+    pub fn public_decls(&self) -> Vec<CapabilityDecl> {
+        self.by_name
+            .values()
+            .filter(|e| e.decl.mode.is_public())
+            .map(|e| e.decl.clone())
+            .collect()
+    }
+
     /// Number of registered capabilities.
     pub fn len(&self) -> usize {
         self.by_name.len()
@@ -100,5 +110,46 @@ impl CapabilityRegistry {
     /// Whether the registry is empty.
     pub fn is_empty(&self) -> bool {
         self.by_name.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use n3ur0n_core::capability::AccessMode;
+    use serde_json::json;
+
+    fn decl(name: &str, mode: AccessMode) -> CapabilityDecl {
+        CapabilityDecl {
+            name: name.into(),
+            description: "d".into(),
+            schema_in: json!({}),
+            schema_out: json!({}),
+            mode,
+            pricing: None,
+            tags: vec![],
+            lobe_ids: vec![],
+            examples: vec![],
+            disambiguation: None,
+            negative_examples: vec![],
+            output_semantic: None,
+            version: "0.0.0".into(),
+            languages: vec![],
+            countries: vec![],
+        }
+    }
+
+    #[test]
+    fn public_decls_excludes_private() {
+        let reg = CapabilityRegistry::from_decls(vec![
+            decl("a", AccessMode::Free),
+            decl("b", AccessMode::Restricted),
+            decl("c", AccessMode::Private),
+        ]);
+        let mut names: Vec<String> = reg.public_decls().into_iter().map(|d| d.name).collect();
+        names.sort();
+        assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
+        // `all()` still returns everything for local API consumers.
+        assert_eq!(reg.all().len(), 3);
     }
 }

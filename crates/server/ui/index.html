@@ -10,32 +10,47 @@
     <aside class="sidebar" id="sidebar-main">
         <header class="sidebar-header">
             <div class="header-row">
-                <h1>N3UR0N</h1>
-                <button id="settings-open" class="header-icon" type="button" title="Settings" aria-label="Settings">⚙</button>
+                <h1 data-i18n="app.title">N3UR0N</h1>
+                <span class="header-actions">
+                    <button id="settings-open" class="header-icon" type="button" data-i18n-attr-title="tooltip.settings" data-i18n-attr-aria-label="tooltip.settings" title="Settings" aria-label="Settings">⚙</button>
+                    <button id="user-logout" class="header-icon hidden" type="button" data-i18n-attr-title="auth.logout" data-i18n-attr-aria-label="auth.logout" title="Sign out" aria-label="Sign out">⎋</button>
+                </span>
             </div>
+            <span id="user-name" class="user-name"></span>
             <code id="self-id" class="self-id" title="local instance id">…</code>
         </header>
         <nav class="sidebar-tabs" role="tablist">
-            <button class="tab active" data-tab="chats" type="button">Chats</button>
-            <button class="tab" data-tab="network" type="button">Network</button>
-            <button class="tab" data-tab="skills" type="button">Skills</button>
+            <button class="tab active" data-tab="chats" type="button" data-i18n="sidebar.tab.chats">Chats</button>
+            <button class="tab" data-tab="network" type="button" data-i18n="sidebar.tab.network">Network</button>
+            <button class="tab" data-tab="skills" type="button" data-i18n="sidebar.tab.skills">Skills</button>
         </nav>
         <section class="tab-panel" data-panel="chats">
-            <button id="new-chat" type="button" class="primary">+ New chat</button>
+            <button id="new-chat" type="button" class="primary" data-i18n="sidebar.newchat">+ New chat</button>
             <ul id="conv-list" class="conv-list"></ul>
         </section>
         <section class="tab-panel hidden" data-panel="network">
             <div class="panel-toolbar">
-                <input id="network-filter" type="search" class="filter" placeholder="filter peers · id / endpoint / cap…" />
-                <button id="network-refresh" type="button" class="icon-btn" title="Refresh">⟳</button>
+                <input id="network-filter" type="search" class="filter" data-i18n-attr-placeholder="sidebar.network.filter" placeholder="filter peers · id / endpoint / cap…" />
+                <button id="network-refresh" type="button" class="icon-btn" data-i18n-attr-title="tooltip.refresh" title="Refresh">⟳</button>
             </div>
             <div id="network-stats" class="panel-stats"></div>
             <ul id="network-list" class="compact-list"></ul>
         </section>
         <section class="tab-panel hidden" data-panel="skills">
             <div class="panel-toolbar">
-                <input id="skills-filter" type="search" class="filter" placeholder="filter skills · name / tag / lang…" />
-                <button id="skills-refresh" type="button" class="icon-btn" title="Refresh">⟳</button>
+                <input id="skills-filter" type="search" class="filter" data-i18n-attr-placeholder="sidebar.skills.filter" placeholder="filter skills · name / tag / lang…" />
+                <button id="skills-refresh" type="button" class="icon-btn" data-i18n-attr-title="tooltip.refresh" title="Refresh">⟳</button>
+            </div>
+            <div class="panel-toolbar">
+                <select id="skills-type-filter" class="filter type-filter" data-i18n-attr-title="filter.type.tooltip" title="Filter by type">
+                    <option value="" data-i18n="filter.type.all">All types</option>
+                    <option value="mode:free" data-i18n="filter.type.public">Public</option>
+                    <option value="mode:restricted" data-i18n="filter.type.restricted">Restricted</option>
+                    <option value="mode:private" data-i18n="filter.type.private">Private</option>
+                    <option value="bind:prompt" data-i18n="filter.type.prompt">Binding: prompt</option>
+                    <option value="bind:mcp" data-i18n="filter.type.mcp">Binding: mcp</option>
+                    <option value="bind:http" data-i18n="filter.type.http">Binding: http</option>
+                </select>
             </div>
             <div id="skills-stats" class="panel-stats"></div>
             <ul id="skills-list" class="compact-list"></ul>
@@ -47,45 +62,59 @@
     <aside class="sidebar hidden" id="sidebar-settings">
         <header class="sidebar-header">
             <div class="header-row">
-                <button id="settings-back" class="header-icon" type="button" title="Back" aria-label="Back">←</button>
-                <h1>Settings</h1>
+                <button id="settings-back" class="header-icon" type="button" data-i18n-attr-title="tooltip.back" data-i18n-attr-aria-label="tooltip.back" title="Back" aria-label="Back">←</button>
+                <h1 data-i18n="settings.title">Settings</h1>
                 <span style="width: 28px;"></span>
             </div>
         </header>
         <ul id="settings-nav" class="settings-nav">
-            <li class="settings-nav-item active" data-section="backends">
+            <li class="settings-nav-item active" data-section="backends" data-perm="backends:read">
                 <span class="nav-icon">⚡</span>
                 <div class="nav-text">
-                    <span class="nav-title">Backends</span>
-                    <span class="nav-sub">LLMs, MCP servers, HTTP APIs</span>
+                    <span class="nav-title" data-i18n="settings.nav.backends">Backends</span>
+                    <span class="nav-sub" data-i18n="settings.nav.backends.sub">LLMs, MCP servers, HTTP APIs</span>
                 </div>
             </li>
-            <li class="settings-nav-item" data-section="caps">
+            <li class="settings-nav-item" data-section="caps" data-perm="caps:read">
                 <span class="nav-icon">✦</span>
                 <div class="nav-text">
-                    <span class="nav-title">Skills</span>
-                    <span class="nav-sub">Capability manifests you publish</span>
+                    <span class="nav-title" data-i18n="settings.nav.caps">Skills</span>
+                    <span class="nav-sub" data-i18n="settings.nav.caps.sub">Capability manifests you publish</span>
                 </div>
             </li>
-            <li class="settings-nav-item" data-section="gateways">
+            <li class="settings-nav-item" data-section="gateways" data-perm="peers:write">
                 <span class="nav-icon">⇄</span>
                 <div class="nav-text">
-                    <span class="nav-title">Gateways</span>
-                    <span class="nav-sub">Remote n3ur0n peers you trust</span>
+                    <span class="nav-title" data-i18n="settings.nav.gateways">Gateways</span>
+                    <span class="nav-sub" data-i18n="settings.nav.gateways.sub">Remote n3ur0n peers you trust</span>
                 </div>
             </li>
-            <li class="settings-nav-item" data-section="identity">
+            <li class="settings-nav-item" data-section="ui">
+                <span class="nav-icon">◐</span>
+                <div class="nav-text">
+                    <span class="nav-title" data-i18n="settings.nav.ui">Interface</span>
+                    <span class="nav-sub" data-i18n="settings.nav.ui.sub">Language, theme</span>
+                </div>
+            </li>
+            <li class="settings-nav-item" data-section="users" data-perm="users:read">
+                <span class="nav-icon">👥</span>
+                <div class="nav-text">
+                    <span class="nav-title" data-i18n="settings.nav.users">Users</span>
+                    <span class="nav-sub" data-i18n="settings.nav.users.sub">Manage accounts and roles</span>
+                </div>
+            </li>
+            <li class="settings-nav-item" data-section="identity" data-perm="identity:read">
                 <span class="nav-icon">⊙</span>
                 <div class="nav-text">
-                    <span class="nav-title">Identity</span>
-                    <span class="nav-sub">Your instance key</span>
+                    <span class="nav-title" data-i18n="settings.nav.identity">Identity</span>
+                    <span class="nav-sub" data-i18n="settings.nav.identity.sub">Your instance key</span>
                 </div>
             </li>
             <li class="settings-nav-item" data-section="about">
                 <span class="nav-icon">ⓘ</span>
                 <div class="nav-text">
-                    <span class="nav-title">About</span>
-                    <span class="nav-sub">Version, license, links</span>
+                    <span class="nav-title" data-i18n="settings.nav.about">About</span>
+                    <span class="nav-sub" data-i18n="settings.nav.about.sub">Version, license, links</span>
                 </div>
             </li>
         </ul>
@@ -93,28 +122,28 @@
 
     <main class="main-pane">
         <header class="main-header">
-            <h2 id="conv-title">No conversation</h2>
+            <h2 id="conv-title" data-i18n="conv.no_conversation">No conversation</h2>
             <div class="actions">
-                <button id="rename" type="button" disabled>Rename</button>
-                <button id="delete" type="button" disabled>Delete</button>
+                <button id="rename" type="button" disabled data-i18n="conv.rename">Rename</button>
+                <button id="delete" type="button" disabled data-i18n="conv.delete">Delete</button>
             </div>
         </header>
 
         <section id="conversation" class="conversation">
-            <p class="empty-hint">Pick a conversation in the sidebar or click <strong>+ New chat</strong>.</p>
+            <p class="empty-hint" data-i18n="conv.empty_hint">Pick a conversation in the sidebar or click <strong>+ New chat</strong>.</p>
         </section>
 
         <section class="composer">
-            <textarea id="prompt" rows="3" placeholder="Type your message and press Enter (Shift+Enter = newline)…" disabled></textarea>
-            <button id="send" type="button" disabled>Send</button>
+            <textarea id="prompt" rows="3" data-i18n-attr-placeholder="composer.placeholder" placeholder="Type your message and press Enter (Shift+Enter = newline)…" disabled></textarea>
+            <button id="send" type="button" disabled data-i18n="composer.send">Send</button>
         </section>
 
         <!-- Inspector: overlays the chat when a peer or cap is opened from the sidebar. -->
         <section id="inspector" class="inspector hidden" aria-hidden="true">
             <header class="inspector-header">
-                <button id="inspector-back" type="button" class="inspector-back" title="Back to chat">←</button>
+                <button id="inspector-back" type="button" class="inspector-back" data-i18n-attr-title="tooltip.back" title="Back to chat">←</button>
                 <h2 id="inspector-title">…</h2>
-                <button id="inspector-close" type="button" class="inspector-close" title="Close">×</button>
+                <button id="inspector-close" type="button" class="inspector-close" data-i18n-attr-title="tooltip.close" title="Close">×</button>
             </header>
             <div id="inspector-body" class="inspector-body"></div>
         </section>
@@ -135,18 +164,22 @@
 
     <!-- Modal dialog for confirms + alerts. Native window.confirm doesn't
          work in Tauri's WKWebView, so we ship our own. -->
+    <!-- Auth gate: full-screen overlay shown when no valid session.
+         Renders login or bootstrap form via JS. -->
+    <div id="auth-gate" class="auth-gate hidden" aria-hidden="false"></div>
+
     <div id="modal" class="modal hidden" aria-hidden="true">
         <div class="modal-backdrop"></div>
         <div class="modal-box" role="dialog" aria-modal="true">
-            <h3 id="modal-title" class="modal-title">Confirm</h3>
+            <h3 id="modal-title" class="modal-title" data-i18n="modal.title.confirm">Confirm</h3>
             <p id="modal-body" class="modal-body"></p>
             <div class="modal-actions">
-                <button id="modal-cancel" type="button" class="icon-btn">Cancel</button>
-                <button id="modal-ok" type="button" class="primary" style="margin: 0;">OK</button>
+                <button id="modal-cancel" type="button" class="icon-btn" data-i18n="button.cancel">Cancel</button>
+                <button id="modal-ok" type="button" class="primary" style="margin: 0;" data-i18n="button.confirm">OK</button>
             </div>
         </div>
     </div>
 
-    <script src="/ui/app.js" defer></script>
+    <script type="module" src="/ui/app.js"></script>
 </body>
 </html>

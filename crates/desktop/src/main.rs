@@ -205,8 +205,7 @@ async fn start_server() -> Result<u16> {
     // Settings routes (manifest CRUD) live in the server crate so the
     // headless `n3ur0n serve` binary exposes the same surface to its
     // embedded web UI. Desktop merges them on the same loopback listener.
-    let app = http::app(node.clone(), runtime)
-        .merge(n3ur0n_server::settings::router(config_dir.clone(), node));
+    let app = http::app_with_settings(node, runtime, Some(config_dir.clone()));
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!(error = %e, "embedded server stopped");

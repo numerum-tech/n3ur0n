@@ -19,3 +19,7 @@ r2d2_sqlite = { workspace = true }
 time = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+argon2 = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+data-encoding = { workspace = true }

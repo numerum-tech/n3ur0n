@@ -11,7 +11,7 @@ use n3ur0n_storage::Db;
 use crate::backends_registry::BackendsRegistry;
 use crate::bindings::build_binding;
 use crate::error::{NodeError, NodeResult};
-use crate::manifest::load_cap_dir;
+use crate::manifest::{load_backend_dir, load_cap_dir};
 use crate::registry::CapabilityRegistry;
 
 /// Static configuration of a [`Node`].
@@ -43,8 +43,9 @@ pub struct Node {
     /// Manifest-mode backends registry, only set when the node was
     /// loaded from a `<config>/{backends,caps}/` directory. Used to
     /// re-bind capability entries when caps reload. `None` in legacy
-    /// compile-time-backend mode.
-    pub(crate) backends: Option<Arc<BackendsRegistry>>,
+    /// compile-time-backend mode. `ArcSwap` so a backend manifest CRUD
+    /// can rebuild + swap atomically (then trigger a cap rebind).
+    pub(crate) backends: Option<Arc<ArcSwap<BackendsRegistry>>>,
     /// Manifest dir (parent of `caps/` and `backends/`). Set when
     /// running in manifest mode so the cap-reload entry point can scan
     /// the same directory.
@@ -93,7 +94,10 @@ impl Node {
         backends: Arc<BackendsRegistry>,
         manifest_dir: PathBuf,
     ) -> Self {
-        self.backends = Some(backends);
+        // Unwrap the incoming Arc into the cell so existing call sites keep
+        // their `Arc<BackendsRegistry>` ergonomics.
+        let inner = Arc::try_unwrap(backends).unwrap_or_else(|a| (*a).clone());
+        self.backends = Some(Arc::new(ArcSwap::from_pointee(inner)));
         self.manifest_dir = Some(manifest_dir);
         self
     }
@@ -138,11 +142,12 @@ impl Node {
                 "node was not built in manifest mode — cap hot-reload unavailable".into(),
             ));
         };
-        let Some(backends) = self.backends.as_ref() else {
+        let Some(backends_cell) = self.backends.as_ref() else {
             return Err(NodeError::InvalidPayload(
                 "node has no backends registry — cap hot-reload unavailable".into(),
             ));
         };
+        let backends = backends_cell.load_full();
         let caps_dir = dir.join("caps");
         let mut entries: Vec<(n3ur0n_core::CapabilityDecl, Arc<dyn crate::bindings::Binding>)> =
             Vec::new();
@@ -180,6 +185,46 @@ impl Node {
         self.registry.store(Arc::new(new_registry));
         tracing::info!(loaded = len, "cap registry hot-reloaded");
         Ok(len)
+    }
+
+    /// Re-scan `<manifest_dir>/backends/*.toml`, build a fresh
+    /// [`BackendsRegistry`], swap it in atomically, then trigger a cap
+    /// rebind so live capability bindings point at the new backend
+    /// instances. Returns `(backends_loaded, caps_loaded)`.
+    ///
+    /// Errors if the node was not built with [`Node::with_manifest_runtime`].
+    /// Malformed individual backend files are logged + skipped (consistent
+    /// with bootstrap-time behavior). If zero backends parse, the swap
+    /// still happens — call sites should surface a warning when len() == 0.
+    pub fn reload_backends_from_manifest_dir(&self) -> NodeResult<(usize, usize)> {
+        let Some(dir) = self.manifest_dir.as_deref() else {
+            return Err(NodeError::InvalidPayload(
+                "node was not built in manifest mode — backend hot-reload unavailable".into(),
+            ));
+        };
+        let Some(cell) = self.backends.as_ref() else {
+            return Err(NodeError::InvalidPayload(
+                "node has no backends registry — backend hot-reload unavailable".into(),
+            ));
+        };
+        let backends_dir = dir.join("backends");
+        let mut manifests = Vec::new();
+        for result in load_backend_dir(&backends_dir) {
+            match result {
+                Ok(m) => manifests.push(m),
+                Err(e) => {
+                    tracing::warn!(error = %e, "skipping malformed backend manifest on reload");
+                }
+            }
+        }
+        let new_registry = BackendsRegistry::from_manifests(manifests)?;
+        let backends_len = new_registry.len();
+        cell.store(Arc::new(new_registry));
+        tracing::info!(loaded = backends_len, "backends registry hot-reloaded");
+        // Rebind caps against the new backends so existing bindings don't
+        // hold stale references.
+        let caps_len = self.reload_caps_from_manifest_dir()?;
+        Ok((backends_len, caps_len))
     }
 
     /// Borrow the storage handle.

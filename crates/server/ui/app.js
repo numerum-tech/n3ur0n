@@ -1,3 +1,82 @@
+import { initI18n, t, setLocale, listLocales, currentLocale, refresh as i18nRefresh } from "./i18n.js";
+import * as auth from "./auth.js";
+
+// --- Theme ---------------------------------------------------------------
+// Pref persisted as one of "dark" / "light" / "system". Applied to
+// `:root[data-theme]`; CSS variables in style.css branch on the attribute.
+const THEME_KEY = "n3ur0n_theme";
+function currentThemePref() {
+    return localStorage.getItem(THEME_KEY) || "system";
+}
+function resolveTheme(pref) {
+    if (pref === "dark" || pref === "light") return pref;
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+function applyTheme() {
+    const pref = currentThemePref();
+    document.documentElement.setAttribute("data-theme", resolveTheme(pref));
+}
+function setThemePref(pref) {
+    localStorage.setItem(THEME_KEY, pref);
+    applyTheme();
+    document.dispatchEvent(new CustomEvent("n3ur0n:theme-changed", { detail: { pref } }));
+}
+// Apply immediately so the initial paint matches the user's choice.
+applyTheme();
+// Track OS changes when pref is "system".
+window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+    if (currentThemePref() === "system") applyTheme();
+});
+
+// Boot i18n before the rest of the app runs. Static `data-i18n` attrs are
+// applied once the catalog loads; dynamic render paths call `t(...)` at
+// build time and re-render on locale-changed events.
+initI18n().then(() => bootAuth()).catch(err => console.warn("i18n init failed:", err));
+
+// Run after i18n so the auth gate uses translated strings.
+async function bootAuth() {
+    await auth.refresh();
+    refreshAuthChrome();
+    auth.renderAuthGate();
+}
+function refreshAuthChrome() {
+    const nameEl = document.getElementById("user-name");
+    const logoutBtn = document.getElementById("user-logout");
+    const s = auth.state();
+    if (s.authenticated && s.username) {
+        if (nameEl) nameEl.textContent = s.username;
+        logoutBtn?.classList.remove("hidden");
+    } else {
+        if (nameEl) nameEl.textContent = "";
+        logoutBtn?.classList.add("hidden");
+    }
+    auth.applyPermDom();
+}
+document.addEventListener("n3ur0n:auth-changed", () => {
+    refreshAuthChrome();
+    // Trigger refresh of any currently-mounted view.
+    try {
+        const active = document.querySelector("#settings-nav .settings-nav-item.active");
+        if (active && !document.getElementById("settings-page").classList.contains("hidden")) {
+            activateSettingsSection(active.dataset.section);
+        }
+    } catch { /* boot order edge case */ }
+});
+document.getElementById("user-logout")?.addEventListener("click", async () => {
+    await auth.logout();
+    refreshAuthChrome();
+    auth.renderAuthGate();
+});
+document.addEventListener("n3ur0n:locale-changed", () => {
+    // Re-render whatever section is currently visible so dynamic strings
+    // refresh. Cheap because every renderer is idempotent + pulls from
+    // cached state.
+    const active = document.querySelector("#settings-nav .settings-nav-item.active");
+    if (active && !document.getElementById("settings-page").classList.contains("hidden")) {
+        activateSettingsSection(active.dataset.section);
+    }
+});
+
 const $ = (id) => document.getElementById(id);
 const sidebar = $("conv-list");
 const conv = $("conversation");
@@ -35,6 +114,11 @@ async function api(method, path, body) {
     const text = await res.text();
     let payload = null;
     try { payload = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+    if (res.status === 401) {
+        // Session expired or never existed. Force the gate; downstream
+        // callers can still inspect the thrown error if they care.
+        auth.refresh().then(() => auth.renderAuthGate());
+    }
     if (!res.ok) {
         const msg = payload?.error || payload?.message || text || `HTTP ${res.status}`;
         const err = new Error(msg);
@@ -649,6 +733,32 @@ function escapeHtml(s) {
         .replace(/"/g, "&quot;");
 }
 
+// Match a cap declaration against the combined "type" filter dropdown.
+// Filter value is `""` (no filter), `mode:<wire-literal>`, or
+// `bind:<prompt|mcp|http>`. Binding-type filters skip caps without a
+// known `binding_type` (i.e. remote-only entries) since we can't tell.
+function matchesTypeFilter(decl, filterValue) {
+    if (!filterValue) return true;
+    if (filterValue.startsWith("mode:")) {
+        return decl.mode === filterValue.slice(5);
+    }
+    if (filterValue.startsWith("bind:")) {
+        const want = filterValue.slice(5);
+        return decl.binding_type === want;
+    }
+    return true;
+}
+
+// UI label for an AccessMode wire literal. Wire stays "free" for backward
+// compat; users see "Public". Returns empty string for unknown / missing
+// modes so the sidebar sub-line doesn't render a bare "?" placeholder.
+function modeLabel(mode) {
+    if (mode === "free") return t("cap.badge.public");
+    if (mode === "restricted") return t("cap.badge.restricted");
+    if (mode === "private") return t("cap.badge.private");
+    return "";
+}
+
 // Caches kept in memory so the inspector can cross-link without re-fetching.
 let _peersCache = { self: null, peers: [] };
 let _capsCache = { self: null, caps: [] };
@@ -777,22 +887,25 @@ function buildMergedCatalog() {
 
 function renderSkillsList() {
     const filter = (document.getElementById("skills-filter")?.value || "").toLowerCase();
+    const typeFilter = document.getElementById("skills-type-filter")?.value || "";
     const list = document.getElementById("skills-list");
     const stats = document.getElementById("skills-stats");
 
     const all = buildMergedCatalog();
     const filtered = all.filter(entry => {
-        if (!filter) return true;
         const c = entry.decl;
-        const hay = [
-            c.name,
-            c.description || "",
-            ...(c.tags || []),
-            ...(c.languages || []),
-            ...(c.countries || []),
-            ...entry.sources.map(s => s.endpoint),
-        ].join(" ").toLowerCase();
-        return hay.includes(filter);
+        if (filter) {
+            const hay = [
+                c.name,
+                c.description || "",
+                ...(c.tags || []),
+                ...(c.languages || []),
+                ...(c.countries || []),
+                ...entry.sources.map(s => s.endpoint),
+            ].join(" ").toLowerCase();
+            if (!hay.includes(filter)) return false;
+        }
+        return matchesTypeFilter(c, typeFilter);
     });
 
     const localCount = all.filter(e => e.sources.some(s => s.kind !== "remote")).length;
@@ -817,12 +930,15 @@ function renderSkillsList() {
                 : `remote-only · seen on ${entry.sources.length} peer${entry.sources.length !== 1 ? "s" : ""}`;
             const sub = [
                 c.version ? `v${c.version}` : "",
-                c.mode,
+                modeLabel(c.mode),
                 ...(c.languages || []),
                 ...(c.tags || []).slice(0, 3),
             ].filter(Boolean).join(" · ");
+            const modeClass = c.mode === "private" ? "mode-private"
+                            : c.mode === "restricted" ? "mode-restricted"
+                            : "mode-public";
             return `
-                <li data-cap="${escapeHtml(c.name)}">
+                <li data-cap="${escapeHtml(c.name)}" class="${modeClass}">
                     <div class="row-main">
                         <span class="name">${escapeHtml(c.name)}</span>
                         <span class="row-sub">${escapeHtml(sub)}</span>
@@ -945,7 +1061,7 @@ function openCapInspector(capName) {
             <h3>${escapeHtml(cap.name)} <span class="row-count ${badgeClass}">${escapeHtml(badgeText)}</span></h3>
             <dl class="kv">
                 <dt>version</dt><dd>${escapeHtml(cap.version || "?")}</dd>
-                <dt>mode</dt><dd>${escapeHtml(cap.mode)}</dd>
+                <dt>mode</dt><dd>${escapeHtml(modeLabel(cap.mode))}</dd>
                 <dt>languages</dt><dd>${(cap.languages || []).join(", ") || "<em>any</em>"}</dd>
                 <dt>countries</dt><dd>${(cap.countries || []).join(", ") || "<em>any</em>"}</dd>
                 <dt>tags</dt><dd>${(cap.tags || []).join(", ") || "<em>none</em>"}</dd>
@@ -1061,23 +1177,27 @@ function activateSettingsSection(name) {
     body.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div></div>';
 
     if (name === "backends") {
-        title.textContent = "Backends";
-        sub.textContent = "Where AI calls go. Add a local LLM (Ollama), a cloud API (OpenAI, Anthropic, Mistral), or any OpenAI-compatible endpoint.";
-        actions.innerHTML = `<button class="primary" id="settings-add-backend">+ Add backend</button>`;
-        document.getElementById("settings-add-backend")?.addEventListener("click", openBackendForm);
+        title.textContent = t("settings.backends.title");
+        sub.textContent = t("settings.backends.subtitle");
+        actions.innerHTML = `<button class="primary" id="settings-add-backend">${escapeHtml(t("settings.backends.add"))}</button>`;
+        document.getElementById("settings-add-backend")?.addEventListener("click", () => openBackendForm());
         renderBackendsCards();
     } else if (name === "caps") {
-        title.textContent = "Skills";
-        sub.textContent = "Capabilities (skills) declared in your manifests. They're invokable by this client and can be shared with peers.";
-        actions.innerHTML = `<button class="primary" id="settings-add-cap">+ Add skill</button>`;
-        document.getElementById("settings-add-cap")?.addEventListener("click", () => openCapForm(null));
+        title.textContent = t("settings.caps.title");
+        sub.textContent = t("settings.caps.subtitle");
+        actions.innerHTML = `<button class="primary" id="settings-add-cap">${escapeHtml(t("settings.caps.add"))}</button>`;
+        document.getElementById("settings-add-cap")?.addEventListener("click", () => openCapTemplatePicker());
         renderCapsCards();
     } else if (name === "gateways") {
-        title.textContent = "Gateways";
-        sub.textContent = "Remote n3ur0n peers you've added. Their skills appear in your catalog.";
-        actions.innerHTML = `<button class="primary" id="settings-add-gateway">+ Add gateway</button>`;
+        title.textContent = t("settings.gateways.title");
+        sub.textContent = t("settings.gateways.subtitle");
+        actions.innerHTML = `<button class="primary" id="settings-add-gateway">${escapeHtml(t("settings.gateways.add"))}</button>`;
         document.getElementById("settings-add-gateway")?.addEventListener("click", openGatewayForm);
         renderGatewaysCards();
+    } else if (name === "ui") {
+        renderUiPage();
+    } else if (name === "users") {
+        renderUsersPage();
     } else if (name === "identity") {
         renderIdentityPage();
     } else if (name === "about") {
@@ -1112,20 +1232,32 @@ async function renderBackendsCards() {
         body.innerHTML = `
             <div class="empty-state">
                 <div class="empty-icon">⚡</div>
-                <p class="empty-title">No backends yet</p>
-                <p class="empty-body">A backend tells N3UR0N where to send AI calls — your local Ollama, an OpenAI key, an MCP server, or any HTTP API. Add your first one to get started.</p>
-                <button class="primary" id="empty-add-backend">+ Add backend</button>
+                <p class="empty-title">${escapeHtml(t("settings.backends.empty.title"))}</p>
+                <p class="empty-body">${escapeHtml(t("settings.backends.empty.body"))}</p>
+                <button class="primary" id="empty-add-backend">${escapeHtml(t("settings.backends.add"))}</button>
             </div>
         `;
-        document.getElementById("empty-add-backend")?.addEventListener("click", openBackendForm);
+        document.getElementById("empty-add-backend")?.addEventListener("click", () => openBackendForm());
         return;
     }
     body.innerHTML = `<div class="card-grid">${backends.map(backendCard).join("")}</div>`;
+    body.querySelectorAll('.card[data-backend]').forEach(card => {
+        card.addEventListener("click", (e) => {
+            if (e.target.closest("[data-action]")) return;
+            openBackendForm(card.dataset.backend);
+        });
+    });
+    body.querySelectorAll('.card [data-action="edit"]').forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openBackendForm(btn.closest(".card").dataset.backend);
+        });
+    });
     body.querySelectorAll('.card [data-action="delete"]').forEach(btn => {
         btn.addEventListener("click", async (e) => {
             e.stopPropagation();
             const name = btn.closest(".card").dataset.backend;
-            if (!(await confirmModal(`Delete backend "${name}"? Restart required.`, { title: "Delete backend", okLabel: "Delete", danger: true }))) return;
+            if (!(await confirmModal(t("backend.form.delete_confirm", { name }), { title: t("backend.form.delete_title"), okLabel: t("button.delete"), danger: true }))) return;
             try {
                 await api("DELETE", `/api/v0/backends/${encodeURIComponent(name)}`);
                 await renderBackendsCards();
@@ -1174,7 +1306,7 @@ function backendCard(b) {
             </div>`;
     }
     return `
-        <article class="card" data-backend="${escapeHtml(b.name)}">
+        <article class="card" data-backend="${escapeHtml(b.name)}" style="cursor: pointer;">
             <div class="card-head">
                 <div class="card-icon">${icon}</div>
                 <span class="card-title">${escapeHtml(b.name)}</span>
@@ -1182,6 +1314,7 @@ function backendCard(b) {
             </div>
             ${meta}
             <div class="card-actions">
+                <button data-action="edit">Edit</button>
                 <button data-action="delete" class="danger">Delete</button>
             </div>
         </article>
@@ -1195,19 +1328,45 @@ async function renderCapsCards() {
     try {
         const d = await api("GET", "/api/v0/caps");
         const caps = d.caps || [];
+        // Keep the inspector cache in sync so clicking a freshly-created
+        // skill in this view doesn't hit "Skill not found".
+        _capsCache = { self: d.self || _capsCache.self, caps };
         if (caps.length === 0) {
             body.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-icon">✦</div>
-                    <p class="empty-title">No skills yet</p>
-                    <p class="empty-body">A skill is a capability you expose: a translation, a search, a structured chat. Use the composer to declare your first one.</p>
-                    <button class="primary" id="empty-add-cap">+ Add skill</button>
+                    <p class="empty-title">${escapeHtml(t("settings.caps.empty.title"))}</p>
+                    <p class="empty-body">${escapeHtml(t("settings.caps.empty.body"))}</p>
+                    <button class="primary" id="empty-add-cap">${escapeHtml(t("settings.caps.add"))}</button>
                 </div>
             `;
-            document.getElementById("empty-add-cap")?.addEventListener("click", () => openCapForm(null));
+            document.getElementById("empty-add-cap")?.addEventListener("click", () => openCapTemplatePicker());
             return;
         }
-        body.innerHTML = `<div class="card-grid">${caps.map(capCard).join("")}</div>`;
+        const typeFilterValue = body.dataset.typeFilter || "";
+        const filteredCaps = caps.filter(c => matchesTypeFilter(c, typeFilterValue));
+        const filterOpts = [
+            ["", "filter.type.all"],
+            ["mode:free", "filter.type.public"],
+            ["mode:restricted", "filter.type.restricted"],
+            ["mode:private", "filter.type.private"],
+            ["bind:prompt", "filter.type.prompt"],
+            ["bind:mcp", "filter.type.mcp"],
+            ["bind:http", "filter.type.http"],
+        ];
+        body.innerHTML = `
+            <div class="caps-toolbar">
+                <select id="caps-type-filter" class="filter type-filter" title="${escapeHtml(t("filter.type.tooltip"))}">
+                    ${filterOpts.map(([v, k]) => `<option value="${escapeHtml(v)}"${v === typeFilterValue ? " selected" : ""}>${escapeHtml(t(k))}</option>`).join("")}
+                </select>
+                <span class="row-sub">${filteredCaps.length}/${caps.length}</span>
+            </div>
+            <div class="card-grid">${filteredCaps.map(capCard).join("")}</div>
+        `;
+        document.getElementById("caps-type-filter")?.addEventListener("change", (e) => {
+            body.dataset.typeFilter = e.target.value;
+            renderCapsCards();
+        });
         body.querySelectorAll(".card[data-cap]").forEach(c => {
             // Card click opens inspector unless the click came from an action button.
             c.addEventListener("click", (e) => {
@@ -1225,7 +1384,7 @@ async function renderCapsCards() {
             btn.addEventListener("click", async (e) => {
                 e.stopPropagation();
                 const name = btn.closest(".card").dataset.cap;
-                if (!(await confirmModal(`Delete skill "${name}"?`, { title: "Delete skill", okLabel: "Delete", danger: true }))) return;
+                if (!(await confirmModal(t("cap.form.delete_confirm", { name }), { title: t("cap.form.delete_title"), okLabel: t("button.delete"), danger: true }))) return;
                 try {
                     await api("DELETE", `/api/v0/caps/manifests/${encodeURIComponent(name)}`);
                     await renderCapsCards();
@@ -1242,15 +1401,21 @@ async function renderCapsCards() {
 function capCard(c) {
     const label = c.has_binding ? "manifest" : "legacy";
     const canEdit = c.has_binding; // legacy backend caps can't be edited via cap.toml CRUD
+    const modeClass = c.mode === "private" ? "mode-private"
+                    : c.mode === "restricted" ? "mode-restricted"
+                    : "mode-public";
+    const modeBadgeKey = c.mode === "private" ? "cap.badge.private"
+                       : c.mode === "restricted" ? "cap.badge.restricted"
+                       : "cap.badge.public";
     return `
-        <article class="card" data-cap="${escapeHtml(c.name)}" style="cursor: pointer;">
+        <article class="card ${modeClass}" data-cap="${escapeHtml(c.name)}" style="cursor: pointer;">
             <div class="card-head">
-                <div class="card-icon">✦</div>
+                <div class="card-icon">${c.mode === "private" ? "🔒" : "✦"}</div>
                 <span class="card-title">${escapeHtml(c.name)}</span>
-                <span class="card-kind">${label}</span>
+                <span class="card-kind mode-badge ${modeClass}">${escapeHtml(t(modeBadgeKey))}</span>
             </div>
             <div class="card-meta">
-                v${escapeHtml(c.version || "?")} · ${escapeHtml(c.mode)}
+                v${escapeHtml(c.version || "?")} · ${escapeHtml(label)}
                 ${(c.languages || []).length ? ` · ${escapeHtml(c.languages.join(", "))}` : ""}
             </div>
             <div class="card-meta" style="color: var(--text); font-size: 0.84rem; line-height: 1.45;">
@@ -1276,9 +1441,9 @@ async function renderGatewaysCards() {
             body.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-icon">⇄</div>
-                    <p class="empty-title">No gateways yet</p>
-                    <p class="empty-body">A gateway is a remote n3ur0n peer you've connected to. Their published skills will appear in your skills catalog. Add the URL of a peer to start sharing.</p>
-                    <button class="primary" id="empty-add-gateway">+ Add gateway</button>
+                    <p class="empty-title">${escapeHtml(t("settings.gateways.empty.title"))}</p>
+                    <p class="empty-body">${escapeHtml(t("settings.gateways.empty.body"))}</p>
+                    <button class="primary" id="empty-add-gateway">${escapeHtml(t("settings.gateways.add"))}</button>
                 </div>
             `;
             document.getElementById("empty-add-gateway")?.addEventListener("click", openGatewayForm);
@@ -1359,6 +1524,208 @@ async function renderIdentityPage() {
     `;
 }
 
+async function renderUsersPage() {
+    const body = document.getElementById("settings-page-body");
+    document.getElementById("settings-page-title").textContent = t("settings.users.title");
+    document.getElementById("settings-page-subtitle").textContent = t("settings.users.subtitle");
+    let users = [];
+    try {
+        const r = await api("GET", "/api/v0/users");
+        users = r.users || [];
+    } catch (e) {
+        body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">load failed</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
+        return;
+    }
+    const me = auth.state();
+    body.innerHTML = `
+        <div class="caps-toolbar">
+            <button class="primary" id="users-add">${escapeHtml(t("settings.users.add"))}</button>
+        </div>
+        <div class="card-grid">
+            ${users.map(u => `
+                <article class="card" data-user="${u.id}">
+                    <div class="card-head">
+                        <div class="card-icon">👤</div>
+                        <span class="card-title">${escapeHtml(u.username)}</span>
+                        <span class="card-kind mode-badge mode-${u.role === "admin" ? "private" : u.role === "operator" ? "restricted" : "public"}">${escapeHtml(t("role." + u.role))}</span>
+                    </div>
+                    <div class="card-meta">id ${u.id}${u.last_login ? " · last login " + new Date(u.last_login*1000).toISOString().slice(0,10) : ""}</div>
+                    <div class="card-actions">
+                        <button data-action="role">${escapeHtml(t("button.edit"))}</button>
+                        ${me.id !== u.id ? `<button data-action="delete" class="danger">${escapeHtml(t("button.delete"))}</button>` : ""}
+                    </div>
+                </article>
+            `).join("")}
+        </div>
+    `;
+    document.getElementById("users-add")?.addEventListener("click", () => openUserCreateForm());
+    body.querySelectorAll('.card [data-action="delete"]').forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const id = btn.closest(".card").dataset.user;
+            if (!(await confirmModal(`Delete user?`, { title: t("button.delete"), okLabel: t("button.delete"), danger: true }))) return;
+            try {
+                await api("DELETE", `/api/v0/users/${id}`);
+                await renderUsersPage();
+            } catch (e) {
+                await alertModal(e.message, { title: "Error" });
+            }
+        });
+    });
+    body.querySelectorAll('.card [data-action="role"]').forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const id = btn.closest(".card").dataset.user;
+            const u = users.find(x => String(x.id) === String(id));
+            openUserEditForm(u);
+        });
+    });
+}
+
+function openUserCreateForm() {
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent = t("settings.users.add");
+    document.getElementById("inspector-body").innerHTML = `
+        <section class="section">
+            <form class="kv" onsubmit="return false;">
+                <label for="uf-name">${escapeHtml(t("auth.field.username"))}</label>
+                <input id="uf-name" type="text" required pattern="[A-Za-z0-9._-]{3,32}" />
+                <label for="uf-pw">${escapeHtml(t("auth.field.password_new"))}</label>
+                <input id="uf-pw" type="password" required minlength="6" />
+                <label for="uf-role">Role</label>
+                <select id="uf-role">
+                    <option value="user">${escapeHtml(t("role.user"))}</option>
+                    <option value="operator">${escapeHtml(t("role.operator"))}</option>
+                    <option value="admin">${escapeHtml(t("role.admin"))}</option>
+                </select>
+            </form>
+            <div style="display:flex; gap:8px; margin-top:12px; justify-content:flex-end;">
+                <button class="icon-btn" id="uf-cancel">${escapeHtml(t("button.cancel"))}</button>
+                <button class="primary" id="uf-save">${escapeHtml(t("button.save"))}</button>
+            </div>
+            <p class="row-sub" id="uf-status"></p>
+        </section>
+    `;
+    overlay.classList.remove("hidden");
+    document.getElementById("uf-cancel").addEventListener("click", closeInspector);
+    document.getElementById("uf-save").addEventListener("click", async () => {
+        const username = document.getElementById("uf-name").value.trim();
+        const password = document.getElementById("uf-pw").value;
+        const role = document.getElementById("uf-role").value;
+        const status = document.getElementById("uf-status");
+        try {
+            await api("POST", "/api/v0/users", { username, password, role });
+            closeInspector();
+            await renderUsersPage();
+        } catch (e) {
+            status.textContent = e.message;
+        }
+    });
+}
+
+function openUserEditForm(u) {
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent = `${t("button.edit")} · ${u.username}`;
+    document.getElementById("inspector-body").innerHTML = `
+        <section class="section">
+            <form class="kv" onsubmit="return false;">
+                <label for="ue-role">Role</label>
+                <select id="ue-role">
+                    <option value="user"${u.role === "user" ? " selected" : ""}>${escapeHtml(t("role.user"))}</option>
+                    <option value="operator"${u.role === "operator" ? " selected" : ""}>${escapeHtml(t("role.operator"))}</option>
+                    <option value="admin"${u.role === "admin" ? " selected" : ""}>${escapeHtml(t("role.admin"))}</option>
+                </select>
+                <label for="ue-pw">${escapeHtml(t("auth.field.password_new"))} (optional)</label>
+                <input id="ue-pw" type="password" minlength="6" />
+            </form>
+            <div style="display:flex; gap:8px; margin-top:12px; justify-content:flex-end;">
+                <button class="icon-btn" id="ue-cancel">${escapeHtml(t("button.cancel"))}</button>
+                <button class="primary" id="ue-save">${escapeHtml(t("button.save_changes"))}</button>
+            </div>
+            <p class="row-sub" id="ue-status"></p>
+        </section>
+    `;
+    overlay.classList.remove("hidden");
+    document.getElementById("ue-cancel").addEventListener("click", closeInspector);
+    document.getElementById("ue-save").addEventListener("click", async () => {
+        const role = document.getElementById("ue-role").value;
+        const pw = document.getElementById("ue-pw").value;
+        const status = document.getElementById("ue-status");
+        const payload = { role };
+        if (pw) payload.password = pw;
+        try {
+            await api("PATCH", `/api/v0/users/${u.id}`, payload);
+            closeInspector();
+            await renderUsersPage();
+        } catch (e) {
+            status.textContent = e.message;
+        }
+    });
+}
+
+async function renderUiPage() {
+    const body = document.getElementById("settings-page-body");
+    document.getElementById("settings-page-title").textContent = t("settings.ui.title");
+    document.getElementById("settings-page-subtitle").textContent = t("settings.ui.subtitle");
+
+    const themePref = currentThemePref();
+    const themeOpts = [
+        ["dark",   "settings.ui.theme.dark"],
+        ["light",  "settings.ui.theme.light"],
+        ["system", "settings.ui.theme.system"],
+    ];
+
+    body.innerHTML = `
+        <article class="card" style="max-width: 720px;">
+            <div class="card-head">
+                <div class="card-icon">🌐</div>
+                <span class="card-title">${escapeHtml(t("settings.ui.language"))}</span>
+            </div>
+            <form class="kv" onsubmit="return false;" style="margin-top: 8px;">
+                <label for="lang-select">${escapeHtml(t("settings.ui.language"))}</label>
+                <select id="lang-select"></select>
+            </form>
+            <p class="row-sub" style="margin-top: 8px;">${t("settings.ui.language.help")}</p>
+        </article>
+        <article class="card" style="max-width: 720px; margin-top: 12px;">
+            <div class="card-head">
+                <div class="card-icon">◐</div>
+                <span class="card-title">${escapeHtml(t("settings.ui.theme"))}</span>
+            </div>
+            <div class="theme-switch" id="theme-switch" role="radiogroup" aria-label="${escapeHtml(t("settings.ui.theme"))}">
+                ${themeOpts.map(([val, key]) => `
+                    <button type="button" class="theme-opt${themePref === val ? " active" : ""}" data-theme-pref="${val}" role="radio" aria-checked="${themePref === val}">
+                        ${escapeHtml(t(key))}
+                    </button>
+                `).join("")}
+            </div>
+            <p class="row-sub" style="margin-top: 8px;">${t("settings.ui.theme.help")}</p>
+        </article>
+    `;
+
+    const sel = document.getElementById("lang-select");
+    const locales = await listLocales();
+    const cur = currentLocale();
+    sel.innerHTML = locales.map(l => {
+        const label = l.native_name && l.name && l.native_name !== l.name
+            ? `${l.native_name} (${l.code})`
+            : `${l.native_name || l.name || l.code} (${l.code})`;
+        return `<option value="${escapeHtml(l.code)}"${l.code === cur ? " selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+    sel.addEventListener("change", () => setLocale(sel.value));
+
+    document.querySelectorAll("#theme-switch [data-theme-pref]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            setThemePref(btn.dataset.themePref);
+            // Re-render so the active highlight updates without a full
+            // section reload.
+            document.querySelectorAll("#theme-switch [data-theme-pref]").forEach(b => {
+                const on = b.dataset.themePref === btn.dataset.themePref;
+                b.classList.toggle("active", on);
+                b.setAttribute("aria-checked", on ? "true" : "false");
+            });
+        });
+    });
+}
+
 function renderAboutPage() {
     const body = document.getElementById("settings-page-body");
     document.getElementById("settings-page-title").textContent = "About N3UR0N";
@@ -1425,20 +1792,290 @@ function openGatewayForm() {
     });
 }
 
-async function openCapForm(existingName) {
-    // Fetch backends to populate the dropdown + the existing manifest
-    // (if editing) in parallel.
+// Cap templates: starter presets the user can pick from. Each is a full
+// `prefill` shape; the form is then editable.
+const CAP_TEMPLATES = {
+    blank_prompt: {
+        title: "Blank · prompt (LLM)",
+        summary: "Empty LLM-backed skill. Fill in everything yourself.",
+        binding_kind: "prompt",
+        data: {
+            name: "", version: "0.1.0", description: "", mode: "free",
+            tags: "", languages: "", countries: "",
+            disambiguation: "", output_semantic: "",
+            schema_in: `{
+  "type": "object",
+  "required": ["text"],
+  "properties": { "text": { "type": "string" } }
+}`,
+            schema_out: `{
+  "type": "object",
+  "required": ["result"],
+  "properties": { "result": { "type": "string" } }
+}`,
+            example_intent: "", example_args: '{"text":"hello"}', example_output: '{"result":"…"}',
+            prompt: { system: "", user: "", parser: "text", temperature: 0.0, model: "" },
+        },
+    },
+    translator_fr_en: {
+        title: "Translator · FR → EN",
+        summary: "LLM French→English translator with strict JSON output.",
+        binding_kind: "prompt",
+        data: {
+            name: "translator-fr-en", version: "0.1.0",
+            description: "Translate French text into English.",
+            mode: "free",
+            tags: "translation, language",
+            languages: "fr, en", countries: "",
+            disambiguation: "Use only for FR→EN translation of natural-language text. Do NOT use for code, table data, or other language pairs.",
+            output_semantic: "An English translation faithful to the source register.",
+            schema_in: `{
+  "type": "object",
+  "required": ["text"],
+  "properties": { "text": { "type": "string", "minLength": 1 } }
+}`,
+            schema_out: `{
+  "type": "object",
+  "required": ["result"],
+  "properties": { "result": { "type": "string" } }
+}`,
+            example_intent: "translate 'bonjour le monde' to English",
+            example_args: '{"text":"bonjour le monde"}',
+            example_output: '{"result":"hello world"}',
+            prompt: {
+                system: "You are a French→English translator. Respond strictly as JSON: {\"result\": \"<english translation>\"}. No commentary.",
+                user: "Translate to English:\n{{args.text}}",
+                parser: "json", temperature: 0.0, model: "",
+            },
+        },
+    },
+    text_summarizer: {
+        title: "Text summarizer (free-text)",
+        summary: "LLM summary in plain text, 2–3 sentences.",
+        binding_kind: "prompt",
+        data: {
+            name: "text-summarizer", version: "0.1.0",
+            description: "Summarize a body of text in 2–3 sentences.",
+            mode: "free", tags: "summary, writing",
+            languages: "", countries: "",
+            disambiguation: "Use for ad-hoc text summarization of articles, transcripts, notes. Do NOT use when structured extraction is needed — pick a JSON-output skill instead.",
+            output_semantic: "A short prose summary of the input.",
+            schema_in: `{
+  "type": "object",
+  "required": ["text"],
+  "properties": { "text": { "type": "string", "minLength": 1 } }
+}`,
+            schema_out: `{
+  "type": "object",
+  "required": ["text"],
+  "properties": { "text": { "type": "string" } }
+}`,
+            example_intent: "summarize this article",
+            example_args: '{"text":"Long article body here..."}',
+            example_output: '{"text":"Two-to-three sentence summary..."}',
+            prompt: {
+                system: "You write concise 2–3 sentence summaries. Output plain text only.",
+                user: "Summarize:\n{{args.text}}",
+                parser: "text", temperature: 0.2, model: "",
+            },
+        },
+    },
+    fact_extractor_json: {
+        title: "Fact extractor (JSON)",
+        summary: "LLM-backed structured extraction into JSON.",
+        binding_kind: "prompt",
+        data: {
+            name: "fact-extractor", version: "0.1.0",
+            description: "Extract structured facts (entities, dates, amounts) from raw text.",
+            mode: "free", tags: "extraction, structured",
+            languages: "", countries: "",
+            disambiguation: "Use when the caller wants typed fields back from prose. Do NOT use for summarization.",
+            output_semantic: "Structured facts pulled from the input, with empty arrays when none found.",
+            schema_in: `{
+  "type": "object",
+  "required": ["text"],
+  "properties": { "text": { "type": "string" } }
+}`,
+            schema_out: `{
+  "type": "object",
+  "required": ["people", "dates", "amounts"],
+  "properties": {
+    "people":  { "type": "array", "items": { "type": "string" } },
+    "dates":   { "type": "array", "items": { "type": "string" } },
+    "amounts": { "type": "array", "items": { "type": "string" } }
+  }
+}`,
+            example_intent: "extract names and dates from this paragraph",
+            example_args: '{"text":"Alice met Bob on 2024-03-12 about a $500 invoice."}',
+            example_output: '{"people":["Alice","Bob"],"dates":["2024-03-12"],"amounts":["$500"]}',
+            prompt: {
+                system: "You are an information-extraction engine. Respond ONLY with JSON matching the schema {\"people\":[],\"dates\":[],\"amounts\":[]}. No prose.",
+                user: "Extract from:\n{{args.text}}",
+                parser: "json", temperature: 0.0, model: "",
+            },
+        },
+    },
+    weather_http_get: {
+        title: "Weather lookup (HTTP GET)",
+        summary: "HTTP-binding skill calling an open-meteo style endpoint.",
+        binding_kind: "http",
+        data: {
+            name: "weather-now", version: "0.1.0",
+            description: "Current weather for a lat/lon pair via Open-Meteo.",
+            mode: "free", tags: "weather, http",
+            languages: "", countries: "",
+            disambiguation: "Use only for current weather at known coordinates. Do NOT use for forecasts beyond now or for geocoding.",
+            output_semantic: "Current weather block (temperature, wind, time) for the given coordinates.",
+            schema_in: `{
+  "type": "object",
+  "required": ["lat", "lon"],
+  "properties": {
+    "lat": { "type": "number" },
+    "lon": { "type": "number" }
+  }
+}`,
+            schema_out: `{
+  "type": "object",
+  "required": ["temperature", "windspeed", "time"],
+  "properties": {
+    "temperature": { "type": "number" },
+    "windspeed":   { "type": "number" },
+    "time":        { "type": "string" }
+  }
+}`,
+            example_intent: "weather at 48.85, 2.35",
+            example_args: '{"lat":48.85,"lon":2.35}',
+            example_output: '{"temperature":12.4,"windspeed":7.1,"time":"2026-05-14T12:00"}',
+            http: {
+                url_template: "/v1/forecast?latitude={{args.lat}}&longitude={{args.lon}}&current_weather=true",
+                method: "GET",
+                response_path: "$.current_weather",
+                timeout_ms: 5000,
+                headers: "",
+                body_template: "",
+            },
+        },
+    },
+    mcp_filesystem_read: {
+        title: "MCP filesystem read",
+        summary: "MCP-binding skill calling a `read_file` tool on a local MCP server.",
+        binding_kind: "mcp",
+        data: {
+            name: "fs-read", version: "0.1.0",
+            description: "Read the contents of a file via an MCP filesystem server.",
+            mode: "restricted", tags: "filesystem, mcp",
+            languages: "", countries: "",
+            disambiguation: "Use only when you need raw file contents from a known path. Restricted by default — caller must be authorized.",
+            output_semantic: "Raw text contents of the requested file.",
+            schema_in: `{
+  "type": "object",
+  "required": ["path"],
+  "properties": { "path": { "type": "string" } }
+}`,
+            schema_out: `{
+  "type": "object",
+  "required": ["content"],
+  "properties": { "content": { "type": "string" } }
+}`,
+            example_intent: "read /etc/hostname",
+            example_args: '{"path":"/etc/hostname"}',
+            example_output: '{"content":"my-host\\n"}',
+            mcp: {
+                tool_name: "read_file",
+                arg_mapping: '{ "path": "{{args.path}}" }',
+                result_mapping: '{ "content": "{{result.content[0].text}}" }',
+            },
+        },
+    },
+};
+
+function defaultPromptData() { return CAP_TEMPLATES.blank_prompt.data; }
+function defaultHttpData() {
+    return {
+        ...CAP_TEMPLATES.blank_prompt.data,
+        http: {
+            url_template: "/path?q={{args.text}}",
+            method: "GET",
+            response_path: "",
+            timeout_ms: 10000,
+            headers: "",
+            body_template: "",
+        },
+    };
+}
+function defaultMcpData() {
+    return {
+        ...CAP_TEMPLATES.blank_prompt.data,
+        mcp: {
+            tool_name: "",
+            arg_mapping: '{ }',
+            result_mapping: '{ }',
+        },
+    };
+}
+
+function openCapTemplatePicker() {
+    const overlay = document.getElementById("inspector");
+    document.getElementById("inspector-title").textContent = t("cap.template.picker.title");
+    document.getElementById("inspector-body").innerHTML = `
+        <section class="section">
+            <p class="row-sub" style="margin-top: 0;">${escapeHtml(t("cap.template.picker.intro"))}</p>
+            <div class="card-grid" id="cf-templates">
+                <article class="card" data-template="__blank__" style="cursor: pointer; border-style: dashed;">
+                    <div class="card-head">
+                        <div class="card-icon">＋</div>
+                        <span class="card-title">${escapeHtml(t("cap.template.blank"))}</span>
+                        <span class="card-kind">${escapeHtml(t("cap.template.blank.kind"))}</span>
+                    </div>
+                    <div class="card-meta">${escapeHtml(t("cap.template.blank.summary"))}</div>
+                </article>
+                ${Object.entries(CAP_TEMPLATES).filter(([k]) => k !== "blank_prompt").map(([key, tpl]) => `
+                    <article class="card" data-template="${escapeHtml(key)}" style="cursor: pointer;">
+                        <div class="card-head">
+                            <div class="card-icon">✦</div>
+                            <span class="card-title">${escapeHtml(tpl.title)}</span>
+                            <span class="card-kind">${escapeHtml(tpl.binding_kind)}</span>
+                        </div>
+                        <div class="card-meta">${escapeHtml(tpl.summary)}</div>
+                    </article>
+                `).join("")}
+            </div>
+        </section>
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
+            <button id="cf-picker-cancel" type="button" class="icon-btn">${escapeHtml(t("button.cancel"))}</button>
+        </div>
+    `;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.getElementById("cf-picker-cancel")?.addEventListener("click", closeInspector);
+    document.querySelectorAll("#cf-templates [data-template]").forEach(card => {
+        card.addEventListener("click", () => {
+            const key = card.dataset.template;
+            openCapForm(null, key === "__blank__" ? null : key);
+        });
+    });
+}
+
+async function openCapForm(existingName, templateKey) {
     let backends = [];
     let prefill = null;
+    let bindingKind = "prompt";
     try {
         const b = await api("GET", "/api/v0/backends");
         backends = (b.backends || []).filter(x => !x.error);
     } catch { /* leave empty */ }
+
     if (existingName) {
+        // Load the raw cap.toml so we can preserve all binding-kind data.
         try {
-            const list = await api("GET", "/api/v0/caps");
-            const cap = (list.caps || []).find(c => c.name === existingName);
+            const [listResp, rawResp] = await Promise.all([
+                api("GET", "/api/v0/caps"),
+                api("GET", `/api/v0/caps/manifests/${encodeURIComponent(existingName)}`).catch(() => null),
+            ]);
+            const cap = (listResp.caps || []).find(c => c.name === existingName);
             if (cap) {
+                const parsedToml = rawResp?.toml ? parseCapTomlBindings(rawResp.toml) : null;
+                bindingKind = parsedToml?.kind || "prompt";
                 prefill = {
                     name: cap.name,
                     version: cap.version || "0.1.0",
@@ -1454,244 +2091,560 @@ async function openCapForm(existingName) {
                     example_intent: (cap.examples && cap.examples[0]?.user_intent) || "",
                     example_args: JSON.stringify((cap.examples && cap.examples[0]?.args) || {}, null, 2),
                     example_output: JSON.stringify((cap.examples && cap.examples[0]?.expected_output) || {}, null, 2),
+                    backend: parsedToml?.backend || "",
+                    prompt: parsedToml?.prompt || defaultPromptData().prompt,
+                    http: parsedToml?.http || defaultHttpData().http,
+                    mcp: parsedToml?.mcp || defaultMcpData().mcp,
                 };
             }
         } catch { /* ignore */ }
     }
     if (!prefill) {
-        prefill = {
-            name: "", version: "0.1.0", description: "", mode: "free",
-            tags: "", languages: "", countries: "",
-            disambiguation: "", output_semantic: "",
-            schema_in: `{
-  "type": "object",
-  "required": ["text"],
-  "properties": { "text": { "type": "string" } }
-}`,
-            schema_out: `{
-  "type": "object",
-  "required": ["result"],
-  "properties": { "result": { "type": "string" } }
-}`,
-            example_intent: "", example_args: '{"text":"hello"}', example_output: '{"result":"…"}',
-        };
+        const tpl = templateKey ? CAP_TEMPLATES[templateKey] : null;
+        if (tpl) {
+            const d = tpl.data;
+            bindingKind = tpl.binding_kind;
+            prefill = {
+                name: d.name, version: d.version, description: d.description, mode: d.mode,
+                tags: d.tags, languages: d.languages, countries: d.countries,
+                disambiguation: d.disambiguation, output_semantic: d.output_semantic,
+                schema_in: d.schema_in, schema_out: d.schema_out,
+                example_intent: d.example_intent, example_args: d.example_args, example_output: d.example_output,
+                backend: "",
+                prompt: d.prompt || defaultPromptData().prompt,
+                http: d.http || defaultHttpData().http,
+                mcp: d.mcp || defaultMcpData().mcp,
+            };
+        } else {
+            prefill = {
+                ...defaultPromptData(),
+                backend: "",
+                http: defaultHttpData().http,
+                mcp: defaultMcpData().mcp,
+            };
+        }
     }
 
-    const backendOptions = backends.length
-        ? backends.map(b => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)} · ${escapeHtml(b.kind)}</option>`).join("")
-        : `<option value="" disabled>no backends — add one first</option>`;
-
     const overlay = document.getElementById("inspector");
-    document.getElementById("inspector-title").textContent =
-        existingName ? `Edit skill · ${existingName}` : "Add skill";
+    document.getElementById("inspector-title").textContent = existingName
+        ? t("cap.form.edit_title", { name: existingName })
+        : (templateKey && CAP_TEMPLATES[templateKey]
+            ? t("cap.form.add_title.template", { title: CAP_TEMPLATES[templateKey].title })
+            : t("cap.form.add_title"));
+
     document.getElementById("inspector-body").innerHTML = `
+        ${existingName ? "" : `
+        <div style="margin-bottom: 10px;">
+            <button id="cf-back-templates" type="button" class="icon-btn">${escapeHtml(t("cap.form.back_to_templates"))}</button>
+        </div>`}
         <section class="section">
-            <h3>basics</h3>
+            <h3>${escapeHtml(t("cap.form.section.basics"))}</h3>
             <form class="kv" onsubmit="return false;">
-                <label for="cf-name">name</label>
+                <label for="cf-name">${escapeHtml(t("cap.form.field.name"))}</label>
                 <input id="cf-name" type="text" required pattern="[a-zA-Z0-9_-]+"
                        value="${escapeHtml(prefill.name)}"
                        ${existingName ? "readonly" : ""}
                        placeholder="translator-fr-en, weather-now, legal-summarizer-fr…" />
-                <label for="cf-version">version</label>
+                <label for="cf-version">${escapeHtml(t("cap.form.field.version"))}</label>
                 <input id="cf-version" type="text" required value="${escapeHtml(prefill.version)}"
                        placeholder="semver: 0.1.0" />
-                <label for="cf-desc">description</label>
+                <label for="cf-desc">${escapeHtml(t("cap.form.field.description"))}</label>
                 <input id="cf-desc" type="text" required value="${escapeHtml(prefill.description)}"
                        placeholder="One sentence: what does this skill do?" />
-                <label for="cf-mode">access mode</label>
-                <select id="cf-mode">
-                    <option value="free"${prefill.mode === "free" ? " selected" : ""}>free</option>
-                    <option value="restricted"${prefill.mode === "restricted" ? " selected" : ""}>restricted</option>
+                <label for="cf-mode">${escapeHtml(t("cap.form.field.mode"))}</label>
+                <select id="cf-mode" title="${escapeHtml(t("cap.form.field.mode.tooltip"))}">
+                    <option value="free"${prefill.mode === "free" ? " selected" : ""}>${escapeHtml(t("cap.form.field.mode.public"))}</option>
+                    <option value="restricted"${prefill.mode === "restricted" ? " selected" : ""}>${escapeHtml(t("cap.form.field.mode.restricted"))}</option>
+                    <option value="private"${prefill.mode === "private" ? " selected" : ""}>${escapeHtml(t("cap.form.field.mode.private"))}</option>
                 </select>
-                <label for="cf-langs">languages</label>
+                <label for="cf-langs">${escapeHtml(t("cap.form.field.languages"))}</label>
                 <input id="cf-langs" type="text" value="${escapeHtml(prefill.languages)}"
                        placeholder="fr, en  (BCP 47, comma-separated)" />
-                <label for="cf-countries">countries</label>
+                <label for="cf-countries">${escapeHtml(t("cap.form.field.countries"))}</label>
                 <input id="cf-countries" type="text" value="${escapeHtml(prefill.countries)}"
                        placeholder="FR, BE, CH  (ISO 3166-1 alpha-2)" />
-                <label for="cf-tags">tags</label>
+                <label for="cf-tags">${escapeHtml(t("cap.form.field.tags"))}</label>
                 <input id="cf-tags" type="text" value="${escapeHtml(prefill.tags)}"
                        placeholder="translation, language, fr…" />
             </form>
         </section>
         <section class="section">
-            <h3>disambiguation (recommended)</h3>
+            <h3>${escapeHtml(t("cap.form.section.disambig"))}</h3>
             <textarea id="cf-disambig" class="form-textarea" rows="3"
-                      placeholder="When to prefer this skill vs others. When NOT to use it.">${escapeHtml(prefill.disambiguation)}</textarea>
+                      placeholder="${escapeHtml(t("cap.form.field.disambig.placeholder"))}">${escapeHtml(prefill.disambiguation)}</textarea>
+            <label for="cf-outsem" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">${escapeHtml(t("cap.form.field.output_semantic"))}</label>
+            <textarea id="cf-outsem" class="form-textarea" rows="2">${escapeHtml(prefill.output_semantic)}</textarea>
         </section>
         <section class="section">
-            <h3>binding · prompt (LLM-backed)</h3>
+            <h3>${escapeHtml(t("cap.form.section.binding"))}</h3>
             <form class="kv" onsubmit="return false;">
-                <label for="cf-backend">backend</label>
-                <select id="cf-backend" required>${backendOptions}</select>
-                <label for="cf-parser">output parser</label>
-                <select id="cf-parser">
-                    <option value="text">text (returns {text: "..."})</option>
-                    <option value="json">json (parsed, must match schema_out)</option>
+                <label for="cf-bindkind">${escapeHtml(t("cap.form.field.binding_type"))}</label>
+                <select id="cf-bindkind" ${existingName ? `disabled title="${escapeHtml(t("cap.form.field.binding.locked"))}"` : ""}>
+                    <option value="prompt"${bindingKind === "prompt" ? " selected" : ""}>${escapeHtml(t("cap.form.field.binding.prompt"))}</option>
+                    <option value="mcp"${bindingKind === "mcp" ? " selected" : ""}>${escapeHtml(t("cap.form.field.binding.mcp"))}</option>
+                    <option value="http"${bindingKind === "http" ? " selected" : ""}>${escapeHtml(t("cap.form.field.binding.http"))}</option>
                 </select>
-                <label for="cf-temp">temperature</label>
-                <input id="cf-temp" type="number" step="0.1" min="0" max="2" value="0.0" />
-                <label for="cf-model">model override</label>
-                <input id="cf-model" type="text" placeholder="(leave empty to use backend default)" />
+                <label for="cf-backend">${escapeHtml(t("cap.form.field.backend"))}</label>
+                <select id="cf-backend" required></select>
             </form>
-            <label for="cf-sysprompt" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">system prompt (required)</label>
-            <textarea id="cf-sysprompt" class="form-textarea" rows="6"
-                      placeholder="You are a French→English translator. Respond strictly as JSON: {&quot;result&quot;: &quot;...&quot;}."></textarea>
-            <label for="cf-usertpl" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">user template (optional)</label>
-            <textarea id="cf-usertpl" class="form-textarea" rows="3"
-                      placeholder="Translate to English: {{args.text}}"></textarea>
+            <div id="cf-bind-prompt" class="hidden" style="margin-top: 10px;">
+                <form class="kv" onsubmit="return false;">
+                    <label for="cf-parser">${escapeHtml(t("cap.form.field.parser"))}</label>
+                    <select id="cf-parser">
+                        <option value="text">${escapeHtml(t("cap.form.field.parser.text"))}</option>
+                        <option value="json">${escapeHtml(t("cap.form.field.parser.json"))}</option>
+                    </select>
+                    <label for="cf-temp">${escapeHtml(t("cap.form.field.temperature"))}</label>
+                    <input id="cf-temp" type="number" step="0.1" min="0" max="2" value="${prefill.prompt?.temperature ?? 0.0}" />
+                    <label for="cf-model">${escapeHtml(t("cap.form.field.model"))}</label>
+                    <input id="cf-model" type="text" value="${escapeHtml(prefill.prompt?.model || "")}" placeholder="${escapeHtml(t("cap.form.field.model.placeholder"))}" />
+                </form>
+                <label for="cf-sysprompt" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">${escapeHtml(t("cap.form.field.system_prompt"))}</label>
+                <textarea id="cf-sysprompt" class="form-textarea" rows="6"
+                          placeholder="You are a French→English translator. Respond strictly as JSON: {&quot;result&quot;: &quot;...&quot;}.">${escapeHtml(prefill.prompt?.system || "")}</textarea>
+                <label for="cf-usertpl" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">${t("cap.form.field.user_template")}</label>
+                <textarea id="cf-usertpl" class="form-textarea" rows="3"
+                          placeholder="Translate to English: {{args.text}}">${escapeHtml(prefill.prompt?.user || "")}</textarea>
+            </div>
+            <div id="cf-bind-http" class="hidden" style="margin-top: 10px;">
+                <form class="kv" onsubmit="return false;">
+                    <label for="cf-http-method">${escapeHtml(t("cap.form.field.http.method"))}</label>
+                    <select id="cf-http-method">
+                        ${["GET","POST","PUT","DELETE"].map(m => `<option value="${m}"${(prefill.http?.method || "GET") === m ? " selected" : ""}>${m}</option>`).join("")}
+                    </select>
+                    <label for="cf-http-url">${escapeHtml(t("cap.form.field.http.url_template"))}</label>
+                    <input id="cf-http-url" type="text" value="${escapeHtml(prefill.http?.url_template || "")}" placeholder="/v1/items/{{args.id}}" />
+                    <label for="cf-http-timeout">${escapeHtml(t("cap.form.field.http.timeout_ms"))}</label>
+                    <input id="cf-http-timeout" type="number" min="0" value="${prefill.http?.timeout_ms ?? ""}" placeholder="(default 30000)" />
+                    <label for="cf-http-respath">${escapeHtml(t("cap.form.field.http.response_path"))}</label>
+                    <input id="cf-http-respath" type="text" value="${escapeHtml(prefill.http?.response_path || "")}" placeholder="$.data.result" />
+                </form>
+                <label for="cf-http-headers" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">${escapeHtml(t("cap.form.field.http.headers"))}</label>
+                <textarea id="cf-http-headers" class="form-textarea code" rows="3" placeholder="Accept: application/json">${escapeHtml(prefill.http?.headers || "")}</textarea>
+                <label for="cf-http-body" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">${t("cap.form.field.http.body_template")}</label>
+                <textarea id="cf-http-body" class="form-textarea code" rows="4" placeholder='{"query":"{{args.q}}"}'>${escapeHtml(prefill.http?.body_template || "")}</textarea>
+            </div>
+            <div id="cf-bind-mcp" class="hidden" style="margin-top: 10px;">
+                <form class="kv" onsubmit="return false;">
+                    <label for="cf-mcp-tool">${escapeHtml(t("cap.form.field.mcp.tool_name"))}</label>
+                    <input id="cf-mcp-tool" type="text" value="${escapeHtml(prefill.mcp?.tool_name || "")}" placeholder="read_file" />
+                </form>
+                <label for="cf-mcp-argmap" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">${escapeHtml(t("cap.form.field.mcp.arg_mapping"))}</label>
+                <textarea id="cf-mcp-argmap" class="form-textarea code" rows="4">${escapeHtml(prefill.mcp?.arg_mapping || "{}")}</textarea>
+                <label for="cf-mcp-resmap" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 10px;">${escapeHtml(t("cap.form.field.mcp.result_mapping"))}</label>
+                <textarea id="cf-mcp-resmap" class="form-textarea code" rows="4">${escapeHtml(prefill.mcp?.result_mapping || "{}")}</textarea>
+            </div>
         </section>
         <section class="section">
-            <h3>schemas (JSON Schema, draft 7)</h3>
-            <label for="cf-schemain" style="color: var(--muted); font-size: 0.72rem;">schema_in</label>
+            <h3>${escapeHtml(t("cap.form.section.schemas"))}</h3>
+            <label for="cf-schemain" style="color: var(--muted); font-size: 0.72rem;">${escapeHtml(t("cap.form.field.schema_in"))}</label>
             <textarea id="cf-schemain" class="form-textarea code" rows="7">${escapeHtml(prefill.schema_in)}</textarea>
-            <label for="cf-schemaout" style="color: var(--muted); font-size: 0.72rem; margin-top: 10px; display: block;">schema_out</label>
+            <label for="cf-schemaout" style="color: var(--muted); font-size: 0.72rem; margin-top: 10px; display: block;">${escapeHtml(t("cap.form.field.schema_out"))}</label>
             <textarea id="cf-schemaout" class="form-textarea code" rows="7">${escapeHtml(prefill.schema_out)}</textarea>
         </section>
         <section class="section">
-            <h3>example (at least one required)</h3>
+            <h3>${escapeHtml(t("cap.form.section.example"))}</h3>
             <form class="kv" onsubmit="return false;">
-                <label for="cf-ex-intent">user_intent</label>
+                <label for="cf-ex-intent">${escapeHtml(t("cap.form.field.example.user_intent"))}</label>
                 <input id="cf-ex-intent" type="text" value="${escapeHtml(prefill.example_intent)}"
                        placeholder="translate 'bonjour' to English" />
             </form>
-            <label for="cf-ex-args" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 8px;">args (JSON)</label>
+            <label for="cf-ex-args" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 8px;">${escapeHtml(t("cap.form.field.example.args"))}</label>
             <textarea id="cf-ex-args" class="form-textarea code" rows="3">${escapeHtml(prefill.example_args)}</textarea>
-            <label for="cf-ex-out" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 8px;">expected_output (JSON)</label>
+            <label for="cf-ex-out" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 8px;">${escapeHtml(t("cap.form.field.example.output"))}</label>
             <textarea id="cf-ex-out" class="form-textarea code" rows="3">${escapeHtml(prefill.example_output)}</textarea>
         </section>
         <div style="display: flex; gap: 8px; justify-content: flex-end;">
-            <button id="cf-cancel" type="button" class="icon-btn">Cancel</button>
-            <button id="cf-save" type="button" class="primary" style="margin: 0;">${existingName ? "Save changes" : "Create skill"}</button>
+            <button id="cf-cancel" type="button" class="icon-btn">${escapeHtml(t("button.cancel"))}</button>
+            <button id="cf-save" type="button" class="primary" style="margin: 0;">${escapeHtml(existingName ? t("cap.form.button.save_changes") : t("cap.form.button.create"))}</button>
         </div>
         <div id="cf-status" class="row-sub" style="margin-top: 8px;"></div>
     `;
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
 
+    // Wire prompt-binding "parser" select since `selected` attribute is
+    // not honored via a static string when the value contains quotes.
+    const parserSel = document.getElementById("cf-parser");
+    if (parserSel) parserSel.value = prefill.prompt?.parser || "text";
+
+    document.getElementById("cf-back-templates")?.addEventListener("click", openCapTemplatePicker);
+
+    const kindSel = document.getElementById("cf-bindkind");
+    const backendSel = document.getElementById("cf-backend");
+    const blocks = {
+        prompt: document.getElementById("cf-bind-prompt"),
+        http:   document.getElementById("cf-bind-http"),
+        mcp:    document.getElementById("cf-bind-mcp"),
+    };
+    const refreshBackendOptions = () => {
+        const kind = kindSel.value;
+        const wanted = kind === "prompt" ? "openai_compat" : kind === "http" ? "http_base" : "mcp_server";
+        const filtered = backends.filter(b => b.kind === wanted);
+        backendSel.innerHTML = filtered.length
+            ? filtered.map(b => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)}</option>`).join("")
+            : `<option value="" disabled>${escapeHtml(t("cap.form.field.backend.empty", { kind: wanted }))}</option>`;
+        if (prefill.backend && filtered.some(b => b.name === prefill.backend)) {
+            backendSel.value = prefill.backend;
+        }
+    };
+    const refreshBlocks = () => {
+        const k = kindSel.value;
+        Object.entries(blocks).forEach(([key, el]) => el.classList.toggle("hidden", key !== k));
+    };
+    kindSel.addEventListener("change", () => { refreshBackendOptions(); refreshBlocks(); });
+    refreshBackendOptions();
+    refreshBlocks();
+
     document.getElementById("cf-cancel")?.addEventListener("click", closeInspector);
-    document.getElementById("cf-save")?.addEventListener("click", async () => {
-        const status = document.getElementById("cf-status");
-        const name = document.getElementById("cf-name").value.trim();
-        const version = document.getElementById("cf-version").value.trim();
-        const description = document.getElementById("cf-desc").value.trim();
-        const mode = document.getElementById("cf-mode").value;
-        const languages = csvList(document.getElementById("cf-langs").value);
-        const countries = csvList(document.getElementById("cf-countries").value);
-        const tags = csvList(document.getElementById("cf-tags").value);
-        const disambig = document.getElementById("cf-disambig").value.trim();
-        const backend = document.getElementById("cf-backend").value;
+    document.getElementById("cf-save")?.addEventListener("click", () => saveCapForm(existingName));
+}
+
+
+async function saveCapForm(existingName) {
+    const status = document.getElementById("cf-status");
+    const name = document.getElementById("cf-name").value.trim();
+    const version = document.getElementById("cf-version").value.trim();
+    const description = document.getElementById("cf-desc").value.trim();
+    const mode = document.getElementById("cf-mode").value;
+    const languages = csvList(document.getElementById("cf-langs").value);
+    const countries = csvList(document.getElementById("cf-countries").value);
+    const tags = csvList(document.getElementById("cf-tags").value);
+    const disambig = document.getElementById("cf-disambig").value.trim();
+    const outsem = document.getElementById("cf-outsem").value.trim();
+    const bindKind = document.getElementById("cf-bindkind").value;
+    const backend = document.getElementById("cf-backend").value;
+
+    if (!name || !version || !description) {
+        status.textContent = "name, version, description required";
+        return;
+    }
+    if (!backend) {
+        status.textContent = "select a backend (or add one first)";
+        return;
+    }
+
+    let schemaIn, schemaOut, exArgs, exOutput;
+    try {
+        schemaIn = JSON.parse(document.getElementById("cf-schemain").value);
+        schemaOut = JSON.parse(document.getElementById("cf-schemaout").value);
+    } catch (e) {
+        status.textContent = `schemas must be valid JSON: ${e.message}`;
+        return;
+    }
+    try {
+        exArgs = JSON.parse(document.getElementById("cf-ex-args").value);
+        exOutput = JSON.parse(document.getElementById("cf-ex-out").value);
+    } catch (e) {
+        status.textContent = `example args/output must be valid JSON: ${e.message}`;
+        return;
+    }
+    const exIntent = document.getElementById("cf-ex-intent").value.trim();
+    if (!exIntent) { status.textContent = "example user_intent required"; return; }
+
+    let binding;
+    if (bindKind === "prompt") {
+        const systemPrompt = document.getElementById("cf-sysprompt").value.trim();
+        const userTemplate = document.getElementById("cf-usertpl").value;
         const parser = document.getElementById("cf-parser").value;
         const temperature = parseFloat(document.getElementById("cf-temp").value || "0");
         const model = document.getElementById("cf-model").value.trim();
-        const systemPrompt = document.getElementById("cf-sysprompt").value.trim();
-        const userTemplate = document.getElementById("cf-usertpl").value;
-
-        if (!name || !version || !description || !backend || !systemPrompt) {
-            status.textContent = "name, version, description, backend, system_prompt are all required";
-            return;
-        }
-
-        let schemaIn, schemaOut, exArgs, exOutput;
-        try {
-            schemaIn = JSON.parse(document.getElementById("cf-schemain").value);
-            schemaOut = JSON.parse(document.getElementById("cf-schemaout").value);
-        } catch (e) {
-            status.textContent = `schemas must be valid JSON: ${e.message}`;
-            return;
-        }
-        try {
-            exArgs = JSON.parse(document.getElementById("cf-ex-args").value);
-            exOutput = JSON.parse(document.getElementById("cf-ex-out").value);
-        } catch (e) {
-            status.textContent = `example args/output must be valid JSON: ${e.message}`;
-            return;
-        }
-        const exIntent = document.getElementById("cf-ex-intent").value.trim();
-        if (!exIntent) { status.textContent = "example user_intent required"; return; }
-
-        const payload = {
-            name, version, description, mode,
-            languages, countries, tags, lobe_ids: [],
-            disambiguation: disambig || null,
-            output_semantic: null,
-            schema_in: schemaIn,
-            schema_out: schemaOut,
-            examples: [{ user_intent: exIntent, args: exArgs, expected_output: exOutput }],
-            binding: {
-                type: "prompt",
-                backend,
-                system_prompt: systemPrompt,
-                user_template: userTemplate.trim() ? userTemplate : null,
-                parameters: temperature ? { temperature } : {},
-                output_parser: parser,
-                model: model || null,
-            },
+        if (!systemPrompt) { status.textContent = "system_prompt is required for prompt binding"; return; }
+        binding = {
+            type: "prompt", backend,
+            system_prompt: systemPrompt,
+            user_template: userTemplate.trim() ? userTemplate : null,
+            parameters: temperature ? { temperature } : {},
+            output_parser: parser,
+            model: model || null,
         };
-        status.textContent = "saving…";
-        try {
-            const r = await api("POST", "/api/v0/caps/manifests", payload);
-            status.textContent = `saved — ${r.registered} skill${r.registered !== 1 ? "s" : ""} active.`;
-            await renderCapsCards();
-            setTimeout(closeInspector, 700);
-        } catch (e) {
-            status.textContent = `save failed: ${e.message}`;
+    } else if (bindKind === "http") {
+        const url_template = document.getElementById("cf-http-url").value.trim();
+        const method = document.getElementById("cf-http-method").value;
+        const respath = document.getElementById("cf-http-respath").value.trim();
+        const timeoutRaw = document.getElementById("cf-http-timeout").value.trim();
+        if (!url_template) { status.textContent = "url_template is required for http binding"; return; }
+        const headers = {};
+        for (const line of document.getElementById("cf-http-headers").value.split("\n")) {
+            const t = line.trim();
+            if (!t) continue;
+            const colon = t.indexOf(":");
+            if (colon <= 0) { status.textContent = `bad header line: "${t}" (expected Key: value)`; return; }
+            headers[t.slice(0, colon).trim()] = t.slice(colon + 1).trim();
         }
-    });
+        let body_template = null;
+        const bodyRaw = document.getElementById("cf-http-body").value.trim();
+        if (bodyRaw) {
+            try { body_template = JSON.parse(bodyRaw); }
+            catch (e) { status.textContent = `body_template must be valid JSON: ${e.message}`; return; }
+        }
+        binding = {
+            type: "http", backend,
+            url_template, method, headers,
+            body_template,
+            response_path: respath || null,
+            timeout_ms: timeoutRaw ? parseInt(timeoutRaw, 10) : null,
+        };
+    } else if (bindKind === "mcp") {
+        const tool_name = document.getElementById("cf-mcp-tool").value.trim();
+        if (!tool_name) { status.textContent = "tool_name is required for mcp binding"; return; }
+        let arg_mapping, result_mapping;
+        try { arg_mapping = JSON.parse(document.getElementById("cf-mcp-argmap").value || "{}"); }
+        catch (e) { status.textContent = `arg_mapping must be valid JSON: ${e.message}`; return; }
+        try { result_mapping = JSON.parse(document.getElementById("cf-mcp-resmap").value || "{}"); }
+        catch (e) { status.textContent = `result_mapping must be valid JSON: ${e.message}`; return; }
+        binding = { type: "mcp", backend, tool_name, arg_mapping, result_mapping };
+    } else {
+        status.textContent = `unknown binding kind: ${bindKind}`; return;
+    }
+
+    const payload = {
+        name, version, description, mode,
+        languages, countries, tags, lobe_ids: [],
+        disambiguation: disambig || null,
+        output_semantic: outsem || null,
+        schema_in: schemaIn,
+        schema_out: schemaOut,
+        examples: [{ user_intent: exIntent, args: exArgs, expected_output: exOutput }],
+        binding,
+    };
+    status.textContent = "saving…";
+    try {
+        const r = await api("POST", "/api/v0/caps/manifests", payload);
+        status.textContent = `saved — ${r.registered} skill${r.registered !== 1 ? "s" : ""} active.`;
+        await renderCapsCards();
+        setTimeout(closeInspector, 700);
+    } catch (e) {
+        status.textContent = `save failed: ${e.message}`;
+    }
+}
+
+// Best-effort parse of cap.toml to detect binding kind + extract per-kind
+// fields for the edit form. Falls back to "prompt" + empty fields on any
+// trouble; the user sees blank fields rather than a broken form.
+function parseCapTomlBindings(raw) {
+    const out = { kind: "prompt", backend: "" };
+    const bindMatch = raw.match(/\[binding\][^\[]*?type\s*=\s*"([^"]+)"[^\[]*?backend\s*=\s*"([^"]+)"/);
+    if (bindMatch) {
+        out.kind = bindMatch[1];
+        out.backend = bindMatch[2];
+    }
+    const grab = (section, key) => {
+        const re = new RegExp(`\\[${section}\\][\\s\\S]*?${key}\\s*=\\s*("""[\\s\\S]*?"""|"[^"]*")`);
+        const m = raw.match(re);
+        if (!m) return "";
+        let v = m[1];
+        if (v.startsWith('"""')) v = v.slice(3, -3).replace(/^\n/, "");
+        else v = v.slice(1, -1);
+        return v.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    };
+    const grabRaw = (section, key) => {
+        const re = new RegExp(`\\[${section}\\][\\s\\S]*?^${key}\\s*=\\s*(.+)$`, "m");
+        const m = raw.match(re);
+        return m ? m[1].trim() : "";
+    };
+    if (out.kind === "prompt") {
+        out.prompt = {
+            system: grab("binding\\.prompt", "system_prompt"),
+            user: grab("binding\\.prompt", "user_template"),
+            parser: (grab("binding\\.prompt", "output_parser") || "text"),
+            model: grab("binding\\.prompt", "model"),
+            temperature: (() => {
+                const m = raw.match(/\[binding\.prompt\][\s\S]*?temperature\s*=\s*([0-9.]+)/);
+                return m ? parseFloat(m[1]) : 0;
+            })(),
+        };
+    } else if (out.kind === "http") {
+        out.http = {
+            url_template: grab("binding\\.http", "url_template"),
+            method: grab("binding\\.http", "method") || "GET",
+            response_path: grab("binding\\.http", "response_path"),
+            timeout_ms: (() => {
+                const m = raw.match(/\[binding\.http\][\s\S]*?timeout_ms\s*=\s*(\d+)/);
+                return m ? parseInt(m[1], 10) : null;
+            })(),
+            headers: (() => {
+                const m = raw.match(/\[binding\.http\.headers\]([\s\S]*?)(?=\n\[|$)/);
+                if (!m) return "";
+                return m[1].trim().split("\n")
+                    .map(l => l.trim()).filter(Boolean)
+                    .map(l => {
+                        const kv = l.match(/^([^=]+)=\s*"([^"]*)"\s*$/);
+                        return kv ? `${kv[1].trim().replace(/^"|"$/g, "")}: ${kv[2]}` : l;
+                    }).join("\n");
+            })(),
+            body_template: (() => {
+                const r = grabRaw("binding\\.http", "body_template");
+                return r || "";
+            })(),
+        };
+    } else if (out.kind === "mcp") {
+        out.mcp = {
+            tool_name: grab("binding\\.mcp", "tool_name"),
+            arg_mapping: grabRaw("binding\\.mcp", "arg_mapping") || "{}",
+            result_mapping: grabRaw("binding\\.mcp", "result_mapping") || "{}",
+        };
+    }
+    return out;
 }
 
 function csvList(s) {
     return (s || "").split(",").map(x => x.trim()).filter(Boolean);
 }
 
-function openBackendForm() {
+async function openBackendForm(existingName) {
+    let prefill = null;
+    if (existingName) {
+        try {
+            prefill = await api("GET", `/api/v0/backends/${encodeURIComponent(existingName)}`);
+        } catch (e) {
+            await alertModal(`Could not load backend: ${e.message}`, { title: "Error" });
+            return;
+        }
+    }
+    const kindInit = prefill?.kind || "openai_compat";
+
     const overlay = document.getElementById("inspector");
-    document.getElementById("inspector-title").textContent = "Add backend (openai_compat)";
+    document.getElementById("inspector-title").textContent =
+        existingName
+            ? t("backend.form.edit_title", { name: existingName })
+            : t("backend.form.add_title");
     document.getElementById("inspector-body").innerHTML = `
         <section class="section">
-            <p>Declare an OpenAI-compatible backend (Ollama, llama.cpp, vLLM, OpenAI, etc).
-            The file is written to <code>backends/&lt;name&gt;.toml</code> in your config dir.
-            A <strong>restart is required</strong> for it to be picked up by the runtime.</p>
-            <form id="backend-form" class="kv" onsubmit="return false;">
-                <label for="bf-name">name</label>
-                <input id="bf-name" type="text" required pattern="[a-zA-Z0-9_-]+" placeholder="e.g. openai_main, llama_cpp_local" />
-                <label for="bf-base">base_url</label>
-                <input id="bf-base" type="url" required placeholder="https://api.openai.com or http://localhost:11434" />
-                <label for="bf-model">default_model</label>
-                <input id="bf-model" type="text" required placeholder="gpt-4o-mini · llama3.1:8b · …" />
-                <label for="bf-key">api_key</label>
-                <input id="bf-key" type="password" placeholder="(leave empty for Ollama / local endpoints)" />
+            <p>${existingName ? t("backend.form.intro.edit") : t("backend.form.intro.create")}</p>
+            <form class="kv" onsubmit="return false;">
+                <label for="bf-name">${escapeHtml(t("backend.form.name"))}</label>
+                <input id="bf-name" type="text" required pattern="[a-zA-Z0-9_-]+"
+                       value="${escapeHtml(prefill?.name || "")}"
+                       ${existingName ? "readonly" : ""}
+                       placeholder="openai_main · llama_local · fs_mcp · weather_api" />
+                <label for="bf-kind">${escapeHtml(t("backend.form.kind"))}</label>
+                <select id="bf-kind" ${existingName ? `disabled title="${escapeHtml(t("backend.form.kind.locked"))}"` : ""}>
+                    <option value="openai_compat"${kindInit === "openai_compat" ? " selected" : ""}>openai_compat — OpenAI / Ollama / vLLM / llama.cpp</option>
+                    <option value="mcp_server"${kindInit === "mcp_server" ? " selected" : ""}>mcp_server — local MCP tool server</option>
+                    <option value="http_base"${kindInit === "http_base" ? " selected" : ""}>http_base — generic HTTP API</option>
+                </select>
             </form>
-            <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
-                <button id="bf-back" type="button" class="icon-btn">← Back</button>
-                <button id="bf-save" type="button" class="primary" style="margin: 0;">Save</button>
-            </div>
-            <div id="bf-status" class="row-sub" style="margin-top: 8px;"></div>
         </section>
+        <section class="section" id="bf-openai">
+            <h3>${escapeHtml(t("backend.form.openai.title"))}</h3>
+            <form class="kv" onsubmit="return false;">
+                <label for="bf-base">${escapeHtml(t("backend.form.openai.base_url"))}</label>
+                <input id="bf-base" type="url" value="${escapeHtml(prefill?.base_url || "")}" placeholder="https://api.openai.com · http://localhost:11434" />
+                <label for="bf-model">${escapeHtml(t("backend.form.openai.default_model"))}</label>
+                <input id="bf-model" type="text" value="${escapeHtml(prefill?.default_model || "")}" placeholder="gpt-4o-mini · llama3.1:8b · qwen2.5:7b" />
+                <label for="bf-key">${escapeHtml(t("backend.form.openai.api_key"))}</label>
+                <input id="bf-key" type="password" placeholder="${escapeHtml(existingName && prefill?.has_api_key ? t("backend.form.openai.api_key.placeholder.keep") : t("backend.form.openai.api_key.placeholder.new"))}" />
+            </form>
+        </section>
+        <section class="section hidden" id="bf-mcp">
+            <h3>${escapeHtml(t("backend.form.mcp.title"))}</h3>
+            <form class="kv" onsubmit="return false;">
+                <label for="bf-mcp-transport">${escapeHtml(t("backend.form.mcp.transport"))}</label>
+                <select id="bf-mcp-transport">
+                    <option value="stdio"${prefill?.transport === "stdio" ? " selected" : ""}>stdio (local exec)</option>
+                    <option value="httpsse"${prefill?.transport === "httpsse" ? " selected" : ""}>http_sse (remote)</option>
+                </select>
+                <label for="bf-mcp-cmd">${escapeHtml(t("backend.form.mcp.command"))}</label>
+                <input id="bf-mcp-cmd" type="text" value="${escapeHtml(prefill?.command || "")}" placeholder="stdio: /path/to/server-binary · http_sse: https://mcp.example.com" />
+                <label for="bf-mcp-args">${escapeHtml(t("backend.form.mcp.args"))}</label>
+                <textarea id="bf-mcp-args" class="form-textarea code" rows="3" placeholder="--root&#10;/data">${escapeHtml((prefill?.args || []).join("\n"))}</textarea>
+                <label for="bf-mcp-env">${escapeHtml(t("backend.form.mcp.env"))}</label>
+                <textarea id="bf-mcp-env" class="form-textarea code" rows="3" placeholder="LOG_LEVEL=info">${escapeHtml(Object.entries(prefill?.env || {}).map(([k,v])=>`${k}=${v}`).join("\n"))}</textarea>
+            </form>
+        </section>
+        <section class="section hidden" id="bf-http">
+            <h3>${escapeHtml(t("backend.form.http.title"))}</h3>
+            <form class="kv" onsubmit="return false;">
+                <label for="bf-http-base">base_url</label>
+                <input id="bf-http-base" type="url" value="${escapeHtml(prefill?.base_url || "")}" placeholder="https://api.example.com" />
+                <label for="bf-http-headers">${escapeHtml(t("backend.form.http.headers"))}</label>
+                <textarea id="bf-http-headers" class="form-textarea code" rows="4" placeholder="Authorization: Bearer YOUR_TOKEN&#10;User-Agent: n3ur0n/0.3">${escapeHtml(Object.entries(prefill?.headers || {}).map(([k,v])=>`${k}: ${v}`).join("\n"))}</textarea>
+            </form>
+        </section>
+        <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
+            <button id="bf-back" type="button" class="icon-btn">${escapeHtml(t("button.back"))}</button>
+            <button id="bf-save" type="button" class="primary" style="margin: 0;">${escapeHtml(existingName ? t("button.save_changes") : t("button.save"))}</button>
+        </div>
+        <div id="bf-status" class="row-sub" style="margin-top: 8px;"></div>
     `;
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
+
+    const kindSel = document.getElementById("bf-kind");
+    const sections = {
+        openai_compat: document.getElementById("bf-openai"),
+        mcp_server: document.getElementById("bf-mcp"),
+        http_base: document.getElementById("bf-http"),
+    };
+    const showKind = (k) => {
+        Object.entries(sections).forEach(([key, el]) => el.classList.toggle("hidden", key !== k));
+    };
+    kindSel.addEventListener("change", () => showKind(kindSel.value));
+    showKind(kindInit);
+
     document.getElementById("bf-back")?.addEventListener("click", closeInspector);
     document.getElementById("bf-save")?.addEventListener("click", async () => {
-        const name = document.getElementById("bf-name").value.trim();
-        const base = document.getElementById("bf-base").value.trim();
-        const model = document.getElementById("bf-model").value.trim();
-        const key = document.getElementById("bf-key").value;
         const status = document.getElementById("bf-status");
-        if (!name || !base || !model) {
-            status.textContent = "name, base_url, default_model are all required";
-            return;
+        const name = existingName || document.getElementById("bf-name").value.trim();
+        const kind = kindSel.value;
+        if (!name) { status.textContent = "name required"; return; }
+        const payload = { name, kind };
+        if (kind === "openai_compat") {
+            payload.base_url = document.getElementById("bf-base").value.trim();
+            payload.default_model = document.getElementById("bf-model").value.trim();
+            const key = document.getElementById("bf-key").value;
+            if (!payload.base_url || !payload.default_model) {
+                status.textContent = "base_url + default_model required"; return;
+            }
+            // On edit with an existing key, blank means "keep". Send a sentinel
+            // the server can detect — here we just omit api_key, and the
+            // server's existing upsert behavior overwrites the file. So if
+            // editing and the user left it blank, preload it from the (now
+            // unknown) value? We can't — api_key is masked on GET. Compromise:
+            // if existing + blank, we keep the file's previous value by
+            // re-reading the existing manifest server-side. Simpler: include
+            // api_key only if non-empty, then patch server to preserve on
+            // empty.
+            if (key) payload.api_key = key;
+            else if (existingName && prefill?.has_api_key) payload.api_key_keep = true;
+            else payload.api_key = "";
+        } else if (kind === "mcp_server") {
+            payload.transport = document.getElementById("bf-mcp-transport").value;
+            payload.command = document.getElementById("bf-mcp-cmd").value.trim();
+            if (!payload.command) { status.textContent = "command required"; return; }
+            payload.args = document.getElementById("bf-mcp-args").value
+                .split("\n").map(s => s.trim()).filter(Boolean);
+            const env = {};
+            for (const line of document.getElementById("bf-mcp-env").value.split("\n")) {
+                const t = line.trim();
+                if (!t) continue;
+                const eq = t.indexOf("=");
+                if (eq <= 0) { status.textContent = `bad env line: "${t}" (expected KEY=value)`; return; }
+                env[t.slice(0, eq).trim()] = t.slice(eq + 1);
+            }
+            payload.env = env;
+        } else if (kind === "http_base") {
+            payload.base_url = document.getElementById("bf-http-base").value.trim();
+            if (!payload.base_url) { status.textContent = "base_url required"; return; }
+            const headers = {};
+            for (const line of document.getElementById("bf-http-headers").value.split("\n")) {
+                const t = line.trim();
+                if (!t) continue;
+                const colon = t.indexOf(":");
+                if (colon <= 0) { status.textContent = `bad header line: "${t}" (expected Key: value)`; return; }
+                headers[t.slice(0, colon).trim()] = t.slice(colon + 1).trim();
+            }
+            payload.headers = headers;
         }
         status.textContent = "saving…";
         try {
-            await api("POST", "/api/v0/backends", {
-                name, kind: "openai_compat",
-                base_url: base, default_model: model, api_key: key,
-            });
-            status.textContent = "saved. restart required.";
-            await renderBackendsList();
-            setTimeout(closeInspector, 600);
+            const r = await api("POST", "/api/v0/backends", payload);
+            status.textContent = r.reload_warning
+                ? `saved, but reload failed: ${r.reload_warning}`
+                : `saved — ${r.backends_loaded} backend${r.backends_loaded !== 1 ? "s" : ""} live, ${r.caps_loaded} cap${r.caps_loaded !== 1 ? "s" : ""} rebound.`;
+            await renderBackendsCards();
+            setTimeout(closeInspector, 800);
         } catch (e) {
             status.textContent = `save failed: ${e.message}`;
         }
@@ -1711,6 +2664,7 @@ document.getElementById("network-refresh")?.addEventListener("click", refreshNet
 document.getElementById("skills-refresh")?.addEventListener("click", refreshSkills);
 document.getElementById("network-filter")?.addEventListener("input", renderNetworkList);
 document.getElementById("skills-filter")?.addEventListener("input", renderSkillsList);
+document.getElementById("skills-type-filter")?.addEventListener("change", renderSkillsList);
 document.getElementById("inspector-back")?.addEventListener("click", closeInspector);
 document.getElementById("inspector-close")?.addEventListener("click", closeInspector);
 document.addEventListener("keydown", (e) => {

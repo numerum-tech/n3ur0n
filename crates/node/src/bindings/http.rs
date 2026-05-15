@@ -122,6 +122,8 @@ impl HttpBinding {
 
 #[async_trait]
 impl Binding for HttpBinding {
+    fn kind(&self) -> &'static str { "http" }
+
     async fn invoke(&self, args: Value) -> NodeResult<Value> {
         // 1. Resolve URL: substitute `{{args.x}}` in the template, then
         // join with base. If the template begins with `http(s)://`, it's

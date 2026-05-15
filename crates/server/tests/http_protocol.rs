@@ -132,3 +132,31 @@ async fn replay_returns_conflict() {
     assert_eq!(s2, StatusCode::CONFLICT);
     assert_eq!(body["error"], "replay");
 }
+
+#[tokio::test]
+async fn api_locales_lists_embedded_catalogs() {
+    let node = build_node().await;
+    let router = app(node, None);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v0/locales")
+        .body(Body::empty())
+        .unwrap();
+    let resp = router.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    let codes: Vec<String> = body["available"]
+        .as_array()
+        .expect("available is an array")
+        .iter()
+        .filter_map(|e| e.get("code").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    // At minimum the en + fr catalogs ship with the binary today.
+    assert!(codes.contains(&"en".to_string()), "missing en in {:?}", codes);
+    assert!(codes.contains(&"fr".to_string()), "missing fr in {:?}", codes);
+    // Default is documented as "en" — guard against accidental flip.
+    assert_eq!(body["default"], "en");
+}

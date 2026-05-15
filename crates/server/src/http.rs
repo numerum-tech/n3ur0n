@@ -64,22 +64,60 @@ struct UiAssets;
 /// Build the HTTP router. `runtime` is `None` when the node has no planner
 /// configured — `/api/v0/conversations/:id/messages` returns 503 in that case.
 pub fn app(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
-    let state = AppState { node, runtime };
+    app_with_settings(node, runtime, None)
+}
 
-    let api_v0 = Router::new()
+/// Variant of [`app`] that also mounts the settings sub-router under
+/// `/api/v0`. The CLI / desktop call this directly so settings routes
+/// pass through the same auth middleware stack.
+pub fn app_with_settings(
+    node: Node,
+    runtime: Option<Arc<NodeRuntime>>,
+    config_dir: Option<std::path::PathBuf>,
+) -> Router {
+    use crate::auth::{require_authed, AuthState};
+    use crate::require_perm;
+
+    let auth_state = AuthState {
+        db: node.db().clone(),
+        bypass: crate::auth::read_bypass_env(),
+    };
+    let state = AppState { node: node.clone(), runtime };
+
+    // Public sub-router: unauthenticated endpoints (health checks, locale
+    // catalog, login + bootstrap + logout + auth/me). Everything else
+    // requires a session cookie via the `require_authed` layer below.
+    let public_api = Router::new()
         .route("/health", get(health))
+        .route("/locales", get(api_locales))
+        .with_state(state.clone());
+
+    // Routes any logged-in user can hit. Permission-specific guards
+    // (caps:write, backends:write, etc.) are layered inside the
+    // settings/auth sub-routers.
+    let authed_api = Router::new()
         .route("/whoami", get(whoami))
-        .route("/caps", get(api_caps))
-        .route("/peers", get(api_peers))
-        .route("/peers/refresh", post(api_peers_refresh))
-        .route("/peers/discover", post(api_peers_discover))
+        .route("/caps", get(api_caps).route_layer(require_perm!(crate::auth::perm::CAPS_READ)))
+        .route("/peers", get(api_peers).route_layer(require_perm!(crate::auth::perm::PEERS_READ)))
+        .route(
+            "/peers/refresh",
+            post(api_peers_refresh).route_layer(require_perm!(crate::auth::perm::PEERS_WRITE)),
+        )
+        .route(
+            "/peers/discover",
+            post(api_peers_discover).route_layer(require_perm!(crate::auth::perm::PEERS_WRITE)),
+        )
         .route(
             "/chat",
-            post(api_chat).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
+            post(api_chat)
+                .layer(DefaultBodyLimit::max(LOCAL_API_LIMIT))
+                .route_layer(require_perm!(crate::auth::perm::CHAT_USE)),
         )
         .route(
             "/invoke",
-            post(api_invoke).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
+            post(api_invoke)
+                .layer(DefaultBodyLimit::max(LOCAL_API_LIMIT))
+                .route_layer(require_perm!(crate::auth::perm::INVOKE_USE)),
         )
         .route("/conversations", get(conv_list).post(conv_create))
         .route(
@@ -94,9 +132,25 @@ pub fn app(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
             "/conversations/:id/messages/stream",
             post(conv_messages_stream).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
+        .route_layer(middleware::from_fn(require_authed))
+        .with_state(state.clone());
+
+    let settings_routes = match config_dir {
+        Some(dir) => crate::settings::router(dir, node),
+        None => Router::new(),
+    };
+
+    let api_v0 = Router::new()
+        .merge(public_api)
+        .merge(authed_api)
+        .merge(crate::auth::router(auth_state.clone()))
+        .merge(settings_routes)
         .layer(DefaultBodyLimit::max(META_LIMIT))
         .layer(middleware::from_fn(client_id_middleware))
-        .with_state(state.clone());
+        .layer(middleware::from_fn_with_state(
+            auth_state,
+            crate::auth::session_middleware,
+        ));
 
     let proto_v0 = Router::new()
         .route("/health", get(public_health))
@@ -198,6 +252,53 @@ async fn whoami(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(json!({"instance_id": state.node.instance_id().as_str()}))
 }
 
+/// List the locale catalogs embedded under `ui/locales/*.json`. Each entry
+/// carries the `_meta` block (code, name, native_name) and the relative URL
+/// to fetch the full catalog. The frontend uses this to populate the
+/// language picker; dropping a new JSON file under `crates/server/ui/locales/`
+/// at build time is enough to surface a new language — no server changes.
+async fn api_locales() -> impl IntoResponse {
+    let mut entries: Vec<Value> = Vec::new();
+    for path in UiAssets::iter() {
+        let p = path.as_ref();
+        if !p.starts_with("locales/") || !p.ends_with(".json") {
+            continue;
+        }
+        let Some(file) = UiAssets::get(p) else { continue };
+        let parsed: serde_json::Value = match serde_json::from_slice(&file.data) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let meta = parsed.get("_meta").cloned().unwrap_or(json!({}));
+        let code = meta
+            .get("code")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| {
+                p.trim_start_matches("locales/")
+                    .trim_end_matches(".json")
+                    .to_string()
+            });
+        entries.push(json!({
+            "code": code,
+            "name": meta.get("name").cloned().unwrap_or(Value::Null),
+            "native_name": meta.get("native_name").cloned().unwrap_or(Value::Null),
+            "url": format!("/ui/{}", p),
+        }));
+    }
+    entries.sort_by(|a, b| {
+        a.get("code")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .cmp(b.get("code").and_then(|v| v.as_str()).unwrap_or(""))
+    });
+    Json(json!({
+        "available": entries,
+        "default": "en",
+    }))
+    .into_response()
+}
+
 /// Local capability registry as JSON. Each entry mirrors `CapabilityDecl`
 /// (the wire form returned by `describe_self`) plus a `has_binding` flag
 /// so the UI can distinguish manifest-mode caps from legacy compile-time
@@ -207,10 +308,15 @@ async fn api_caps(State(state): State<AppState>) -> impl IntoResponse {
     let body: Vec<Value> = decls
         .into_iter()
         .map(|d| {
-            let has_binding = state.node.registry().binding_for(&d.name).is_some();
+            let binding = state.node.registry().binding_for(&d.name);
+            let has_binding = binding.is_some();
+            let binding_type = binding.as_ref().map(|b| b.kind());
             let mut v = serde_json::to_value(&d).unwrap_or(Value::Null);
             if let Value::Object(m) = &mut v {
                 m.insert("has_binding".into(), Value::Bool(has_binding));
+                if let Some(bt) = binding_type {
+                    m.insert("binding_type".into(), Value::String(bt.into()));
+                }
             }
             v
         })

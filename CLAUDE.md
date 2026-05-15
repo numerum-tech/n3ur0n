@@ -9,16 +9,22 @@ This project uses OpenWolf for context management. Read and follow .wolf/OPENWOL
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## État du dépôt (8 mai 2026)
+## État du dépôt (mis à jour 2026-05-12)
 
-Phase pré-implémentation. **Aucun code à ce jour** — uniquement deux documents de spec :
+Releases tagged : **0.1.0** (protocole initial), **0.2.0** (planner v2, BM25, GBNF, cascade), **0.3.0** (manifestes TOML, hot-reload, master-detail UI). Cf. [CHANGELOG.md](CHANGELOG.md) et [ROADMAP.md](ROADMAP.md) pour la traçabilité shipping.
 
-- [n3ur0n-architecture-v0.md](n3ur0n-architecture-v0.md) — architecture v0.1 (vision, vocabulaire, couches, identité, protocole, limites assumées, questions ouvertes).
-- [project-tech-stack.md](project-tech-stack.md) — stack technique v0.1 (Rust workspace, Tauri 2, SvelteKit, axum, SQLite, profils consumer/publisher).
+Documents de spec et de référence :
 
-**Règle de précédence** : si un détail de stack contredit l'architecture, l'architecture prime ; le doc de stack est mis à jour pour refléter le compromis (cf. `project-tech-stack.md` §17).
+- [n3ur0n-architecture-v0.md](n3ur0n-architecture-v0.md) — architecture v0.1 + amendements 2026-05-08 (sender_public_key) et 2026-05-12 (AccessMode ternaire, CapabilityDecl v0.2, planner local).
+- [project-tech-stack.md](project-tech-stack.md) — stack technique v0.1 + amendement 2026-05-12 (crate `node`, backend runtime-instantiation, bindings v0.3, hot-reload ArcSwap).
+- [n3ur0n-capability-manifest-v0.md](n3ur0n-capability-manifest-v0.md) — brouillon de format de manifeste (spec conceptuelle ; le split caps/backends effectif diverge, voir note d'écart en tête du doc).
+- [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md) — brouillon de spec blob protocol (transfert de fichiers via endpoint `/n3ur0n/v0/blobs`, non implémenté).
+- [n3ur0n-planner-recommendations-v0.md](n3ur0n-planner-recommendations-v0.md) — recommandations planner v0.1→v0.2 (largement absorbées par 0.2.0/0.3.0, conservé comme trace de raisonnement).
+- [n3ur0n-planner-brainstorm.md](n3ur0n-planner-brainstorm.md) — brainstorm initial planner (référence pour comprendre les choix v0.2).
 
-Avant tout travail d'implémentation, **lire les deux docs en entier** — ils sont opiniâtres, les choix sont fermes (pas des suggestions). Les sections "Limites assumées" (§10 archi) et "Limites et reports" (§16 stack) listent les compromis explicites de v0.1 ; ne pas réintroduire de fonctionnalité sans note datée.
+**Règle de précédence** : si un détail de stack contredit l'architecture, l'architecture prime ; le doc de stack est mis à jour pour refléter le compromis (cf. `project-tech-stack.md` §17). Si une décision implémentation contredit un doc, le **code prime** sur les docs — les écarts sont consignés par notes datées en tête des docs concernés.
+
+Avant tout travail d'implémentation, lire au minimum architecture + stack + leurs amendements 2026-05-12. Les sections "Limites assumées" (§10 archi) et "Limites et reports" (§16 stack) listent les compromis explicites de v0.1 ; ne pas réintroduire de fonctionnalité sans note datée.
 
 ## Ce que N3UR0N est (et n'est pas)
 
@@ -170,9 +176,13 @@ docker compose -f docker/compose.yml down -v
 - `node-c` : backend Ollama via `host.docker.internal:11434` (host Ollama réutilisé via `extra_hosts: host-gateway`). Modèle override par env `OLLAMA_MODEL` (défaut `qwen2.5:0.5b`), base URL override par `OLLAMA_BASE_URL`.
 - `node-b` bootstrappe automatiquement depuis `node-a` (env `N3UR0N_BOOTSTRAP_PEERS`).
 
-### Capacity planner v0.1 (Mode A — local LLM)
+### Capacity planner (v0.2 — PlanExec, mis à jour 2026-05-12)
 
-Le user **dialogue uniquement avec son instance**. L'instance fait planner → tool_call → observe → reply. v0.1 livre une seule impl `LLMPlanner` (tool-calling natif OpenAI). Modèle recommandé : `llama3.1:8b` ou `qwen2.5:7b`.
+Le user **dialogue uniquement avec son instance**. L'instance compile un plan typé (DAG de steps avec refs `${...}`), l'exécute en parallèle au-dessus des capacités du réseau, puis synthétise la réponse (reflect). Trois appels LLM par dispatch (compile / [exécution des steps] / reflect), pas une boucle ReAct.
+
+Impl : `PlanExecPlanner` dans `crates/node/src/planner/plan_exec.rs`. Le trait `PlanCompiler` permet l'escalade vers un peer remote exposant la cap `plan` (cascade). Constrained decoding GBNF / JSON Schema activé quand le backend le supporte (`crates/node/src/planner/grammar.rs`). Retrieval BM25 sur le catalogue avant compile (`crates/node/src/planner/retrieval.rs`).
+
+`LLMPlanner` (ReAct boucle, présent en 0.1.0) **a été supprimé** en 0.2.0 — toute référence dans des docs anciennes est obsolète. Modèle recommandé inchangé : `llama3.1:8b` ou `qwen2.5:7b`.
 
 Cf `n3ur0n-planner-brainstorm.md` pour le brainstorm complet (3 modes, 4 niveaux, limites assumées).
 
@@ -194,7 +204,7 @@ browser → /api/v0/conversations/:id/messages {message}
 - `N3UR0N_PLANNER_LLM_BASE_URL`, `N3UR0N_PLANNER_LLM_MODEL`, `N3UR0N_PLANNER_LLM_API_KEY`
 - `N3UR0N_MAX_CONCURRENT_PLANNERS=4`
 - `N3UR0N_MAX_ACTIVE_CONVERSATIONS=50`
-- `MAX_TOOL_TURNS=6`, `MAX_CONTEXT_TURNS=16` (constantes code)
+- `MAX_CONTEXT_TURNS=16` (constante code). `MAX_TOOL_TURNS` n'a plus de sens avec `PlanExecPlanner` (plan compilé en un coup, pas de boucle ReAct) — la limite équivalente est `MAX_PLAN_STEPS` (défaut 8, configurable).
 
 **Conversations API** (cookie `n3ur0n_client_id` pour isolation, généré server-side) :
 | Route | Rôle |

@@ -127,6 +127,8 @@ impl McpBinding {
 
 #[async_trait]
 impl Binding for McpBinding {
+    fn kind(&self) -> &'static str { "mcp" }
+
     async fn invoke(&self, args: Value) -> NodeResult<Value> {
         let mapped = self.map_args(args)?;
         let session = self.backend.ensure_session().await?;

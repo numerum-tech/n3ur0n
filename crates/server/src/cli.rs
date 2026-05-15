@@ -13,7 +13,7 @@ use n3ur0n_node::client as peer_client;
 use n3ur0n_node::discovery;
 use n3ur0n_node::runtime::RuntimeConfig;
 use n3ur0n_server::bootstrap::{BackendKind, PlannerKind};
-use n3ur0n_server::{bootstrap, http, settings};
+use n3ur0n_server::{bootstrap, http};
 use n3ur0n_storage::peers as peers_repo;
 use serde_json::Value;
 
@@ -238,7 +238,7 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
         None
     };
 
-    let app = http::app(node.clone(), runtime).merge(settings::router(dir.clone(), node));
+    let app = http::app_with_settings(node, runtime, Some(dir.clone()));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "listening");
     axum::serve(listener, app).await?;

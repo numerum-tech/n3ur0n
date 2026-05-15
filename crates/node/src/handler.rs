@@ -144,7 +144,7 @@ fn describe_self(node: &Node, now: OffsetDateTime) -> NodeResult<Value> {
         updated_at: now
             .format(&time::format_description::well_known::Rfc3339)
             .map_err(|e| NodeError::InvalidPayload(e.to_string()))?,
-        capabilities: node.registry().all(),
+        capabilities: node.registry().public_decls(),
     };
     Ok(serde_json::to_value(body)?)
 }
@@ -181,7 +181,11 @@ fn get_known_peers(node: &Node, payload: &Value) -> NodeResult<Value> {
                     .as_deref()
                     .and_then(|raw| serde_json::from_str(raw).ok());
                 let matches = cached
-                    .map(|d| d.capabilities.iter().any(|c| &c.name == want))
+                    .map(|d| {
+                        d.capabilities
+                            .iter()
+                            .any(|c| &c.name == want && c.mode.is_public())
+                    })
                     .unwrap_or(false);
                 if !matches {
                     return None;
@@ -210,6 +214,11 @@ async fn invoke(node: &Node, envelope: &Envelope) -> NodeResult<Value> {
     let decl = registry
         .get(&req.capability)
         .ok_or_else(|| NodeError::UnknownCapability(req.capability.clone()))?;
+
+    // Private caps are local-only: do not disclose existence to peers.
+    if matches!(decl.mode, AccessMode::Private) {
+        return Err(NodeError::UnknownCapability(req.capability.clone()));
+    }
 
     if matches!(decl.mode, AccessMode::Restricted) && req.subscription_token.is_none() {
         return Err(NodeError::InvalidPayload(format!(

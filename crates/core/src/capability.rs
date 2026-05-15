@@ -4,13 +4,29 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Access mode for a single capability.
+///
+/// `Free` and `Restricted` are network-visible; `Private` is local-only —
+/// it MUST be filtered out of `describe_self` and treated as
+/// `UnknownCapability` for inbound invokes. Local API + planner may still
+/// use it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AccessMode {
-    /// Any correctly signed message is accepted.
+    /// Any correctly signed message is accepted. Surfaced as "Public" in
+    /// the UI; wire literal stays `"free"` for backward compatibility.
     Free,
     /// Caller must be in the whitelist or present a valid `subscription_token`.
     Restricted,
+    /// Local-only. Never advertised to peers, never invokable over the
+    /// network. Usable by the local API, local planner, and embedded UI.
+    Private,
+}
+
+impl AccessMode {
+    /// True iff this cap should be visible to / invokable by peers.
+    pub fn is_public(self) -> bool {
+        !matches!(self, AccessMode::Private)
+    }
 }
 
 /// Wire-level capability declaration.
@@ -106,4 +122,27 @@ pub struct NegativeExample {
     pub user_intent: String,
     /// Why this cap is the wrong choice (often points to the right one).
     pub why_not: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn access_mode_wire_literals() {
+        // Wire literal stability matters for cross-version peer compat.
+        // `Free` MUST stay `"free"` even though the UI labels it "Public".
+        assert_eq!(serde_json::to_string(&AccessMode::Free).unwrap(), "\"free\"");
+        assert_eq!(serde_json::to_string(&AccessMode::Restricted).unwrap(), "\"restricted\"");
+        assert_eq!(serde_json::to_string(&AccessMode::Private).unwrap(), "\"private\"");
+        assert_eq!(serde_json::from_str::<AccessMode>("\"free\"").unwrap(), AccessMode::Free);
+        assert_eq!(serde_json::from_str::<AccessMode>("\"private\"").unwrap(), AccessMode::Private);
+    }
+
+    #[test]
+    fn is_public_excludes_private_only() {
+        assert!(AccessMode::Free.is_public());
+        assert!(AccessMode::Restricted.is_public());
+        assert!(!AccessMode::Private.is_public());
+    }
 }

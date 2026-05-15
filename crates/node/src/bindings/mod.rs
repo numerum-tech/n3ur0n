@@ -34,6 +34,11 @@ pub trait Binding: Send + Sync + std::fmt::Debug {
     /// Invoke the binding with caller args. Returns the cap's output
     /// shaped to match `schema_out` declared on the capability.
     async fn invoke(&self, args: Value) -> NodeResult<Value>;
+
+    /// Static identifier of the binding kind ("prompt" / "mcp" / "http").
+    /// Used by UI / introspection paths that need to label a registered
+    /// cap without peeking at the manifest.
+    fn kind(&self) -> &'static str;
 }
 
 /// Build a binding for the given spec, consuming the backend instance it

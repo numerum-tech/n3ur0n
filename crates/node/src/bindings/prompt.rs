@@ -75,6 +75,8 @@ impl PromptBinding {
 
 #[async_trait]
 impl Binding for PromptBinding {
+    fn kind(&self) -> &'static str { "prompt" }
+
     async fn invoke(&self, args: Value) -> NodeResult<Value> {
         // 1. Render the user-facing message.
         let user_content: String = match &self.user_template {
@@ -193,6 +195,8 @@ mod tests {
 
     #[async_trait]
     impl Binding for DirectBinding {
+        fn kind(&self) -> &'static str { "prompt" }
+
         async fn invoke(&self, args: Value) -> NodeResult<Value> {
             let user = match &self.user_tmpl {
                 Some(t) => match template::render(t, &args)? {
