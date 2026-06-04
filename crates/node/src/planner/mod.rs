@@ -2,6 +2,7 @@
 
 pub mod catalog;
 pub mod compiler;
+pub mod direct;
 pub mod grammar;
 pub mod plan;
 pub mod plan_exec;
@@ -18,6 +19,7 @@ use crate::error::NodeResult;
 use crate::node::Node;
 
 pub use catalog::{Catalog, ToolDef};
+pub use direct::DirectChatPlanner;
 pub use plan_exec::PlanExecPlanner;
 
 /// Maximum number of conversation turns (User+Assistant pairs) to include
