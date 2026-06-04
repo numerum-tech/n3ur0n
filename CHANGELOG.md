@@ -4,10 +4,23 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [Unreleased]
 
+## [0.4.0] — open source, i18n, RBAC, settings UX
+
 ### Added
 - Apache-2.0 license + open-source scaffolding (README, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY).
 - GitHub Actions: CI (Linux + macOS + Windows), release workflow for desktop + server artefacts, Pages workflow for the landing page.
 - GitHub Pages landing page with download buttons that pull from the latest release.
+- i18n EN + FR: catalogs at `crates/server/ui/locales/{en,fr}.json`, `/api/v0/locales`, `data-i18n` DOM attributes, locale picker in Settings → Interface.
+- Interface settings: language picker + Dark / Light / System theme (`:root[data-theme]`).
+- Capability composer: all three binding kinds (`prompt`, `mcp`, `http`) with per-kind backend filtering; template picker (blank, translator, summarizer, fact-extractor, weather HTTP, fs-read MCP).
+- `AccessMode::Private`: excluded from `describe_self`, remote invoke returns `UnknownCapability`; Public / Restricted / Private badges in UI.
+- Skills type filter (binding kind + access mode) on sidebar and Settings.
+- Backend hot-reload: `Node.backends` is `Arc<ArcSwap<BackendsRegistry>>`; POST/DELETE `/api/v0/backends` reload without restart.
+- Backend edit form: GET `/api/v0/backends/:name`, upsert with `api_key_keep` to preserve secrets on blank edit.
+- RBAC phase 1: SQLite migration `0003_users_sessions.sql`, argon2id passwords, session cookies, roles (User / Operator / Admin), permission-gated API routes, Users admin page, `N3UR0N_AUTH_DISABLE=1` for loopback dev.
+
+### Changed
+- Workspace and desktop package version aligned to **0.4.0** (wire `protocol_version` remains `n3ur0n/0.3` — no envelope change).
 
 ## [0.3.0] — capability manifests + desktop client
 

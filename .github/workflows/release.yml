@@ -1,6 +1,6 @@
 name: Release
 
-# Triggered when a tag like `v0.3.0` is pushed. Builds server binaries
+# Triggered when a tag like `v0.4.0` is pushed. Builds server binaries
 # for Linux/macOS/Windows, a Docker image to ghcr.io, and desktop
 # installers (.dmg, .msi, .AppImage, .deb) via tauri-action — all
 # attached to the GitHub Release.
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build (e.g. v0.3.0)"
+        description: "Tag to build (e.g. v0.4.0)"
         required: true
 
 permissions:

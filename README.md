@@ -152,9 +152,9 @@ Drop it in `<config>/caps/`. The runtime picks it up; no restart needed. See [`n
 
 ## Project status
 
-**v0.3 (current)** — capability manifests, hot-reload, master-detail Settings UI, desktop app, Docker image. The protocol is stable enough to play with; cryptographic primitives and signing are non-negotiable.
+**v0.4.0 (current)** — open-source release, EN/FR UI, RBAC phase 1, full capability composer (prompt / mcp / http), backend hot-reload, `AccessMode::Private`. Wire protocol `n3ur0n/0.3` unchanged.
 
-**Not yet** — public registry, lobe governance, marketplace, WASM bindings, OS keychain integration, mobile clients.
+**Not yet** — public registry, lobe governance, marketplace, WASM bindings, OS keychain integration, mobile clients, CLI i18n.
 
 See [ROADMAP.md](ROADMAP.md) for the milestone tracker.
 

@@ -46,17 +46,17 @@ See [CHANGELOG.md](CHANGELOG.md) for what has shipped.
 - First-launch Ollama auto-detect + default backend scaffold
 - Reverse-announce + transitive bootstrap
 
-## v0.4 — open source 🚧
+## v0.4 — open source ✅ (release 0.4.0)
 
 - ✅ Apache-2.0 + public docs + GitHub Pages download site
 - ✅ Multi-arch CI + release workflow (server bin × 5 targets, Docker, desktop installers)
-- 🧭 **i18n — EN + FR shipped by default.** Web UI, desktop shell menus,
-  CLI `--help`, error messages. Locale resolved from `Accept-Language`
-  (web) / OS locale (desktop) / `--lang` flag (CLI). Translation
-  catalog under `crates/server/ui/locales/{en,fr}.json` and
-  `crates/server/src/locales/`. Third-party locales accepted via PR.
-- 🧭 MCP + HTTP binding forms in composer (currently prompt-only)
-- 🧭 Backend hot-reload (currently restart-required)
+- ✅ i18n EN + FR (web UI catalogs, Settings → Interface locale picker, `data-i18n` DOM). Third-party locales via PR (`crates/server/ui/locales/*.json`).
+- ✅ MCP + HTTP binding forms in composer + template picker
+- ✅ Backend hot-reload (`ArcSwap` on `BackendsRegistry`; POST/DELETE backends without restart)
+- ✅ RBAC phase 1 (users, sessions, roles, permission-gated `/api/v0`)
+- ✅ `AccessMode::Private` + cap type filters in Settings / sidebar
+- ✅ Interface theme (Dark / Light / System)
+- 🧭 CLI `--help` + server error messages fully i18n (web UI done in 0.4.0)
 - 🧭 OS keychain integration for backend `api_key` storage
 - 🧭 Conversation summarization above N turns
 - 🧭 SSE reconnect + stable step IDs across dispatches
@@ -154,7 +154,7 @@ These have been considered and rejected for the foreseeable future. Re-open only
 
 ## Open governance questions
 
-To resolve before a public launch — not before v0.4 ships:
+To resolve before a public launch — not before v1.0:
 
 - Synapse granularity (1:1 vs 1:lobe vs 1:capability)
 - Economic model of any default registry

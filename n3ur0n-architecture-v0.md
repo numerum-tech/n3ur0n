@@ -7,8 +7,13 @@
 **Amendement 2026-05-12** : alignement docs ↔ code après les releases 0.2.0 et 0.3.0. Trois écarts à connaître avant lecture :
 
 1. **`AccessMode` est ternaire**, pas binaire. Wire literals : `"free" | "restricted" | "private"`. UI labels : `Public | Restricted | Private`. `Private` = local-only, jamais annoncé via `describe_self`, jamais invokable réseau. Voir §6.1 (à lire avec cet amendement).
-2. **`CapabilityDecl` étendu en v0.2** (`PROTOCOL_VERSION = "n3ur0n/0.2"`). Nouveaux champs (tous `#[serde(default)]` pour rétrocompat) : `examples`, `disambiguation`, `negative_examples`, `output_semantic`, `version` (semver de la cap), `languages` (BCP 47), `countries` (ISO 3166-1 alpha-2). Voir §9.4 (à lire avec cet amendement).
+2. **`CapabilityDecl` étendu en v0.2** (`PROTOCOL_VERSION` effectif : `"n3ur0n/0.3"`). Nouveaux champs (tous `#[serde(default)]` pour rétrocompat) : `examples`, `disambiguation`, `negative_examples`, `output_semantic`, `version` (semver de la cap), `languages` (BCP 47), `countries` (ISO 3166-1 alpha-2). Voir §9.4 (à lire avec cet amendement).
 3. **Le planning multi-étapes existe désormais côté instance** (release 0.2.0, `PlanExecPlanner` + `PlanCompiler` cascade). §10 affirme « pas de pipelines orchestrés v0.1 » — cette limite est levée. La planification reste *locale à l'instance du consumer*, le protocole pair lui-même n'a pas changé.
+
+**Amendement 2026-06-02** (release 0.4.0, sans changement d'envelope) :
+
+4. **`AccessMode::Private` livré** — filtrage `describe_self` + rejet invoke réseau (cf. amendement 2026-05-12 §6.1).
+5. **Comptes locaux RBAC phase 1** — hors protocole pair ; sessions cookie sur `/api/v0` / UI embarquée uniquement.
 
 Le code prime sur les docs. Cf. règle de précédence CLAUDE.md.
 

@@ -9,9 +9,9 @@ This project uses OpenWolf for context management. Read and follow .wolf/OPENWOL
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## État du dépôt (mis à jour 2026-05-12)
+## État du dépôt (mis à jour 2026-06-02)
 
-Releases tagged : **0.1.0** (protocole initial), **0.2.0** (planner v2, BM25, GBNF, cascade), **0.3.0** (manifestes TOML, hot-reload, master-detail UI). Cf. [CHANGELOG.md](CHANGELOG.md) et [ROADMAP.md](ROADMAP.md) pour la traçabilité shipping.
+Releases : **0.1.0** (protocole initial), **0.2.0** (planner v2, BM25, GBNF, cascade), **0.3.0** (manifestes TOML, hot-reload caps, master-detail UI), **0.4.0** (open source, i18n EN/FR, RBAC phase 1, composer tous bindings, backend hot-reload). Version workspace = `0.4.0` ; `protocol_version` fil = `n3ur0n/0.3` (inchangé). Cf. [CHANGELOG.md](CHANGELOG.md) et [ROADMAP.md](ROADMAP.md).
 
 Documents de spec et de référence :
 
@@ -19,6 +19,7 @@ Documents de spec et de référence :
 - [project-tech-stack.md](project-tech-stack.md) — stack technique v0.1 + amendement 2026-05-12 (crate `node`, backend runtime-instantiation, bindings v0.3, hot-reload ArcSwap).
 - [n3ur0n-capability-manifest-v0.md](n3ur0n-capability-manifest-v0.md) — brouillon de format de manifeste (spec conceptuelle ; le split caps/backends effectif diverge, voir note d'écart en tête du doc).
 - [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md) — brouillon de spec blob protocol (transfert de fichiers via endpoint `/n3ur0n/v0/blobs`, non implémenté).
+- [n3ur0n-direct-chat-v0.md](n3ur0n-direct-chat-v0.md) — spec mode chat direct (bypass planner, API locale + UI uniquement ; validée 2026-06-04, non implémentée).
 - [n3ur0n-planner-recommendations-v0.md](n3ur0n-planner-recommendations-v0.md) — recommandations planner v0.1→v0.2 (largement absorbées par 0.2.0/0.3.0, conservé comme trace de raisonnement).
 - [n3ur0n-planner-brainstorm.md](n3ur0n-planner-brainstorm.md) — brainstorm initial planner (référence pour comprendre les choix v0.2).
 

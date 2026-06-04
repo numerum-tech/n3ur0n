@@ -11,6 +11,12 @@
 3. **Trois bindings de capacité implémentés v0.3** : `prompt` (prompted-LLM), `mcp` (tool MCP), `http` (forward générique). §7.2 listait `MCPBackend`, `OpenAIBackend`, `HTTPBackend`, `ProcessBackend` comme aspirations v0.1 ; la réalité est plus propre — les bindings remplacent les backends figés, et le `OpenAIBackend` historique est devenu le sous-jacent du binding `prompt`. `ProcessBackend` non implémenté (reporté, le besoin est en grande partie absorbé par `mcp` stdio).
 4. **Hot-reload du registry via `ArcSwap`** (release 0.3.0). `Node.registry` est `Arc<ArcSwap<CapabilityRegistry>>`. Permet la CRUD de caps sans redémarrer le serveur.
 
+**Amendement 2026-06-02** : alignement docs ↔ code après release **0.4.0** :
+
+5. **Hot-reload des backends** (0.4.0). `Node.backends` est `Arc<ArcSwap<BackendsRegistry>>`. POST/DELETE `/api/v0/backends` reconstruit le registry et rebind les caps sans redémarrage.
+6. **RBAC phase 1** (0.4.0). Migration `0003_users_sessions.sql`, rôles User / Operator / Admin, cookie de session, routes `/api/v0` protégées par permission. `N3UR0N_AUTH_DISABLE=1` pour le dev loopback. Le protocole pair (`/n3ur0n/v0`) reste signé Ed25519, indépendant des comptes locaux.
+7. **`AccessMode::Private` implémenté** (0.4.0). Filtré de `describe_self` ; invoke réseau → `UnknownCapability`.
+
 Le code prime sur les docs. Cf. règle de précédence CLAUDE.md.
 
 ---
@@ -614,7 +620,7 @@ Ce stack assume les compromis listés dans `n3ur0n-architecture-v0.md` §10 et y
 - **Pas de mises à jour automatiques v0.1 côté server.** Auto-update intégré côté desktop via `tauri-plugin-updater`. Côté server, l'opérateur upgrade manuellement (Docker pull, binaire replace, systemd restart). Auto-update server v0.2.
 - **Pas de packaging Linux distro v0.1** au-delà de `.AppImage` et `.deb`. Ni `.rpm`, ni paquets Arch, ni Flatpak. À industrialiser v0.2.
 - **Pas de version mobile v0.1.** Tauri Mobile reste expérimental selon les plateformes ; cible v1.0.
-- **UI mono-utilisateur côté UX.** Le token local unique n'établit pas de session multi-utilisateur. Vrai multi-utilisateur (comptes distincts dans une même instance) est v0.3+. Acceptable car le multi-utilisateur naturel du réseau est inter-instances, pas intra-instance.
+- **Multi-utilisateur local (0.4.0+).** RBAC phase 1 : comptes locaux + rôles sur l'API `/api/v0` et l'UI embarquée. Pas encore de fédération d'identité utilisateur sur le fil pair ; le multi-utilisateur *réseau* reste inter-instances.
 - **Listener publisher en mode desktop nécessite intervention manuelle sur le NAT.** UPnP via `igd-next` proposé mais non garanti. Pas de relais TURN/WebRTC v0.1. Publisher sérieux = VPS ou homelab avec port forward.
 - **Coûts de signing (Apple, Windows) non couverts par budget v0.1.** Premiers releases peuvent être non signés pour early adopters acceptant les warnings, mais signature obligatoire avant lancement grand public.
 

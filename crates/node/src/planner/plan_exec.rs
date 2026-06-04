@@ -22,10 +22,9 @@ use crate::node::Node;
 use crate::planner::catalog::{Catalog, ToolDef};
 use crate::planner::plan::{execute_plan_streaming, validate_plan, Plan};
 use crate::planner::{
-    DispatchEvent, DispatchOutcome, EventSender, Planner, PlanStepInfo, TraceEntry,
+    DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, Planner,
+    PlanStepInfo, TraceEntry, MAX_CONTEXT_TURNS,
 };
-
-const MAX_CONTEXT_TURNS: usize = 16;
 /// Maximum number of *remote* tools surfaced in the compile prompt. Local
 /// tools always pass through (the operator configured them explicitly).
 /// 20 picked to keep prompts under ~3k tokens for moderately enriched
@@ -117,6 +116,8 @@ impl Planner for PlanExecPlanner {
         node: &Node,
         state: &mut ConversationState,
         user_message: String,
+        _mode: DispatchMode,
+        _opts: DispatchOptions,
     ) -> NodeResult<DispatchOutcome> {
         self.dispatch_inner(node, state, user_message, None).await
     }
@@ -126,6 +127,8 @@ impl Planner for PlanExecPlanner {
         node: &Node,
         state: &mut ConversationState,
         user_message: String,
+        _mode: DispatchMode,
+        _opts: DispatchOptions,
         events: EventSender,
     ) -> NodeResult<DispatchOutcome> {
         self.dispatch_inner(node, state, user_message, Some(&events))

@@ -19,7 +19,7 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use crate::conversation::{self, ConversationError, ConversationState};
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
-use crate::planner::{DispatchOutcome, EventSender, Planner};
+use crate::planner::{DispatchMode, DispatchOptions, DispatchOutcome, EventSender, Planner};
 
 /// Configurable bounds for the runtime.
 #[derive(Debug, Clone)]
@@ -136,6 +136,19 @@ impl NodeRuntime {
         conv_id: &str,
         message: String,
     ) -> NodeResult<DispatchOutcome> {
+        self.handle_user_message_with_opts(client_id, conv_id, message, DispatchMode::default(), DispatchOptions::default())
+            .await
+    }
+
+    /// Process a user message with explicit dispatch mode and options.
+    pub async fn handle_user_message_with_opts(
+        &self,
+        client_id: &str,
+        conv_id: &str,
+        message: String,
+        mode: DispatchMode,
+        opts: DispatchOptions,
+    ) -> NodeResult<DispatchOutcome> {
         // Per-conversation serialisation.
         let conv_lock = self.lock_for(conv_id);
         let _guard = conv_lock.lock().await;
@@ -146,7 +159,7 @@ impl NodeRuntime {
         let mut state = self.load_state(conv_id, client_id).await?;
         let outcome = self
             .planner
-            .dispatch(&self.node, &mut state, message)
+            .dispatch(&self.node, &mut state, message, mode, opts)
             .await?;
         self.store_in_cache(state).await;
         Ok(outcome)
@@ -162,6 +175,27 @@ impl NodeRuntime {
         message: String,
         events: EventSender,
     ) -> NodeResult<DispatchOutcome> {
+        self.handle_user_message_streaming_with_opts(
+            client_id,
+            conv_id,
+            message,
+            DispatchMode::default(),
+            DispatchOptions::default(),
+            events,
+        )
+        .await
+    }
+
+    /// Same as `handle_user_message_streaming` but with explicit dispatch mode and options.
+    pub async fn handle_user_message_streaming_with_opts(
+        &self,
+        client_id: &str,
+        conv_id: &str,
+        message: String,
+        mode: DispatchMode,
+        opts: DispatchOptions,
+        events: EventSender,
+    ) -> NodeResult<DispatchOutcome> {
         let conv_lock = self.lock_for(conv_id);
         let _guard = conv_lock.lock().await;
 
@@ -170,7 +204,7 @@ impl NodeRuntime {
         let mut state = self.load_state(conv_id, client_id).await?;
         let outcome = self
             .planner
-            .dispatch_streaming(&self.node, &mut state, message, events)
+            .dispatch_streaming(&self.node, &mut state, message, mode, opts, events)
             .await?;
         self.store_in_cache(state).await;
         Ok(outcome)

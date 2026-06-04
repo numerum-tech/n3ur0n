@@ -20,6 +20,33 @@ use crate::node::Node;
 pub use catalog::{Catalog, ToolDef};
 pub use plan_exec::PlanExecPlanner;
 
+/// Maximum number of conversation turns (User+Assistant pairs) to include
+/// in the planner's context window. Shared between PlanExecPlanner and
+/// DirectChatPlanner implementations.
+pub const MAX_CONTEXT_TURNS: usize = 16;
+
+/// Dispatch mode: determines how the planner processes a user message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchMode {
+    /// Default mode: compile a plan and execute it (PlanExecPlanner).
+    Auto,
+    /// Direct mode: skip planning, call LLM directly (DirectChatPlanner).
+    Direct,
+}
+
+impl Default for DispatchMode {
+    fn default() -> Self {
+        DispatchMode::Auto
+    }
+}
+
+/// Options passed to the planner's dispatch methods.
+#[derive(Debug, Clone, Default)]
+pub struct DispatchOptions {
+    /// If set, override the default model for the LLM backend.
+    pub model_override: Option<String>,
+}
+
 /// Outcome of one user message → planner exchange. The state has already
 /// been mutated and persisted (one row per turn) by the time this returns.
 #[derive(Debug, Clone)]
@@ -107,6 +134,8 @@ pub trait Planner: Send + Sync + std::fmt::Debug {
         node: &Node,
         state: &mut ConversationState,
         user_message: String,
+        mode: DispatchMode,
+        opts: DispatchOptions,
     ) -> NodeResult<DispatchOutcome>;
 
     /// Streaming variant: same contract as `dispatch`, but emits live
@@ -117,8 +146,10 @@ pub trait Planner: Send + Sync + std::fmt::Debug {
         node: &Node,
         state: &mut ConversationState,
         user_message: String,
+        mode: DispatchMode,
+        opts: DispatchOptions,
         _events: EventSender,
     ) -> NodeResult<DispatchOutcome> {
-        self.dispatch(node, state, user_message).await
+        self.dispatch(node, state, user_message, mode, opts).await
     }
 }

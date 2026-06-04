@@ -2425,7 +2425,7 @@ dependencies = [
 
 [[package]]
 name = "n3ur0n-adapters"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2442,7 +2442,7 @@ dependencies = [
 
 [[package]]
 name = "n3ur0n-core"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "data-encoding",
@@ -2461,7 +2461,7 @@ dependencies = [
 
 [[package]]
 name = "n3ur0n-desktop"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2485,7 +2485,7 @@ dependencies = [
 
 [[package]]
 name = "n3ur0n-node"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2514,7 +2514,7 @@ dependencies = [
 
 [[package]]
 name = "n3ur0n-server"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "n3ur0n-storage"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "argon2",
  "data-encoding",

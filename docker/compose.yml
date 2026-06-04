@@ -41,6 +41,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       N3UR0N_ENDPOINT: http://node-a:4242
+      N3UR0N_AUTH_DISABLE: "1"
       # node-a runs the local planner: a 7B/8B model on the host's Ollama.
       # plan_exec: LLM compiles a typed plan upfront, deterministic executor
       # walks it. Override with PLANNER_MODE=llm to use the older ReAct loop.
@@ -62,6 +63,7 @@ services:
         condition: service_healthy
     environment:
       N3UR0N_ENDPOINT: http://node-b:4242
+      N3UR0N_AUTH_DISABLE: "1"
       N3UR0N_BACKEND: utility
       N3UR0N_BOOTSTRAP_PEERS: http://node-a:4242
       RUST_LOG: info,n3ur0n=debug
@@ -81,6 +83,7 @@ services:
         condition: service_healthy
     environment:
       N3UR0N_ENDPOINT: http://node-c:4242
+      N3UR0N_AUTH_DISABLE: "1"
       N3UR0N_BACKEND: ollama
       N3UR0N_OPENAI_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       N3UR0N_OPENAI_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
@@ -103,6 +106,7 @@ services:
         condition: service_healthy
     environment:
       N3UR0N_ENDPOINT: http://node-d:4242
+      N3UR0N_AUTH_DISABLE: "1"
       N3UR0N_BACKEND: ollama
       N3UR0N_OPENAI_BASE_URL: ${REMOTE_OLLAMA_BASE_URL:-http://192.168.4.101:11435}
       N3UR0N_OPENAI_MODEL: ${REMOTE_OLLAMA_MODEL:-gpt-oss:20b}
@@ -113,7 +117,7 @@ services:
     volumes:
       - node-d-data:/var/lib/n3ur0n
 
-  # node-e: manifest mode (v0.3). Loads capabilities from cap.toml files
+  # node-e: manifest mode (v0.3+). Loads capabilities from caps/*.toml
   # mounted from the host. Demonstrates the binding-driven runtime path.
   node-e:
     <<: *node
@@ -124,6 +128,7 @@ services:
         condition: service_healthy
     environment:
       N3UR0N_ENDPOINT: http://node-e:4242
+      N3UR0N_AUTH_DISABLE: "1"
       N3UR0N_MANIFEST_DIR: /etc/n3ur0n/manifests
       N3UR0N_BOOTSTRAP_PEERS: http://node-a:4242
       RUST_LOG: info,n3ur0n=debug

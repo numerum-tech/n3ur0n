@@ -33,7 +33,7 @@ listener. Calls back from those peers won't reach this node — by design.
 
 Contents:
 - `keys.json` — Ed25519 keypair (0600 perms on Unix).
-- `n3ur0n.sqlite` — peer directory + nonce table + conversations.
+- `n3ur0n.sqlite` — peer directory + nonce table + conversations + users/sessions (0.4+).
 - `backends/*.toml` — backend manifests (LLM endpoints, MCP servers, HTTP bases).
 - `caps/*.toml` — capability manifests (skills exposed by this client).
 
@@ -67,13 +67,13 @@ cargo install tauri-cli@^2
 cargo tauri build
 ```
 
-## Status (v0.3 alpha)
+## Status (v0.4.0)
 
-- [x] Scaffold + loopback embed
+- [x] Scaffold + loopback embed (same UI as server `/ui/`)
 - [x] Identity in OS config dir
 - [x] Ollama auto-detect on first launch
-- [ ] Settings tab (form-driven backend CRUD)
-- [ ] Planner runtime auto-wired
-- [ ] Cap composer (form → manifest)
-- [ ] OS keychain for api_key storage
-- [ ] Signed app bundles + auto-updater
+- [x] Settings UI (backends, skills, gateways, identity, interface, users)
+- [x] Planner + manifest-mode node (shared with server embed)
+- [x] Cap composer (prompt / mcp / http → TOML)
+- [ ] OS keychain for `api_key` storage
+- [ ] Signed app bundles + auto-updater (CI workflow exists; signing keys TBD)
