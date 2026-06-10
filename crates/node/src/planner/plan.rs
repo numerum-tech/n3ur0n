@@ -158,12 +158,7 @@ fn validate_args_against_schema(args: &Value, schema: &Value) -> Result<(), Stri
     // Treat `{}` or non-object schemas as "no constraints" — common for
     // pass-through caps and for malformed publishers we shouldn't punish
     // the planner for.
-    if !schema.is_object()
-        || schema
-            .as_object()
-            .map(|m| m.is_empty())
-            .unwrap_or(true)
-    {
+    if !schema.is_object() || schema.as_object().map(|m| m.is_empty()).unwrap_or(true) {
         return Ok(());
     }
     let compiled = jsonschema::JSONSchema::options()
@@ -346,7 +341,9 @@ pub fn resolve_value(v: &Value, blackboard: &HashMap<String, Value>) -> Value {
             // Inline substitution.
             Value::String(substitute_inline(s, blackboard))
         }
-        Value::Array(arr) => Value::Array(arr.iter().map(|x| resolve_value(x, blackboard)).collect()),
+        Value::Array(arr) => {
+            Value::Array(arr.iter().map(|x| resolve_value(x, blackboard)).collect())
+        }
         Value::Object(o) => Value::Object(
             o.iter()
                 .map(|(k, x)| (k.clone(), resolve_value(x, blackboard)))
@@ -461,15 +458,14 @@ pub async fn execute_plan_streaming(
     catalog: &Catalog,
     events: Option<&EventSender>,
 ) -> NodeResult<PlanRun> {
-    use futures::stream::{FuturesUnordered, StreamExt};
     use futures::FutureExt;
+    use futures::stream::{FuturesUnordered, StreamExt};
 
     // Validate the plan can be ordered (cycle detection); the actual order
     // is irrelevant here — we drive execution off the dependency graph.
     topological_order(plan).map_err(|e| NodeError::InvalidPayload(e.to_string()))?;
 
-    let by_id: HashMap<&str, &PlanStep> =
-        plan.plan.iter().map(|s| (s.id.as_str(), s)).collect();
+    let by_id: HashMap<&str, &PlanStep> = plan.plan.iter().map(|s| (s.id.as_str(), s)).collect();
     let plan_idx: HashMap<String, usize> = plan
         .plan
         .iter()
@@ -520,9 +516,9 @@ pub async fn execute_plan_streaming(
     // Helper: schedule one step (run synchronously up to the await point so
     // resolve_value reads the latest blackboard, then push the future).
     let spawn_step = |step_id: String,
-                          blackboard: &HashMap<String, Value>,
-                          trace_by_id: &mut HashMap<String, TraceEntry>,
-                          in_flight: &mut FuturesUnordered<_>| {
+                      blackboard: &HashMap<String, Value>,
+                      trace_by_id: &mut HashMap<String, TraceEntry>,
+                      in_flight: &mut FuturesUnordered<_>| {
         let step = match by_id.get(step_id.as_str()).copied() {
             Some(s) => s,
             None => return,
@@ -589,6 +585,39 @@ use raw refs only, let the downstream tool combine values)",
                 return;
             }
         };
+
+        // Revalidate the *resolved* args against the cap's input schema.
+        // `validate_plan` skips templated args at compile time (the values
+        // aren't known yet); now that `${...}` refs are substituted we can
+        // catch a type error (e.g. an int landing in a string field) locally
+        // instead of shipping a doomed, signed invoke over the wire.
+        if let Err(e) = validate_args_against_schema(&resolved_args, &tool.cap.schema_in) {
+            let err = format!(
+                "step `{}`: resolved args do not conform to `{}` schema_in: {}",
+                step.id, tool_name, e
+            );
+            trace_by_id.insert(
+                step.id.clone(),
+                TraceEntry {
+                    peer_id: tool.peer_id.clone(),
+                    capability: step.capability.clone(),
+                    args: resolved_args,
+                    result: None,
+                    error: Some(err.clone()),
+                },
+            );
+            let id = step.id.clone();
+            in_flight.push(
+                async move {
+                    StepCompletion {
+                        id,
+                        result: Err(err),
+                    }
+                }
+                .boxed(),
+            );
+            return;
+        }
 
         // Stash the trace entry now (peer_id resolved, args captured).
         trace_by_id.insert(
@@ -662,7 +691,10 @@ use raw refs only, let the downstream tool combine values)",
                             let p = reply.envelope.payload;
                             let raw = p.get("result").cloned().unwrap_or(p);
                             crate::blob_resolve::fetch_output_blobs(
-                                &node_exec, &http_client, ep, raw,
+                                &node_exec,
+                                &http_client,
+                                ep,
+                                raw,
                             )
                             .await
                         }
@@ -752,7 +784,10 @@ mod tests {
     use super::*;
 
     fn bb(pairs: &[(&str, Value)]) -> HashMap<String, Value> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
 
     #[test]
@@ -846,9 +881,7 @@ mod tests {
     }
 
     fn make_catalog(name: &str, peer: &str, schema_in: Value) -> Catalog {
-        use n3ur0n_core::capability::{
-            AccessMode, CapabilityDecl, CapabilityExample,
-        };
+        use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample};
         let mut cat = Catalog::default();
         cat.tools.push(crate::planner::catalog::ToolDef {
             peer_id: format!("n3:{peer}aaaaaaaaaaaa"),
@@ -968,5 +1001,147 @@ mod tests {
         };
         let order = topological_order(&plan).unwrap();
         assert!(order.len() < 2);
+    }
+
+    // --- P3: revalidation of resolved args against schema_in ---
+
+    /// Local backend that echoes args back and counts how many times it was
+    /// invoked, so a test can assert that a step which fails post-resolution
+    /// validation never reaches the backend.
+    #[derive(Debug)]
+    struct CountingEchoBackend {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl n3ur0n_adapters::Backend for CountingEchoBackend {
+        async fn invoke(
+            &self,
+            _capability: &str,
+            args: Value,
+        ) -> n3ur0n_adapters::AdapterResult<Value> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(args)
+        }
+
+        async fn describe(
+            &self,
+        ) -> n3ur0n_adapters::AdapterResult<Vec<n3ur0n_core::CapabilityDecl>> {
+            Ok(vec![])
+        }
+
+        async fn health(&self) -> n3ur0n_adapters::AdapterResult<n3ur0n_adapters::HealthStatus> {
+            Ok(n3ur0n_adapters::HealthStatus::Healthy)
+        }
+    }
+
+    /// Two local caps under one peer: `gen` (no schema) and `consume`
+    /// (requires `text: string`). Both `peer_endpoint: None` → executed via
+    /// the node's local backend, never over the network.
+    fn make_local_catalog() -> Catalog {
+        use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample};
+        let decl = |name: &str, schema_in: Value| CapabilityDecl {
+            name: name.into(),
+            description: format!("test {name}"),
+            schema_in,
+            schema_out: json!({}),
+            mode: AccessMode::Free,
+            pricing: None,
+            tags: vec![],
+            lobe_ids: vec![],
+            examples: vec![CapabilityExample {
+                user_intent: "go".into(),
+                args: json!({}),
+                expected_output: json!({}),
+            }],
+            disambiguation: None,
+            negative_examples: vec![],
+            output_semantic: None,
+            version: "0.0.0".into(),
+            languages: vec![],
+            countries: vec![],
+        };
+        let mut cat = Catalog::default();
+        let peer_id = "n3:peeraaaaaaaaaaaa".to_string();
+        cat.tools.push(crate::planner::catalog::ToolDef {
+            peer_id: peer_id.clone(),
+            peer_endpoint: None,
+            cap: decl("gen", json!({})),
+        });
+        cat.tools.push(crate::planner::catalog::ToolDef {
+            peer_id,
+            peer_endpoint: None,
+            cap: decl(
+                "consume",
+                json!({
+                    "type": "object",
+                    "required": ["text"],
+                    "properties": {"text": {"type": "string"}}
+                }),
+            ),
+        });
+        cat
+    }
+
+    #[tokio::test]
+    async fn resolved_args_violating_schema_fail_locally_without_invoke() {
+        use n3ur0n_adapters::Backend;
+        use n3ur0n_core::Keypair;
+        use n3ur0n_storage::open_in_memory;
+        use std::sync::Arc;
+        use std::sync::atomic::Ordering;
+
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let backend: Arc<dyn Backend> = Arc::new(CountingEchoBackend {
+            calls: calls.clone(),
+        });
+        let db = open_in_memory().unwrap();
+        let registry = crate::registry::CapabilityRegistry::from_decls(vec![]);
+        let node = crate::node::Node::new(
+            Keypair::generate(),
+            db,
+            backend,
+            registry,
+            crate::node::NodeConfig::default(),
+        );
+
+        let cat = make_local_catalog();
+        let peer = short_peer_helper("peera");
+        let plan = Plan {
+            plan: vec![
+                // s1 echoes `{value: 42}` → blackboard["s1"] = {value: 42}.
+                PlanStep {
+                    id: "s1".into(),
+                    peer: peer.clone(),
+                    capability: "gen".into(),
+                    args: json!({"value": 42}),
+                    depends_on: vec![],
+                },
+                // s2 resolves `${s1.value}` (int 42) into a string field.
+                PlanStep {
+                    id: "s2".into(),
+                    peer,
+                    capability: "consume".into(),
+                    args: json!({"text": "${s1.value}"}),
+                    depends_on: vec![],
+                },
+            ],
+        };
+
+        let run = execute_plan(&node, &plan, &cat).await.unwrap();
+
+        // Only s1 reached the backend; s2 failed schema revalidation locally.
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "s2 must not be invoked");
+
+        let s2 = run
+            .trace
+            .iter()
+            .find(|e| e.capability == "consume")
+            .expect("s2 trace present");
+        let err = s2.error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("schema_in"),
+            "expected schema error, got: {err:?}"
+        );
     }
 }
