@@ -56,12 +56,22 @@ See [CHANGELOG.md](CHANGELOG.md) for what has shipped.
 - ✅ RBAC phase 1 (users, sessions, roles, permission-gated `/api/v0`)
 - ✅ `AccessMode::Private` + cap type filters in Settings / sidebar
 - ✅ Interface theme (Dark / Light / System)
+- ✅ Direct chat mode (composer toggle, `mode: "direct"`, optional model override, `DirectChatPlanner`)
 - 🧭 CLI `--help` + server error messages fully i18n (web UI done in 0.4.0)
 - 🧭 OS keychain integration for backend `api_key` storage
 - 🧭 Conversation summarization above N turns
 - 🧭 SSE reconnect + stable step IDs across dispatches
 - 💭 Wire format fuzz harness (`cargo-fuzz`)
 - 💭 Public capability marketplace browser
+
+## v0.4.x — blob protocol ✅ (unreleased)
+
+- ✅ Blob side-channel (`/n3ur0n/v0/blobs`, `blob_ticket` verb, hash refs in `invoke` payloads)
+- ✅ Classification A–D : outbound / inbound output / cap staging (non user-visible) / local cache
+- ✅ User Files panel + `GET /api/v0/files` (session-scoped) ; cap staging admin view only ; periodic GC
+- 💭 Inline base64 threshold §8 ; `data_policy` / `blob_quota` in manifests
+
+See [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md).
 
 ## v0.5 — federation 💭
 

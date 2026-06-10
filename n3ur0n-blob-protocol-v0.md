@@ -1,10 +1,12 @@
-# N3UR0N — Blob Protocol v0.1 (brouillon)
+# N3UR0N — Blob Protocol v0.1
 
 **Date** : 2026-05-12
-**Statut** : brouillon de spec, non implémenté. À discuter avant gel.
+**Statut** : implémentée (2026-06-05), amendement 2026-06-04 inclus. Impl : `core/blob.rs`, `server/{blobs,blob_gc,files_api}.rs`, `node/{blob_client,blob_resolve}.rs`, verbe `blob_ticket`, panneau Files UI, attachments `UserInput`. Le code prime sur la spec — consigner ici tout écart par note datée.
 **Objet** : définir comment des contenus binaires (fichiers, médias, documents générés) transitent entre instances n3uron sans violer les invariants protocolaires (envelopes JSON signées, request/response, pas de streaming).
 **Portée** : transfert de blobs auxiliaire au verbe `invoke`. Ne touche pas aux 4 verbes existants. Ajoute un endpoint HTTPS sur le listener publisher.
 **Lecteur** : implémenteur runtime, designer du format `cap.toml` / `backend.toml`, équipe UI Tauri.
+
+**Amendement 2026-06-04** : classification des blobs par **provenance** (envoyé / reçu) et **ancrage** (session utilisateur locale vs job cap). Quatre classes A–D (§2.4). Panneau **Files** utilisateur (§10.5) limité aux classes visibles ; staging cap distant (classe C) hors UI utilisateur, admin/cap uniquement. Index SQLite étendu (§5.4), RBAC local (§6.3). Pas de backend de stockage pluggable — disque + SQLite comme au brouillon initial.
 
 ---
 
@@ -86,6 +88,71 @@ Dans un `schema_in` ou `schema_out`, un champ destiné à un blob est annoté :
 Le runtime n3uron reconnaît cette extension. Au moment de l'invocation :
 - Pour un argument entrant marqué `x-n3uron-type: "blob"` non encore présent côté publisher, le runtime n3uron *côté consumer* déclenche l'upload du blob avant d'envoyer l'envelope `invoke`.
 - Pour un résultat sortant marqué `x-n3uron-type: "blob"`, le runtime *côté consumer* récupère le blob via `fetch_url` après avoir reçu l'envelope de réponse.
+
+### 2.4 Classification : provenance, rôle, ancrage (amendement 2026-06-04)
+
+Les bytes ne transitent **jamais** dans l'envelope `invoke` (sauf inlining §8 sous le seuil). L'index local doit en revanche distinguer **qui** a causé la présence du fichier sur *cette* instance et **si l'utilisateur local** peut le voir ou le manipuler.
+
+Trois axes orthogonaux :
+
+| Axe | Valeurs | Rôle |
+|-----|---------|------|
+| `provenance` | `outbound` \| `inbound` | Sens par rapport à *notre* instance |
+| `role` | `input` \| `output` | Argument d'invoke ou résultat |
+| `anchor_kind` | `user_session` \| `cap_job` \| `local_cache` | À quoi le blob est rattaché côté runtime |
+
+#### Classes opérationnelles (A–D)
+
+| Classe | Provenance | Rôle | Ancrage | Situation |
+|--------|------------|------|---------|-----------|
+| **A — Outbound** | `outbound` | `input` | `user_session` | Nous avons `PUT` chez un **peer** avant un `invoke` que **nous** avons initié pour un utilisateur local. |
+| **B — Inbound output** | `inbound` | `output` | `user_session` | Résultat blob d'un `invoke` distant que **nous** avons initié (planner / chat / form) pour un utilisateur local. |
+| **C — Cap staging** | `inbound` | `input` | `cap_job` | Un **peer distant** a `PUT` sur **notre** listener pour invoquer **notre** cap. Pas de session utilisateur locale. Infrastructure cap. |
+| **D — Local cache** | — | — | `local_cache` | Fichier dans `~/.n3ur0n/blobs/` après file picker, pas encore référencé réseau (ou cache pur). |
+
+Matrice direction × rôle :
+
+```
+                    │  input              │  output
+────────────────────┼─────────────────────┼──────────────────────────
+Nous initions       │  A (outbound)       │  B (inbound output)
+invoke distant      │                     │
+────────────────────┼─────────────────────┼──────────────────────────
+Peer invoque        │  C (cap staging)    │  peer GET (TTL chez nous ;
+notre cap           │                     │  pas une « ressource user » locale)
+```
+
+**Classe C — règles structurantes** :
+
+- Ancré à `capability` + `remote_sender_id` (`n3:…`) + corrélation ticket/`invoke` (`ticket_nonce` ou `invoke_id`), **pas** à `user_id` RBAC local.
+- **Interdit** dans le panneau Files utilisateur (§10.5).
+- Utilisateurs locaux : pas de `DELETE`, pas de rename, pas d'exposition via `GET /api/v0/files`.
+- Cycle de vie : GC + fin de traitement cap uniquement ; vue opérateur optionnelle (§6.3, §10.5).
+
+**Distinction A vs C sur le publisher** : si le `PUT` arrive sur notre listener avec un ticket dont `purpose = input` et `capability` pointe vers **notre** cap exposée → **C**. Si nous sommes consumer et avons uploadé chez un autre peer → **A** (index côté consumer, pas sur le publisher distant).
+
+#### Politique de manipulation (dérivée)
+
+| Classe | `user_visible` | `user_deletable` | API utilisateur |
+|--------|----------------|------------------|-----------------|
+| A | oui | oui avant envoi ; non après `invoke` parti | `GET/DELETE /api/v0/files` |
+| B | oui | oui (purge cache) | idem |
+| C | **non** | **non** | admin `GET /api/v0/cap-jobs/blobs` seulement |
+| D | oui | oui | idem (scope cache local) |
+
+#### États de traitement (`processing_status`, UX)
+
+Enum local (non protocolaire), mis à jour par le runtime :
+
+| Statut | Classes | Signification |
+|--------|---------|---------------|
+| `uploading` | A, D | Transfert HTTP en cours |
+| `staged` | A, D | Présent localement, pas encore dans un `invoke` |
+| `referenced` | A | BlobRef inclus dans un `invoke` en vol |
+| `processing` | B | `invoke` / step planner en cours côté peer |
+| `ready` | A, B, D | Disponible pour l'utilisateur |
+| `consumed` | C | Cap a lu le blob ; en attente GC |
+| `expired` / `stale` | toutes | TTL dépassé ; fichier local éventuellement conservé (§10.4) |
 
 ---
 
@@ -222,6 +289,13 @@ L'autorisation d'une opération suit la *règle de propriété transitive du tic
 - **`GET`** : autorisé si le sender du ticket est *soit* l'uploader original (`put.sender == get.sender`), *soit* listé dans le `recipients_whitelist` du blob (sortie d'invocation : le publisher autorise le consumer cible à récupérer).
 - **`DELETE`** : autorisé uniquement si `sender == uploader`.
 
+**Amendement 2026-06-04 — classe C (cap staging)** :
+
+- À chaque `PUT` accepté sur **notre** listener pour une cap **que nous publions**, le runtime classe le blob `anchor_kind = cap_job`, `provenance = inbound`, `role = input` (classe **C**).
+- **`DELETE` via ticket** : inchangé (seul le `sender` distant = uploader réseau). Les comptes RBAC locaux ne peuvent **jamais** obtenir un ticket `delete` sur un blob classe C — refus côté forge de ticket local.
+- **`GET /api/v0/files`** : ne liste jamais les blobs C ; filtre `user_visible = true` (§5.4).
+- Opérateur / admin : lecture seule via route dédiée (§6.3), sans téléchargement arbitraire du contenu si politique stricte (configurable v1 : admin peut `GET` blob C pour debug).
+
 ### 4.4 Encodage on-the-wire
 
 Le ticket est sérialisé en JCS, puis encodé en base64url *sans padding*, et placé dans le header HTTP `X-N3UR0N-Ticket`. Taille typique : ~600 octets après base64. Bien dans les limites HTTP/2.
@@ -257,6 +331,54 @@ Côté consumer, un cache blob local indexé par hash dans `~/.n3ur0n/blobs/sha2
 Permet :
 - Ré-upload sans recompute : si le user retraite le même PDF, le hash est déjà calculé.
 - Téléchargement skippé : si un publisher renvoie un blob qu'on a déjà (rare mais possible avec content-addressing), le cache court-circuite le GET.
+
+### 5.4 Index stockage (amendement 2026-06-04)
+
+Table `blobs` (publisher **et** index miroir consumer pour A/B/D). Pas de backend pluggable : `storage_path` sur disque sous `<config_dir>/blobs/sha256/<hash>`.
+
+Colonnes **en plus** du brouillon initial :
+
+```sql
+-- Identité fichier (inchangé)
+hash TEXT PRIMARY KEY,
+size INTEGER NOT NULL,
+mime TEXT NOT NULL,
+expires_at INTEGER NOT NULL,
+storage_path TEXT NOT NULL,
+
+-- Provenance / classification (§2.4)
+provenance TEXT NOT NULL,       -- 'outbound' | 'inbound'
+role TEXT NOT NULL,             -- 'input' | 'output'
+anchor_kind TEXT NOT NULL,      -- 'user_session' | 'cap_job' | 'local_cache'
+processing_status TEXT NOT NULL DEFAULT 'staged',
+
+-- Ancrage utilisateur (classes A, B, D — NULL pour C)
+local_user_id INTEGER,          -- FK users.id (RBAC 0.4+), NULL si client-only
+client_id TEXT,                 -- cookie n3ur0n_client_id si pas de compte
+conversation_id TEXT,
+dispatch_id TEXT,               -- corrélation planner step / trace
+
+-- Ancrage cap job (classe C — NULL pour A/B/D)
+capability TEXT,                -- notre cap exposée
+remote_sender_id TEXT,          -- n3:… du peer uploader
+ticket_nonce TEXT,
+invoke_id TEXT,                 -- optionnel, rempli à l'invoke entrant
+
+-- Politique UI (dérivée à l'insert, pas éditée à la main)
+user_visible INTEGER NOT NULL DEFAULT 0,
+user_deletable INTEGER NOT NULL DEFAULT 0,
+
+-- Existant spec
+uploader_id TEXT,                 -- sender_id ticket (réseau)
+recipients_whitelist TEXT         -- JSON array, outputs vers peer cible
+```
+
+Règles d'insertion :
+
+- **A** : `outbound` + `input` + `user_session` ; `user_visible=1`, `user_deletable=1` jusqu'à `referenced`.
+- **B** : `inbound` + `output` + `user_session` ; `user_visible=1`, `user_deletable=1`.
+- **C** : `inbound` + `input` + `cap_job` ; `user_visible=0`, `user_deletable=0` ; `local_user_id` **toujours NULL**.
+- **D** : `local_cache` ; `user_visible=1`, `user_deletable=1` ; pas de `uploader_id` réseau tant que non envoyé.
 
 ---
 
@@ -294,6 +416,21 @@ total_cache_bytes = 1073741824      # cache local 1 GB
 ```
 
 Refus côté consumer = `413 Payload Too Large` côté response handler, avec log explicite. Le blob reste chez le publisher, qui le garbage-collectera selon sa TTL.
+
+### 6.3 RBAC et routes locales (amendement 2026-06-04)
+
+API **locale** `/api/v0` (session cookie / RBAC phase 1), distincte du protocole fil `/n3ur0n/v0/blobs`.
+
+| Route | Permission | Scope |
+|-------|------------|-------|
+| `GET /api/v0/files` | `files:read` (défaut : tout utilisateur authentifié) | `user_visible = 1` **et** (`local_user_id = me` **ou** `client_id = mon cookie`) |
+| `GET /api/v0/files/:hash` | `files:read` | idem + hash |
+| `DELETE /api/v0/files/:hash` | `files:delete` | idem + `user_deletable = 1` |
+| `GET /api/v0/cap-jobs/blobs` | `caps:blobs:read` (Operator / Admin) | `anchor_kind = cap_job` uniquement ; **pas** de DELETE utilisateur |
+
+Les blobs **classe C** n'apparaissent jamais dans `GET /api/v0/files` même si l'appelant est Admin — séparation volontaire panneau utilisateur / ops cap.
+
+Téléchargement octets : réutilise `GET /n3ur0n/v0/blobs/:hash` avec ticket forgé par le runtime (comme §3.2), pas d'exposition directe du chemin disque.
 
 ---
 
@@ -460,6 +597,35 @@ Pas de progression *protocolaire* (pas de streaming) ; c'est de la cosmétique H
 
 Un fichier dans le cache local dont le blob distant a expiré est marqué "stale" mais conservé localement (le user peut l'avoir sauvé ailleurs). Le runtime ne re-fetch pas automatiquement, mais propose un re-upload si la même cap est invoquée à nouveau avec ce hash.
 
+### 10.5 Panneau Files utilisateur (amendement 2026-06-04)
+
+Objectif : visualiser les fichiers **associés à l'utilisateur connecté** et leur **état de traitement**, sans backend pluggable. Implémentation cible : `crates/server/ui/` (+ Tauri desktop, même UI embarquée).
+
+**Périmètre affiché** : classes **A, B, D** uniquement (§2.4). **Exclut** classe **C** (staging cap entrant).
+
+**Emplacement UI** : section Settings → **Files** ou onglet sidebar dédié (choix implémentation ; même données).
+
+**Colonnes** :
+
+| Colonne | Source |
+|---------|--------|
+| Nom / mime | `mime` + label dérivé ou nom original (métadonnée optionnelle `display_name` v1.1) |
+| Direction | `provenance` → libellé « Sent » / « Received » |
+| Cap | `capability` si connu |
+| Conversation | lien `conversation_id` si présent |
+| Status | `processing_status` (§2.4) |
+| Expires | `expires_at` |
+
+**Actions utilisateur** : Ouvrir (cache local / download), Enregistrer sous…, Supprimer — seulement si `user_deletable`.
+
+**Pendant upload/download** : barre de progression §10.3 ; statut `uploading` / `processing`.
+
+**i18n** : clés `files.*` dans `locales/{en,fr}.json` (même discipline que direct-chat).
+
+**Vue opérateur (hors panneau user)** : Settings → Capabilities → **Staging** (optionnel v1) liste les blobs C : hash court, cap, `remote_sender_id`, `processing_status`, `expires_at` — lecture seule, pas de bouton supprimer pour rôle User.
+
+**v1 simplifié** : consumer/desktop mono-utilisateur peut filtrer par `client_id` seul ; publisher multi-utilisateur exige `local_user_id` peuplé à l'auth.
+
 ---
 
 ## 11. Questions ouvertes
@@ -499,15 +665,17 @@ Une cap `binding.type = "local"` (process local) qui prend un blob — doit-elle
 | `crates/core/src/blob.rs` *(nouveau)* | Types `BlobRef`, `BlobTicketPayload`, fonctions de validation. |
 | `crates/core/src/message.rs` | Étendre `ProtocolVerb` pour inclure `BlobTicket` (verbe interne, jamais routé via `/messages`). |
 | `crates/storage/src/blobs.rs` *(nouveau)* | Repo blobs côté publisher : index hash → métadonnées + chemin disque. |
-| `crates/storage/migrations/` | Nouvelle migration : table `blobs` (hash, size, mime, uploader_id, capability, expires_at, recipients_whitelist). |
-| `crates/server/src/http.rs` | Routes `PUT/GET/HEAD/DELETE /n3ur0n/v0/blobs/:hash`. |
+| `crates/storage/migrations/` | Migration `blobs` : schéma §5.4 (provenance, anchor_kind, processing_status, user_visible, …). |
+| `crates/server/src/http.rs` | Routes fil `PUT/GET/HEAD/DELETE /n3ur0n/v0/blobs/:hash` + API locale `GET/DELETE /api/v0/files`, `GET /api/v0/cap-jobs/blobs`. |
 | `crates/server/src/blob_gc.rs` *(nouveau)* | Job background de GC, tick toutes les 10 min. |
-| `crates/node/src/client.rs` | Helpers `upload_blob(endpoint, blob_ref, bytes)`, `download_blob(blob_ref) -> Vec<u8>`. |
-| `crates/node/src/planner/plan.rs` | Avant exécution d'un step, résoudre les BlobRef entrants (upload si nécessaire). |
+| `crates/server/src/auth.rs` | Permissions `files:read`, `files:delete`, `caps:blobs:read`. |
+| `crates/node/src/client.rs` | Helpers `upload_blob`, `download_blob` ; classification A/B/C/D à l'insert index. |
+| `crates/node/src/planner/plan.rs` | Résolution BlobRef + mise à jour `processing_status` (`referenced` → `processing` → `ready`). |
+| `crates/node/src/handler.rs` | Sur `invoke` entrant avec args blob : insert classe **C**. |
 | `crates/node/src/manifest/types.rs` | Ajout du bloc `[descriptor.data_policy]`, du bloc `[blob_quota]`. |
-| `crates/server/ui/` | Composants UX : progress upload/download, file picker → BlobRef, propose-save-as. |
+| `crates/server/ui/` | File picker, progress, save-as (§10) + panneau **Files** (§10.5) + staging cap admin. |
 
-Effort total estimé : 2-3 semaines pour la couche core + endpoint + GC + intégration planner. UX Tauri : +1 semaine.
+Effort total estimé : 2-3 semaines couche core + endpoint + GC + planner + index §5.4. UX Files + i18n : +3–5 jours. Vue staging cap (admin) : +1–2 jours optionnels.
 
 ---
 

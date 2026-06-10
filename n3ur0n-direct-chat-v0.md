@@ -1,6 +1,6 @@
 # N3UR0N — Mode chat direct (spec d'implémentation v0)
 
-> **Statut** : spec validée 2026-06-04, non implémentée.
+> **Statut** : spec validée 2026-06-04, **implémentée** (2026-06-04).
 > **Périmètre** : API locale + UI embarquée uniquement. `protocol_version` inchangé (`n3ur0n/0.3`), aucune migration SQL, aucun nouveau verbe.
 > **Décisions actées avec l'utilisateur (2026-06-04)** : (1) toggle libre au sein de la discussion active — le mode est porté par chaque message ; (2) le mode direct utilise le LLM du planner, avec override texte du nom de modèle ; (3) planner requis — sans planner, le 503 actuel reste.
 

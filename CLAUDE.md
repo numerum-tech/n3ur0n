@@ -9,17 +9,17 @@ This project uses OpenWolf for context management. Read and follow .wolf/OPENWOL
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## État du dépôt (mis à jour 2026-06-02)
+## État du dépôt (mis à jour 2026-06-10)
 
-Releases : **0.1.0** (protocole initial), **0.2.0** (planner v2, BM25, GBNF, cascade), **0.3.0** (manifestes TOML, hot-reload caps, master-detail UI), **0.4.0** (open source, i18n EN/FR, RBAC phase 1, composer tous bindings, backend hot-reload). Version workspace = `0.4.0` ; `protocol_version` fil = `n3ur0n/0.3` (inchangé). Cf. [CHANGELOG.md](CHANGELOG.md) et [ROADMAP.md](ROADMAP.md).
+Releases : **0.1.0** (protocole initial), **0.2.0** (planner v2, BM25, GBNF, cascade), **0.3.0** (manifestes TOML, hot-reload caps, master-detail UI), **0.4.0** (open source, i18n EN/FR, RBAC phase 1, composer tous bindings, backend hot-reload). Version workspace = `0.4.0` ; `protocol_version` fil = `n3ur0n/0.3` (inchangé). Non releasé (post-0.4.0) : mode chat direct (`DirectChatPlanner`, toggle auto/direct), couche blob (verbe `blob_ticket`, endpoint `/n3ur0n/v0/blobs`, panneau Files, attachments), durcissement `OpenAIBackend` (`allow_model_override`, normalisation base_url). Cf. [CHANGELOG.md](CHANGELOG.md) et [ROADMAP.md](ROADMAP.md).
 
 Documents de spec et de référence :
 
 - [n3ur0n-architecture-v0.md](n3ur0n-architecture-v0.md) — architecture v0.1 + amendements 2026-05-08 (sender_public_key) et 2026-05-12 (AccessMode ternaire, CapabilityDecl v0.2, planner local).
 - [project-tech-stack.md](project-tech-stack.md) — stack technique v0.1 + amendement 2026-05-12 (crate `node`, backend runtime-instantiation, bindings v0.3, hot-reload ArcSwap).
 - [n3ur0n-capability-manifest-v0.md](n3ur0n-capability-manifest-v0.md) — brouillon de format de manifeste (spec conceptuelle ; le split caps/backends effectif diverge, voir note d'écart en tête du doc).
-- [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md) — brouillon de spec blob protocol (transfert de fichiers via endpoint `/n3ur0n/v0/blobs`, non implémenté).
-- [n3ur0n-direct-chat-v0.md](n3ur0n-direct-chat-v0.md) — spec mode chat direct (bypass planner, API locale + UI uniquement ; validée 2026-06-04, non implémentée).
+- [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md) — spec blob protocol (endpoint `/n3ur0n/v0/blobs`, classes A–D, panneau Files utilisateur ; amendement 2026-06-04 inclus). **Implémentée 2026-06-05** : `core/blob.rs`, `server/{blobs,blob_gc,files_api}.rs`, `node/{blob_client,blob_resolve}.rs`, verbe `blob_ticket`, attachments dans `UserInput`.
+- [n3ur0n-direct-chat-v0.md](n3ur0n-direct-chat-v0.md) — mode chat direct (API locale + UI ; un appel LLM/message, toggle auto/direct).
 - [n3ur0n-planner-recommendations-v0.md](n3ur0n-planner-recommendations-v0.md) — recommandations planner v0.1→v0.2 (largement absorbées par 0.2.0/0.3.0, conservé comme trace de raisonnement).
 - [n3ur0n-planner-brainstorm.md](n3ur0n-planner-brainstorm.md) — brainstorm initial planner (référence pour comprendre les choix v0.2).
 
@@ -54,7 +54,7 @@ Système distribué pair-à-pair pour publier et invoquer des **capacités d'IA*
 - **Sans canonicalisation, les signatures divergent silencieusement** — ne jamais sérialiser à la main pour signer.
 - Vérifications obligatoires côté destinataire : binding pk↔id, signature, `recipient_id`, fenêtre timestamp ±5 min, anti-replay nonce sur 1h.
 - Trois verbes méta (`describe_self`, `get_known_peers`, `ping`) sont **toujours en mode libre**. Ne jamais restreindre.
-- Quatrième verbe : `invoke`. **Aucun autre verbe v0.1**. Pas de session, pas de streaming protocolaire, pas de pipeline orchestré côté protocole.
+- Quatrième verbe : `invoke`. Pas de session, pas de streaming protocolaire, pas de pipeline orchestré côté protocole. **Amendement 2026-06-05** : cinquième verbe `blob_ticket` (couche blob), autorisé **uniquement** sur `/n3ur0n/v0/blobs` — jamais dispatché via `/messages` (cf. spec blob §1).
 - Mode d'accès (`free` / `restricted`) déclaré **par capacité**, pas par instance.
 
 ## Asymétrie consumer / publisher (structurante pour le stack)
@@ -74,24 +74,29 @@ n3ur0n/
 │   │   ├── identity.rs        # InstanceId, Keypair, PublicKey
 │   │   ├── message.rs         # Envelope, SignedMessage (avec sender_public_key)
 │   │   ├── verify.rs          # verify_envelope (pure, Clock injectable)
-│   │   ├── protocol.rs        # payloads typés des 4 verbes
+│   │   ├── protocol.rs        # payloads typés des verbes
 │   │   ├── capability.rs      # CapabilityDecl, AccessMode
+│   │   ├── blob.rs            # BlobRef, classes A–D, tickets
 │   │   └── error.rs
-│   ├── adapters/              # lib : trait Backend + EchoBackend (MCP/OpenAI/HTTP/Process à venir)
-│   ├── storage/               # lib : SQLite + r2d2, repos peers + nonces
+│   ├── adapters/              # lib : trait Backend + EchoBackend + OpenAIBackend
+│   ├── storage/               # lib : SQLite + r2d2, repos peers + nonces (+ index blobs)
 │   │   └── migrations/        # SQL versionné via schema_version table
 │   ├── node/                  # lib : orchestration runtime
 │   │   ├── identity_file.rs   # load/save keys.json (0600)
 │   │   ├── registry.rs        # CapabilityRegistry
 │   │   ├── node.rs            # Node (keypair + db + backend + registry + clock)
-│   │   └── handler.rs         # handle_request : verify → anti-replay → dispatch
+│   │   ├── handler.rs         # handle_request : verify → anti-replay → dispatch
+│   │   ├── planner/           # PlanExecPlanner, DirectChatPlanner, catalog, retrieval BM25
+│   │   │                      #   NB : l'exécuteur de plan vit dans planner/plan.rs
+│   │   └── blob_client.rs / blob_resolve.rs  # upload/download + résolution refs blob
 │   ├── server/                # lib + bin : axum + clap (publisher)
 │   │   ├── lib.rs             # http::app(node), bootstrap
 │   │   ├── http.rs            # /n3ur0n/v0/messages + /api/v0
+│   │   ├── blobs.rs / blob_gc.rs / files_api.rs  # endpoint blobs + GC + panneau Files
 │   │   ├── bootstrap.rs       # config dirs, load_node, create_identity
 │   │   ├── cli.rs             # init / serve / keys
 │   │   └── main.rs
-│   └── desktop/               # placeholder Tauri (excluded jusqu'à init Tauri CLI)
+│   └── desktop/               # shell Tauri 2 (profil consumer, scaffold 0.4.0)
 ├── frontend/                  # SvelteKit + adapter-static + Tailwind
 └── .gitignore                 # ignore /target, frontend build artifacts, runtime files
 ```
@@ -179,7 +184,7 @@ docker compose -f docker/compose.yml down -v
 
 ### Capacity planner (v0.2 — PlanExec, mis à jour 2026-05-12)
 
-Le user **dialogue uniquement avec son instance**. L'instance compile un plan typé (DAG de steps avec refs `${...}`), l'exécute en parallèle au-dessus des capacités du réseau, puis synthétise la réponse (reflect). Trois appels LLM par dispatch (compile / [exécution des steps] / reflect), pas une boucle ReAct.
+Le user **dialogue uniquement avec son instance**. L'instance compile un plan typé (DAG de steps avec refs `${...}`), l'exécute au-dessus des capacités du réseau, puis synthétise la réponse (reflect). **Deux appels LLM par dispatch** (compile + reflect — les steps peuvent eux-mêmes invoquer des caps LLM, mais ce sont des invokes réseau, pas des appels du planner), pas une boucle ReAct. Exécution **parallèle bornée** : tout step dont les dépendances sont satisfaites part concurremment, plafonné par `MAX_CONCURRENT_STEPS=4` (`planner/plan.rs`). Streaming SSE des événements de dispatch (`PlanReady`, `StepStart/StepDone`, `LowConfidence`, `Reflecting`, `Final`).
 
 Impl : `PlanExecPlanner` dans `crates/node/src/planner/plan_exec.rs`. Le trait `PlanCompiler` permet l'escalade vers un peer remote exposant la cap `plan` (cascade). Constrained decoding GBNF / JSON Schema activé quand le backend le supporte (`crates/node/src/planner/grammar.rs`). Retrieval BM25 sur le catalogue avant compile (`crates/node/src/planner/retrieval.rs`).
 
@@ -195,7 +200,7 @@ browser → /api/v0/conversations/:id/messages {message}
        → conv_lock[id] mutex (sérialise même conv)
        → planner_slots semaphore (limite parallèle LLM)
        → load ConversationState (cache LRU OR SQLite)
-       → planner.dispatch (boucle plan → tool_call → observe)
+       → planner.dispatch (compile → execute DAG (parallèle borné) → reflect)
        → persist chaque turn (transaction atomique)
        → return {reply, trace, model}
 ```
@@ -234,6 +239,9 @@ Local API (non signée, loopback-only en prod) :
 | `/api/v0/chat` | POST `{peer_endpoint, prompt, model?}` | Proxy signé `invoke chat` vers le peer |
 | `/api/v0/whoami` | GET | `{instance_id}` |
 | `/api/v0/health` | GET | `{status: ok}` |
+| `/api/v0/files` | GET/POST/DELETE | Panneau Files : upload + listing des blobs visibles (classes A/B/D) |
+
+Couche blob réseau : `PUT/GET/HEAD/DELETE /n3ur0n/v0/blobs/*hash` autorisés par verbe signé `blob_ticket` ; GC périodique (`blob_gc.rs`) ; côté local `/api/v0/files`, `/api/v0/files/*hash`, `/api/v0/cap-jobs/blobs`. Spec : `n3ur0n-blob-protocol-v0.md`.
 
 Smoke script (`bash docker/cluster-smoke.sh`) couvre : healthchecks, 6 pings croisés signés, describe_self, invoke chat signé a→c, bootstrap b←a, cascade depth-1 a→b→c sur capacité `chat`, **et le chemin browser** via POST `/api/v0/chat` sur node-a.
 
