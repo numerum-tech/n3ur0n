@@ -5,8 +5,8 @@
 //! storage on cache miss or restart.
 
 use n3ur0n_core::InstanceId;
-use n3ur0n_storage::conversations::{self, ConversationRecord, TurnRecord};
 use n3ur0n_storage::Db;
+use n3ur0n_storage::conversations::{self, ConversationRecord, TurnRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -222,16 +222,29 @@ impl ConversationState {
         capability: String,
         args: Value,
     ) -> String {
-        let ts = OffsetDateTime::now_utc().unix_timestamp();
         let id = format!("call_{}", Uuid::new_v4().simple());
+        self.push_tool_call_with_id(id.clone(), peer_id, capability, args);
+        id
+    }
+
+    /// Record a ToolCall reusing a caller-provided id. Used when the plan
+    /// executor already minted the id (so the in-memory turn and the row it
+    /// persisted incrementally to the DB share the same `call_id`).
+    pub fn push_tool_call_with_id(
+        &mut self,
+        id: String,
+        peer_id: InstanceId,
+        capability: String,
+        args: Value,
+    ) {
+        let ts = OffsetDateTime::now_utc().unix_timestamp();
         self.push(Turn::ToolCall {
-            id: id.clone(),
+            id,
             peer_id,
             capability,
             args,
             ts,
         });
-        id
     }
 
     pub fn push_tool_result(
@@ -380,7 +393,8 @@ pub(crate) fn prune_context_refs<'a>(refs: &[&'a Turn], max_turns: usize) -> Vec
     // If we'd start at a ToolResult whose ToolCall is just outside, rewind.
     if start > 0 {
         if let Some(Turn::ToolResult { call_id, .. }) = refs.get(start).copied() {
-            if matches!(refs.get(start - 1).copied(), Some(Turn::ToolCall { id, .. }) if id == call_id) {
+            if matches!(refs.get(start - 1).copied(), Some(Turn::ToolCall { id, .. }) if id == call_id)
+            {
                 start -= 1;
             }
         }
@@ -411,11 +425,7 @@ pub(crate) fn filter_visible_for_llm(turns: &[Turn]) -> Vec<&Turn> {
         .filter_map(|(i, t)| {
             let is_tool = matches!(t, Turn::ToolCall { .. } | Turn::ToolResult { .. });
             let is_past = last_assistant_idx.map(|li| i <= li).unwrap_or(false);
-            if is_tool && is_past {
-                None
-            } else {
-                Some(t)
-            }
+            if is_tool && is_past { None } else { Some(t) }
         })
         .collect()
 }
@@ -447,8 +457,8 @@ pub fn create(
 
 /// Load conversation header + all turns, verify ownership, run validate().
 pub fn load(db: &Db, id: &str, client_id: &str) -> ConversationResult<ConversationState> {
-    let record = conversations::get(db, id)?
-        .ok_or_else(|| ConversationError::NotFound(id.to_string()))?;
+    let record =
+        conversations::get(db, id)?.ok_or_else(|| ConversationError::NotFound(id.to_string()))?;
     if record.client_id != client_id {
         return Err(ConversationError::OwnershipMismatch);
     }
@@ -498,6 +508,64 @@ pub fn persist_last(db: &Db, state: &ConversationState) -> ConversationResult<()
     Ok(())
 }
 
+/// Persist one (ToolCall, ToolResult) pair directly to the DB at a seq
+/// reserved by the step's plan index — without touching any in-memory
+/// `ConversationState`. Used by the plan executor's durability hook so each
+/// step's turns hit storage the moment it completes; a crash mid-run then
+/// leaves a partial but correctly-ordered trace.
+///
+/// `base_seq` is the user turn's seq. Step `plan_index` claims
+/// `base_seq + 1 + 2*plan_index` for its call and the next seq for its result,
+/// matching the order an in-memory replay (user turn, then tool pairs in plan
+/// order) would assign.
+#[allow(clippy::too_many_arguments)]
+pub fn persist_tool_pair_at(
+    db: &Db,
+    conversation_id: &str,
+    base_seq: i64,
+    plan_index: usize,
+    call_id: &str,
+    peer_id: &InstanceId,
+    capability: &str,
+    args: &Value,
+    result: &Option<Value>,
+    error: &Option<String>,
+    updated_at: i64,
+) -> ConversationResult<()> {
+    let call_seq = base_seq + 1 + 2 * plan_index as i64;
+    let result_seq = call_seq + 1;
+    let call = Turn::ToolCall {
+        id: call_id.to_string(),
+        peer_id: peer_id.clone(),
+        capability: capability.to_string(),
+        args: args.clone(),
+        ts: updated_at,
+    };
+    let res = Turn::ToolResult {
+        call_id: call_id.to_string(),
+        peer_id: peer_id.clone(),
+        capability: capability.to_string(),
+        result: result.clone(),
+        error: error.clone(),
+        ts: updated_at,
+    };
+    for (seq, turn) in [(call_seq, call), (result_seq, res)] {
+        let payload = serde_json::to_string(&turn)?;
+        conversations::append_turn(
+            db,
+            &TurnRecord {
+                conversation_id: conversation_id.to_string(),
+                seq,
+                role: turn.role_label().to_string(),
+                payload,
+                created_at: updated_at,
+            },
+            updated_at,
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,7 +610,10 @@ mod tests {
 
         let reloaded = load(&db, &state.id, "alice").unwrap();
         // validate() must have appended a synthetic ToolResult.
-        assert!(matches!(reloaded.turns.last(), Some(Turn::ToolResult { error: Some(_), .. })));
+        assert!(matches!(
+            reloaded.turns.last(),
+            Some(Turn::ToolResult { error: Some(_), .. })
+        ));
     }
 
     #[test]
@@ -570,10 +641,7 @@ mod tests {
         let cid = state.push_tool_call(peer.clone(), "echo".into(), json!({"x": 1}));
         state.push_tool_result(cid, peer, "echo".into(), Some(json!({"x": 1})), None);
         let msgs = state.to_chat_messages(10);
-        let roles: Vec<&str> = msgs
-            .iter()
-            .map(|m| m["role"].as_str().unwrap())
-            .collect();
+        let roles: Vec<&str> = msgs.iter().map(|m| m["role"].as_str().unwrap()).collect();
         assert_eq!(roles, ["user", "assistant", "tool"]); // tool_call as assistant + tool_result as tool
     }
 
@@ -590,10 +658,7 @@ mod tests {
         state.push_user("u2");
         // Mid-second-dispatch: no new tool_call yet.
         let msgs = state.to_chat_messages(10);
-        let roles: Vec<&str> = msgs
-            .iter()
-            .map(|m| m["role"].as_str().unwrap())
-            .collect();
+        let roles: Vec<&str> = msgs.iter().map(|m| m["role"].as_str().unwrap()).collect();
         // Past dispatch's tool_call+tool_result hidden. Past User+Assistant
         // kept. Current dispatch's User kept.
         assert_eq!(roles, ["user", "assistant", "user"]);

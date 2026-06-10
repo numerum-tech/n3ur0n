@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_conversations.sql"),
     include_str!("../migrations/0003_users_sessions.sql"),
     include_str!("../migrations/0004_blobs.sql"),
+    include_str!("../migrations/0005_plan_runs.sql"),
 ];
 
 pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Db> {
@@ -43,7 +44,10 @@ pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Db> {
     // r2d2 default min_idle/max_size of 8 races during first-time WAL setup.
     // Build a single-connection pool first so migrations run cleanly, then
     // resize.
-    let pool = Pool::builder().max_size(8).min_idle(Some(1)).build(manager)?;
+    let pool = Pool::builder()
+        .max_size(8)
+        .min_idle(Some(1))
+        .build(manager)?;
     migrate(&pool)?;
     Ok(pool)
 }
@@ -58,11 +62,12 @@ pub fn open_in_memory() -> StorageResult<Db> {
 fn migrate(pool: &Db) -> StorageResult<()> {
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
-    tx.execute_batch(
-        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);",
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);")?;
+    let current: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+        [],
+        |r| r.get(0),
     )?;
-    let current: i64 = tx
-        .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0))?;
     for (idx, sql) in MIGRATIONS.iter().enumerate() {
         let v = (idx + 1) as i64;
         if v > current {
@@ -78,8 +83,9 @@ fn migrate(pool: &Db) -> StorageResult<()> {
 pub mod auth;
 pub mod blobs;
 pub mod conversations;
-pub mod peers;
 pub mod nonces;
+pub mod peers;
+pub mod plan_runs;
 
 #[cfg(test)]
 mod tests {

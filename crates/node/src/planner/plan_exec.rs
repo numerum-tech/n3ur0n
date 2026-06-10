@@ -14,16 +14,17 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use n3ur0n_adapters::Backend;
 use serde_json::{Value, json};
+use time::OffsetDateTime;
 use tracing::warn;
 
-use crate::conversation::{persist_last, ConversationState};
+use crate::conversation::{ConversationState, persist_last, persist_tool_pair_at};
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
 use crate::planner::catalog::{Catalog, ToolDef};
-use crate::planner::plan::{execute_plan_streaming, validate_plan, Plan};
+use crate::planner::plan::{Plan, execute_plan_streaming, validate_plan};
 use crate::planner::{
-    DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, Planner,
-    PlanStepInfo, TraceEntry, MAX_CONTEXT_TURNS,
+    DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, MAX_CONTEXT_TURNS,
+    PlanStepInfo, Planner, TraceEntry,
 };
 /// Maximum number of *remote* tools surfaced in the compile prompt. Local
 /// tools always pass through (the operator configured them explicitly).
@@ -85,7 +86,6 @@ impl PlanExecPlanner {
         }
     }
 
-
     fn reflect_system_prompt(&self) -> String {
         String::from(
             "You are an n3ur0n response composer. The user asked a question and a plan \
@@ -131,8 +131,7 @@ impl Planner for PlanExecPlanner {
         _opts: DispatchOptions,
         events: EventSender,
     ) -> NodeResult<DispatchOutcome> {
-        self.dispatch_inner(node, state, input, Some(&events))
-            .await
+        self.dispatch_inner(node, state, input, Some(&events)).await
     }
 }
 
@@ -224,42 +223,112 @@ impl PlanExecPlanner {
         }
 
         // 5. Execute.
-        let run = execute_plan_streaming(node, &plan, &catalog, events).await?;
+        //
+        // Open a `plan_runs` journal row (status=running) before execution so a
+        // crash mid-run is detectable as an orphan. The durability hook then
+        // persists each step's tool pair the moment it completes, at a seq
+        // reserved by its plan index — so a partial trace stays correctly
+        // ordered. The in-memory ConversationState is reconciled afterwards
+        // from the returned trace (and is NOT persisted again here).
+        let run_id = format!("run_{}", uuid::Uuid::new_v4().simple());
+        let started_at = OffsetDateTime::now_utc().unix_timestamp();
+        let plan_json = serde_json::to_string(&plan)
+            .map_err(|e| NodeError::InvalidPayload(format!("serialize plan: {e}")))?;
+        n3ur0n_storage::plan_runs::insert(
+            node.db(),
+            &n3ur0n_storage::plan_runs::PlanRunRecord {
+                id: run_id.clone(),
+                conversation_id: state.id.clone(),
+                plan_json,
+                status: "running".into(),
+                created_at: started_at,
+                finished_at: None,
+            },
+        )
+        .map_err(|e| NodeError::InvalidPayload(format!("insert plan_run: {e}")))?;
 
-        // Persist tool turns for the UI / DB record (sequentially).
+        // User turn sits at `next_seq() - 1`; the reserved tool block starts
+        // right after it. Stamp every tool turn with the dispatch start time.
+        let base_seq = state.next_seq() - 1;
+        let db_hook = node.db().clone();
+        let conv_id_hook = state.id.clone();
+        let fallback_id = node.instance_id();
+        let mut on_done = |idx: usize, entry: &TraceEntry| {
+            let peer = n3ur0n_core::InstanceId::parse(&entry.peer_id)
+                .unwrap_or_else(|_| fallback_id.clone());
+            if let Err(e) = persist_tool_pair_at(
+                &db_hook,
+                &conv_id_hook,
+                base_seq,
+                idx,
+                &entry.call_id,
+                &peer,
+                &entry.capability,
+                &entry.args,
+                &entry.result,
+                &entry.error,
+                started_at,
+            ) {
+                warn!(error = %e, step = idx, "failed to persist tool turn mid-execution");
+            }
+        };
+
+        let run = match execute_plan_streaming(node, &plan, &catalog, events, Some(&mut on_done))
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let finished_at = OffsetDateTime::now_utc().unix_timestamp();
+                if let Err(se) =
+                    n3ur0n_storage::plan_runs::set_status(node.db(), &run_id, "failed", finished_at)
+                {
+                    warn!(error = %se, "failed to mark plan_run failed");
+                }
+                return Err(e);
+            }
+        };
+
+        // Reconcile the in-memory conversation with the executed trace. The DB
+        // already holds these turns (written incrementally by the hook above);
+        // here we only mirror them into the cached state, reusing each step's
+        // `call_id` so both views agree. No re-persist.
         for entry in &run.trace {
-            // We don't have the underlying ToolCall.id from execute_plan, so we
-            // synthesise per-pair ids from the plan step id.
             let pid = n3ur0n_core::InstanceId::parse(&entry.peer_id)
                 .unwrap_or_else(|_| node.instance_id());
-            let call_id = state.push_tool_call(
+            state.push_tool_call_with_id(
+                entry.call_id.clone(),
                 pid.clone(),
                 entry.capability.clone(),
                 entry.args.clone(),
             );
-            persist_last(node.db(), state)
-                .map_err(|e| NodeError::InvalidPayload(format!("persist tool_call: {e}")))?;
             state.push_tool_result(
-                call_id,
+                entry.call_id.clone(),
                 pid,
                 entry.capability.clone(),
                 entry.result.clone(),
                 entry.error.clone(),
             );
-            persist_last(node.db(), state)
-                .map_err(|e| NodeError::InvalidPayload(format!("persist tool_result: {e}")))?;
         }
 
         // 6. Reflect.
-        self.reflect_only(
-            node,
-            state,
-            &planner_text,
-            Some(&run.blackboard_summary()),
-            run.trace,
-            events,
-        )
-        .await
+        let outcome = self
+            .reflect_only(
+                node,
+                state,
+                &planner_text,
+                Some(&run.blackboard_summary()),
+                run.trace,
+                events,
+            )
+            .await;
+        let finished_at = OffsetDateTime::now_utc().unix_timestamp();
+        let status = if outcome.is_ok() { "done" } else { "failed" };
+        if let Err(e) =
+            n3ur0n_storage::plan_runs::set_status(node.db(), &run_id, status, finished_at)
+        {
+            warn!(error = %e, "failed to close plan_run journal row");
+        }
+        outcome
     }
 }
 
@@ -430,8 +499,7 @@ disambiguation, anti-patterns):\n\n",
 fn render_skill_block(catalog: &Catalog, t: &ToolDef) -> String {
     let cap = &t.cap;
     let name = catalog.tool_name(t);
-    let schema_in = serde_json::to_string(&cap.schema_in)
-        .unwrap_or_else(|_| "{}".into());
+    let schema_in = serde_json::to_string(&cap.schema_in).unwrap_or_else(|_| "{}".into());
 
     let mut out = String::new();
     out.push_str(&format!("## {name}\n"));
@@ -443,8 +511,7 @@ fn render_skill_block(catalog: &Catalog, t: &ToolDef) -> String {
     if !cap.examples.is_empty() {
         out.push_str("examples:\n");
         for ex in cap.examples.iter().take(2) {
-            let args = serde_json::to_string(&ex.args)
-                .unwrap_or_else(|_| "{}".into());
+            let args = serde_json::to_string(&ex.args).unwrap_or_else(|_| "{}".into());
             out.push_str(&format!(
                 "  - intent: \"{}\" → args: {}\n",
                 ex.user_intent, args
@@ -554,9 +621,7 @@ fn extract_first_json_object(s: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use n3ur0n_core::capability::{
-        AccessMode, CapabilityDecl, CapabilityExample, NegativeExample,
-    };
+    use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 
     #[test]
     fn parse_plan_direct() {

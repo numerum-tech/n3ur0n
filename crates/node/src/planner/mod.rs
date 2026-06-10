@@ -63,6 +63,9 @@ pub struct DispatchOutcome {
 
 #[derive(Debug, Clone)]
 pub struct TraceEntry {
+    /// Stable id linking the persisted ToolCall turn to its ToolResult.
+    /// Generated once per step so DB and in-memory views agree.
+    pub call_id: String,
     pub peer_id: String,
     pub capability: String,
     pub args: serde_json::Value,
@@ -89,19 +92,13 @@ pub struct PlanStepInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DispatchEvent {
     /// Plan compiled and validated; UI should render the full chip row.
-    PlanReady {
-        steps: Vec<PlanStepInfo>,
-    },
+    PlanReady { steps: Vec<PlanStepInfo> },
     /// Compile step finished but produced a low-confidence plan. UI may
     /// flag the stepper as degraded so the user knows the answer should
     /// be checked. Fired post-compile, pre-execute.
-    LowConfidence {
-        confidence: f32,
-    },
+    LowConfidence { confidence: f32 },
     /// One step starts executing.
-    StepStart {
-        id: String,
-    },
+    StepStart { id: String },
     /// One step finished (with or without error).
     StepDone {
         id: String,
@@ -116,9 +113,7 @@ pub enum DispatchEvent {
         model: Option<String>,
     },
     /// Fatal error during dispatch; stream is about to close.
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 /// Anything that can take a user message + conversation state and produce a

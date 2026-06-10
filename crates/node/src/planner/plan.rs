@@ -438,7 +438,7 @@ fn value_to_text(v: Value) -> String {
 
 /// Execute the plan sequentially in topological order.
 pub async fn execute_plan(node: &Node, plan: &Plan, catalog: &Catalog) -> NodeResult<PlanRun> {
-    execute_plan_streaming(node, plan, catalog, None).await
+    execute_plan_streaming(node, plan, catalog, None, None).await
 }
 
 /// Execute the plan with maximum safe parallelism: every step whose
@@ -452,11 +452,19 @@ pub async fn execute_plan(node: &Node, plan: &Plan, catalog: &Catalog) -> NodeRe
 /// The returned `PlanRun.trace` is sorted in plan declaration order so that
 /// persisted tool turns + UI history stay deterministic regardless of
 /// completion timing.
+///
+/// `on_step_done` is an optional durability hook invoked synchronously the
+/// moment each step finishes, with its plan-declaration index and finalized
+/// trace entry. Callers use it to persist the step's tool turns incrementally
+/// at a reserved seq (so a crash mid-run leaves a partial, correctly-ordered
+/// trace). The index is the step's position in `plan.plan`, not its completion
+/// order.
 pub async fn execute_plan_streaming(
     node: &Node,
     plan: &Plan,
     catalog: &Catalog,
     events: Option<&EventSender>,
+    mut on_step_done: Option<&mut (dyn FnMut(usize, &TraceEntry) + Send)>,
 ) -> NodeResult<PlanRun> {
     use futures::FutureExt;
     use futures::stream::{FuturesUnordered, StreamExt};
@@ -523,6 +531,9 @@ pub async fn execute_plan_streaming(
             Some(s) => s,
             None => return,
         };
+        // One stable id per step, shared by the trace entry and the persisted
+        // ToolCall/ToolResult pair so DB and in-memory views stay linked.
+        let call_id = format!("call_{}", uuid::Uuid::new_v4().simple());
         let resolved_args = resolve_value(&step.args, blackboard);
 
         // Fail-fast: leftover `${...}` after resolution.
@@ -535,6 +546,7 @@ use raw refs only, let the downstream tool combine values)",
             trace_by_id.insert(
                 step.id.clone(),
                 TraceEntry {
+                    call_id: call_id.clone(),
                     peer_id: step.peer.clone(),
                     capability: step.capability.clone(),
                     args: resolved_args,
@@ -565,6 +577,7 @@ use raw refs only, let the downstream tool combine values)",
                 trace_by_id.insert(
                     step.id.clone(),
                     TraceEntry {
+                        call_id: call_id.clone(),
                         peer_id: step.peer.clone(),
                         capability: step.capability.clone(),
                         args: resolved_args,
@@ -599,6 +612,7 @@ use raw refs only, let the downstream tool combine values)",
             trace_by_id.insert(
                 step.id.clone(),
                 TraceEntry {
+                    call_id: call_id.clone(),
                     peer_id: tool.peer_id.clone(),
                     capability: step.capability.clone(),
                     args: resolved_args,
@@ -623,6 +637,7 @@ use raw refs only, let the downstream tool combine values)",
         trace_by_id.insert(
             step.id.clone(),
             TraceEntry {
+                call_id: call_id.clone(),
                 peer_id: tool.peer_id.clone(),
                 capability: step.capability.clone(),
                 args: resolved_args.clone(),
@@ -744,6 +759,16 @@ use raw refs only, let the downstream tool combine values)",
                     });
                 }
             }
+        }
+
+        // Durability hook: persist this step's tool pair the moment it
+        // completes, at a seq reserved by its plan index. Steps finish out of
+        // order under concurrency, but the reserved seq keeps the persisted
+        // trace in plan declaration order.
+        if let Some(cb) = on_step_done.as_deref_mut()
+            && let (Some(idx), Some(entry)) = (plan_idx.get(&id).copied(), trace_by_id.get(&id))
+        {
+            cb(idx, entry);
         }
 
         // Free downstream steps.
@@ -1142,6 +1167,166 @@ mod tests {
         assert!(
             err.contains("schema_in"),
             "expected schema error, got: {err:?}"
+        );
+    }
+
+    // --- P1: incremental tool-turn persistence (durability hook) ---
+
+    /// Local backend: `gen` echoes args; `block` never returns. Lets a test
+    /// stall execution at a chosen step to simulate a crash mid-run.
+    #[derive(Debug)]
+    struct BlockingBackend;
+
+    #[async_trait::async_trait]
+    impl n3ur0n_adapters::Backend for BlockingBackend {
+        async fn invoke(
+            &self,
+            capability: &str,
+            args: Value,
+        ) -> n3ur0n_adapters::AdapterResult<Value> {
+            if capability == "block" {
+                futures::future::pending::<()>().await;
+            }
+            Ok(args)
+        }
+
+        async fn describe(
+            &self,
+        ) -> n3ur0n_adapters::AdapterResult<Vec<n3ur0n_core::CapabilityDecl>> {
+            Ok(vec![])
+        }
+
+        async fn health(&self) -> n3ur0n_adapters::AdapterResult<n3ur0n_adapters::HealthStatus> {
+            Ok(n3ur0n_adapters::HealthStatus::Healthy)
+        }
+    }
+
+    fn local_cap_catalog(names: &[&str]) -> Catalog {
+        use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample};
+        let mut cat = Catalog::default();
+        for name in names {
+            cat.tools.push(crate::planner::catalog::ToolDef {
+                peer_id: "n3:peeraaaaaaaaaaaa".into(),
+                peer_endpoint: None,
+                cap: CapabilityDecl {
+                    name: (*name).into(),
+                    description: format!("test {name}"),
+                    schema_in: json!({}),
+                    schema_out: json!({}),
+                    mode: AccessMode::Free,
+                    pricing: None,
+                    tags: vec![],
+                    lobe_ids: vec![],
+                    examples: vec![CapabilityExample {
+                        user_intent: "go".into(),
+                        args: json!({}),
+                        expected_output: json!({}),
+                    }],
+                    disambiguation: None,
+                    negative_examples: vec![],
+                    output_semantic: None,
+                    version: "0.0.0".into(),
+                    languages: vec![],
+                    countries: vec![],
+                },
+            });
+        }
+        cat
+    }
+
+    #[tokio::test]
+    async fn step_turns_persisted_incrementally_survive_a_kill() {
+        use crate::conversation::persist_tool_pair_at;
+        use n3ur0n_adapters::Backend;
+        use n3ur0n_core::Keypair;
+        use n3ur0n_storage::conversations::{self, ConversationRecord};
+        use n3ur0n_storage::open_in_memory;
+        use std::sync::Arc;
+
+        let backend: Arc<dyn Backend> = Arc::new(BlockingBackend);
+        let db = open_in_memory().unwrap();
+        // Seed a conversation row so the FK + append_turn UPDATE resolve.
+        conversations::insert(
+            &db,
+            &ConversationRecord {
+                id: "conv1".into(),
+                client_id: "client".into(),
+                title: None,
+                created_at: 0,
+                updated_at: 0,
+            },
+        )
+        .unwrap();
+        let registry = crate::registry::CapabilityRegistry::from_decls(vec![]);
+        let node = crate::node::Node::new(
+            Keypair::generate(),
+            db.clone(),
+            backend,
+            registry,
+            crate::node::NodeConfig::default(),
+        );
+
+        // Chain so steps run one at a time: s1 → s2 → s3(block) → s4.
+        let peer = short_peer_helper("peera");
+        let cat = local_cap_catalog(&["gen", "block"]);
+        let step = |id: &str, cap: &str, dep: Option<&str>| PlanStep {
+            id: id.into(),
+            peer: peer.clone(),
+            capability: cap.into(),
+            args: json!({"v": id}),
+            depends_on: dep.into_iter().map(|d| d.to_string()).collect(),
+        };
+        let plan = Plan {
+            plan: vec![
+                step("s1", "gen", None),
+                step("s2", "gen", Some("s1")),
+                step("s3", "block", Some("s2")),
+                step("s4", "gen", Some("s3")),
+            ],
+        };
+
+        // Durability hook mirroring dispatch_inner: base_seq = user turn seq.
+        // No user turn here, so base_seq = 0 → first tool turn lands at seq 1.
+        let base_seq = 0i64;
+        let db_hook = db.clone();
+        let fallback = node.instance_id();
+        let mut on_done = |idx: usize, entry: &TraceEntry| {
+            let pid =
+                n3ur0n_core::InstanceId::parse(&entry.peer_id).unwrap_or_else(|_| fallback.clone());
+            persist_tool_pair_at(
+                &db_hook,
+                "conv1",
+                base_seq,
+                idx,
+                &entry.call_id,
+                &pid,
+                &entry.capability,
+                &entry.args,
+                &entry.result,
+                &entry.error,
+                0,
+            )
+            .unwrap();
+        };
+
+        // Kill the run mid-execution: s3 blocks forever, so the timeout drops
+        // the future after s1 and s2 have completed + persisted.
+        let fut = execute_plan_streaming(&node, &plan, &cat, None, Some(&mut on_done));
+        let killed = tokio::time::timeout(std::time::Duration::from_millis(200), fut).await;
+        assert!(killed.is_err(), "run should have been killed by timeout");
+
+        // Exactly 2 tool pairs (s1, s2) persisted, at the reserved seqs.
+        let turns = conversations::load_turns(&db, "conv1").unwrap();
+        let seqs: Vec<i64> = turns.iter().map(|t| t.seq).collect();
+        assert_eq!(
+            seqs,
+            vec![1, 2, 3, 4],
+            "two pairs at reserved seqs, got {seqs:?}"
+        );
+        let roles: Vec<&str> = turns.iter().map(|t| t.role.as_str()).collect();
+        assert_eq!(
+            roles,
+            vec!["tool_call", "tool_result", "tool_call", "tool_result"]
         );
     }
 }
