@@ -115,23 +115,23 @@ impl Planner for PlanExecPlanner {
         &self,
         node: &Node,
         state: &mut ConversationState,
-        user_message: String,
+        input: crate::conversation::UserInput,
         _mode: DispatchMode,
         _opts: DispatchOptions,
     ) -> NodeResult<DispatchOutcome> {
-        self.dispatch_inner(node, state, user_message, None).await
+        self.dispatch_inner(node, state, input, None).await
     }
 
     async fn dispatch_streaming(
         &self,
         node: &Node,
         state: &mut ConversationState,
-        user_message: String,
+        input: crate::conversation::UserInput,
         _mode: DispatchMode,
         _opts: DispatchOptions,
         events: EventSender,
     ) -> NodeResult<DispatchOutcome> {
-        self.dispatch_inner(node, state, user_message, Some(&events))
+        self.dispatch_inner(node, state, input, Some(&events))
             .await
     }
 }
@@ -141,11 +141,12 @@ impl PlanExecPlanner {
         &self,
         node: &Node,
         state: &mut ConversationState,
-        user_message: String,
+        input: crate::conversation::UserInput,
         events: Option<&EventSender>,
     ) -> NodeResult<DispatchOutcome> {
+        let planner_text = input.planner_text();
         // 1. Persist user turn.
-        state.push_user(user_message.clone());
+        state.push_user_input(&input);
         persist_last(node.db(), state)
             .map_err(|e| NodeError::InvalidPayload(format!("persist user: {e}")))?;
 
@@ -158,7 +159,7 @@ impl PlanExecPlanner {
             &registry_snapshot,
             node.db(),
             500,
-            &user_message,
+            &planner_text,
             REMOTE_TOP_K,
         )?;
 
@@ -166,7 +167,7 @@ impl PlanExecPlanner {
         // default LocalLLMCompiler ships the constrained-decoding fields
         // (grammar / response_format / format) so backends that honour
         // them stay strict; cascading variants may try a remote planner.
-        let plan = self.compiler.compile(&user_message, &catalog).await?;
+        let plan = self.compiler.compile(&planner_text, &catalog).await?;
 
         // Surface low-confidence plans to the UI. Threshold matches the
         // default cascade escalation point (0.5) so the chip-row banner
@@ -186,7 +187,7 @@ impl PlanExecPlanner {
                 let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
             }
             return self
-                .reflect_only(node, state, &user_message, None, Vec::new(), events)
+                .reflect_only(node, state, &planner_text, None, Vec::new(), events)
                 .await;
         }
 
@@ -196,7 +197,7 @@ impl PlanExecPlanner {
                 let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
             }
             return self
-                .reflect_only(node, state, &user_message, None, Vec::new(), events)
+                .reflect_only(node, state, &planner_text, None, Vec::new(), events)
                 .await;
         }
 
@@ -253,7 +254,7 @@ impl PlanExecPlanner {
         self.reflect_only(
             node,
             state,
-            &user_message,
+            &planner_text,
             Some(&run.blackboard_summary()),
             run.trace,
             events,

@@ -29,9 +29,11 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use n3ur0n_adapters::openai::OpenAIConfig;
 use n3ur0n_node::manifest::{load_backend_dir, BackendKind as MfBackendKind};
-use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
-use n3ur0n_server::bootstrap::{self, BackendKind, PlannerKind};
+use arc_swap::ArcSwap;
+use n3ur0n_node::runtime::RuntimeConfig;
+use n3ur0n_server::bootstrap::{self, BackendKind};
 use n3ur0n_server::http;
+use n3ur0n_server::planner_config::{PlannerEnvFallback, load_planner_user_config};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
@@ -127,6 +129,7 @@ fn pick_planner_backend(backends_dir: &PathBuf) -> Option<OpenAIConfig> {
                     Some(cfg.api_key)
                 },
                 description: None,
+                allow_model_override: false,
             });
         }
     }
@@ -168,44 +171,48 @@ async fn start_server() -> Result<u16> {
     let port = listener.local_addr()?.port();
 
     let runtime_config = RuntimeConfig::default();
-    // Auto-wire the planner runtime when the user has at least one
-    // `openai_compat` backend declared. We pick the FIRST such backend by
-    // load order (deterministic per-filename sort) — heuristic, but it
-    // means "Ollama auto-detected on first launch" → working chat with
-    // zero further config. When no openai_compat backend exists, the
-    // node still runs but the conversation routes return 503.
-    let runtime: Option<Arc<NodeRuntime>> =
-        match pick_planner_backend(&config_dir.join("backends")) {
-            Some(cfg) => {
-                let chosen_model = Some(cfg.default_model.clone());
-                match bootstrap::build_runtime(
-                    node.clone(),
-                    PlannerKind::PlanExec {
-                        backend: cfg,
-                        model_hint: chosen_model,
-                    },
-                    runtime_config,
-                ) {
-                    Ok(rt) => {
-                        info!("planner runtime wired");
-                        Some(Arc::new(rt))
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "planner runtime failed to init; chat tab will return 503");
-                        None
-                    }
-                }
+    // Bootstrap default: first `openai_compat` backend on disk (Ollama
+    // auto-detect seeds `local_ollama`). Operators can override via
+    // Settings → Planner without restart.
+    let planner_env = pick_planner_backend(&config_dir.join("backends")).map(|cfg| {
+        PlannerEnvFallback {
+            base_url: cfg.base_url,
+            default_model: cfg.default_model,
+            api_key: cfg.api_key,
+        }
+    });
+    let runtime_cell = Arc::new(ArcSwap::from_pointee(None));
+    if let Some(env) = planner_env.as_ref() {
+        let user = load_planner_user_config(&config_dir);
+        match bootstrap::build_runtime_with_user_config(
+            node.clone(),
+            &config_dir,
+            env,
+            &user,
+            runtime_config.clone(),
+        ) {
+            Ok(rt) => {
+                info!("planner runtime wired");
+                runtime_cell.store(Arc::new(Some(Arc::new(rt))));
             }
-            None => {
-                warn!("no openai_compat backend found in backends/; chat tab will return 503 until one is added");
-                None
+            Err(e) => {
+                warn!(error = %e, "planner runtime failed to init; chat tab will return 503");
             }
-        };
+        }
+    } else {
+        warn!("no openai_compat backend found in backends/; chat tab will return 503 until one is added");
+    }
 
     // Settings routes (manifest CRUD) live in the server crate so the
     // headless `n3ur0n serve` binary exposes the same surface to its
     // embedded web UI. Desktop merges them on the same loopback listener.
-    let app = http::app_with_settings(node, runtime, Some(config_dir.clone()));
+    let app = http::app_with_settings(
+        node,
+        runtime_cell,
+        Some(config_dir.clone()),
+        planner_env.clone(),
+        planner_env.as_ref().map(|_| runtime_config),
+    );
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!(error = %e, "embedded server stopped");

@@ -35,6 +35,7 @@ tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 toml = { workspace = true }
 dirs = "5"
+arc-swap = { workspace = true }
 
 [features]
 default = ["custom-protocol"]

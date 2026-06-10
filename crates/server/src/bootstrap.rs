@@ -19,9 +19,13 @@ use n3ur0n_node::planner::compiler::{
     CascadingCompiler, LocalLLMCompiler, PlanCompiler, RemotePlanCompiler,
 };
 use n3ur0n_node::planner::plan_exec::default_compile_system_prompt;
-use n3ur0n_node::planner::{PlanExecPlanner, Planner};
+use n3ur0n_node::planner::{DirectChatPlanner, PlanExecPlanner, Planner};
 use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_node::{CapabilityRegistry, IdentityFile, Node, NodeConfig, identity_file};
+
+use crate::planner_config::{
+    PlannerEnvFallback, PlannerUserConfig, ResolvedPlannerLlm, resolve_planner_llm,
+};
 
 pub fn default_config_dir() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
@@ -58,6 +62,7 @@ pub async fn load_node(
         endpoint,
         alias: None,
         bootstrap_peers,
+        blobs_dir: Some(config_dir.join("blobs").join("sha256")),
         ..Default::default()
     };
 
@@ -207,27 +212,60 @@ pub enum PlannerKind {
     },
 }
 
-/// Build a `NodeRuntime` (Node + Planner + concurrency primitives) from a
-/// resolved `PlannerKind`.
-///
-/// If `N3UR0N_PLANNER_REMOTE_FALLBACK` is set to a peer endpoint (e.g.
-/// `http://node-c:4242`), the planner wraps its local compiler in a
-/// `CascadingCompiler` that escalates to that peer's `plan` capability
-/// when the local compile produces a low-confidence plan. The escalation
-/// threshold is set by `N3UR0N_PLANNER_CONFIDENCE_THRESHOLD` (default
-/// 0.5).
+/// Build a `NodeRuntime` from env-resolved planner LLM settings (tests and
+/// legacy callers).
 pub fn build_runtime(
     node: Node,
     kind: PlannerKind,
     runtime_config: RuntimeConfig,
 ) -> Result<NodeRuntime> {
-    let planner: Arc<dyn Planner> = match kind {
-        PlannerKind::PlanExec { backend, model_hint } => {
+    let PlannerKind::PlanExec { backend, model_hint } = kind;
+    let chosen = model_hint
+        .clone()
+        .unwrap_or_else(|| backend.default_model.clone());
+    let resolved = ResolvedPlannerLlm {
+        openai: backend,
+        model_hint: chosen,
+        source: "env",
+        backend_name: None,
+    };
+    build_runtime_from_resolved(node, resolved, runtime_config)
+}
+
+/// Build a `NodeRuntime` honouring `planner.toml` when present.
+pub fn build_runtime_with_user_config(
+    node: Node,
+    config_dir: &Path,
+    env: &PlannerEnvFallback,
+    user: &PlannerUserConfig,
+    runtime_config: RuntimeConfig,
+) -> Result<NodeRuntime> {
+    let resolved = resolve_planner_llm(&node, config_dir, env, user)?;
+    tracing::info!(
+        source = resolved.source,
+        backend = ?resolved.backend_name,
+        model = %resolved.model_hint,
+        "planner LLM resolved"
+    );
+    build_runtime_from_resolved(node, resolved, runtime_config)
+}
+
+/// If `N3UR0N_PLANNER_REMOTE_FALLBACK` is set, wraps the local compiler in a
+/// `CascadingCompiler` that escalates to a remote peer's `plan` cap when
+/// local confidence is below `N3UR0N_PLANNER_CONFIDENCE_THRESHOLD` (default 0.5).
+fn build_runtime_from_resolved(
+    node: Node,
+    resolved: ResolvedPlannerLlm,
+    runtime_config: RuntimeConfig,
+) -> Result<NodeRuntime> {
+    let (auto, direct): (Arc<dyn Planner>, Arc<dyn Planner>) = {
+            let mut planner_cfg = resolved.openai.clone();
+            planner_cfg.allow_model_override = true;
             let llm: Arc<dyn Backend> = Arc::new(
-                OpenAIBackend::new(backend.clone())
+                OpenAIBackend::new(planner_cfg)
                     .map_err(|e| anyhow::anyhow!("planner llm init: {e}"))?,
             );
-            let chosen_model = model_hint.unwrap_or(backend.default_model);
+            let chosen_model = resolved.model_hint.clone();
 
             let local = Arc::new(LocalLLMCompiler {
                 llm_backend: llm.clone(),
@@ -262,14 +300,15 @@ pub fn build_runtime(
                     _ => local,
                 };
 
-            Arc::new(PlanExecPlanner::with_compiler(
+            let auto = Arc::new(PlanExecPlanner::with_compiler(
                 compiler,
-                llm,
-                Some(chosen_model),
-            ))
-        }
+                llm.clone(),
+                Some(chosen_model.clone()),
+            ));
+            let direct = Arc::new(DirectChatPlanner::new(llm, Some(chosen_model)));
+            (auto, direct)
     };
-    Ok(NodeRuntime::new(node, planner, runtime_config))
+    Ok(NodeRuntime::new(node, auto, direct, runtime_config))
 }
 
 /// Generate a fresh identity, persist it, and return the underlying keypair.

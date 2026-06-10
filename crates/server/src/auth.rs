@@ -74,6 +74,9 @@ pub mod perm {
     pub const USERS_WRITE: &str = "users:write";
     pub const IDENTITY_READ: &str = "identity:read";
     pub const IDENTITY_ROTATE: &str = "identity:rotate";
+    pub const FILES_READ: &str = "files:read";
+    pub const FILES_DELETE: &str = "files:delete";
+    pub const CAPS_BLOBS_READ: &str = "caps:blobs:read";
 }
 
 /// Permissions granted to each role. The lowest-tier User can chat +
@@ -84,11 +87,13 @@ pub fn permissions_for(role: Role) -> &'static [&'static str] {
         Role::User => &[
             CHAT_USE, INVOKE_USE,
             CAPS_READ, PEERS_READ, BACKENDS_READ, IDENTITY_READ,
+            FILES_READ, FILES_DELETE,
         ],
         Role::Operator => &[
             CHAT_USE, INVOKE_USE,
             CAPS_READ, CAPS_WRITE,
             PEERS_READ, BACKENDS_READ, IDENTITY_READ,
+            FILES_READ, FILES_DELETE, CAPS_BLOBS_READ,
         ],
         Role::Admin => &[
             CHAT_USE, INVOKE_USE,
@@ -97,6 +102,7 @@ pub fn permissions_for(role: Role) -> &'static [&'static str] {
             BACKENDS_READ, BACKENDS_WRITE,
             USERS_READ, USERS_WRITE,
             IDENTITY_READ, IDENTITY_ROTATE,
+            FILES_READ, FILES_DELETE, CAPS_BLOBS_READ,
         ],
     }
 }

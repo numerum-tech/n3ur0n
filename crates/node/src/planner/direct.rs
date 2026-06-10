@@ -73,12 +73,42 @@ impl Planner for DirectChatPlanner {
         &self,
         node: &Node,
         state: &mut ConversationState,
-        user_message: String,
+        input: crate::conversation::UserInput,
         _mode: DispatchMode,
         opts: DispatchOptions,
     ) -> NodeResult<DispatchOutcome> {
-        // Push user turn and persist
-        state.push_user(user_message);
+        self.dispatch_inner(node, state, input, opts).await
+    }
+
+    async fn dispatch_streaming(
+        &self,
+        node: &Node,
+        state: &mut ConversationState,
+        input: crate::conversation::UserInput,
+        _mode: DispatchMode,
+        opts: DispatchOptions,
+        events: EventSender,
+    ) -> NodeResult<DispatchOutcome> {
+        let _ = events.send(DispatchEvent::PlanReady { steps: vec![] });
+        let _ = events.send(DispatchEvent::Reflecting);
+        let outcome = self.dispatch_inner(node, state, input, opts).await?;
+        let _ = events.send(DispatchEvent::Final {
+            reply: outcome.reply.clone(),
+            model: outcome.model.clone(),
+        });
+        Ok(outcome)
+    }
+}
+
+impl DirectChatPlanner {
+    async fn dispatch_inner(
+        &self,
+        node: &Node,
+        state: &mut ConversationState,
+        input: crate::conversation::UserInput,
+        opts: DispatchOptions,
+    ) -> NodeResult<DispatchOutcome> {
+        state.push_user_input(&input);
         persist_last(node.db(), state)
             .map_err(|e| crate::error::NodeError::InvalidPayload(format!("persist user: {e}")))?;
 
@@ -127,38 +157,12 @@ impl Planner for DirectChatPlanner {
             trace: vec![],
         })
     }
-
-    async fn dispatch_streaming(
-        &self,
-        node: &Node,
-        state: &mut ConversationState,
-        user_message: String,
-        mode: DispatchMode,
-        opts: DispatchOptions,
-        events: EventSender,
-    ) -> NodeResult<DispatchOutcome> {
-        // Emit PlanReady with empty steps
-        let _ = events.send(DispatchEvent::PlanReady { steps: vec![] });
-
-        // Emit Reflecting
-        let _ = events.send(DispatchEvent::Reflecting);
-
-        // Call dispatch to do the actual work
-        let outcome = self.dispatch(node, state, user_message, mode, opts).await?;
-
-        // Emit Final with reply and model
-        let _ = events.send(DispatchEvent::Final {
-            reply: outcome.reply.clone(),
-            model: outcome.model.clone(),
-        });
-
-        Ok(outcome)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conversation::UserInput;
     use n3ur0n_adapters::{AdapterError, AdapterResult};
     use n3ur0n_core::capability::CapabilityDecl;
     use serde_json::{Value, json};
@@ -296,7 +300,7 @@ mod tests {
             .dispatch(
                 &node,
                 &mut state,
-                "What is 2+2?".to_string(),
+                UserInput::from("What is 2+2?"),
                 DispatchMode::Direct,
                 DispatchOptions::default(),
             )
@@ -341,7 +345,7 @@ mod tests {
             .dispatch(
                 &node,
                 &mut state,
-                "Hello".to_string(),
+                UserInput::from("Hello"),
                 DispatchMode::Direct,
                 DispatchOptions {
                     model_override: Some("custom-model".to_string()),
@@ -368,7 +372,7 @@ mod tests {
             .dispatch(
                 &node,
                 &mut state,
-                "Test message".to_string(),
+                UserInput::from("Test message"),
                 DispatchMode::Direct,
                 DispatchOptions::default(),
             )
@@ -407,7 +411,7 @@ mod tests {
             .dispatch_streaming(
                 &node,
                 &mut state,
-                "Stream test".to_string(),
+                UserInput::from("Stream test"),
                 DispatchMode::Direct,
                 DispatchOptions::default(),
                 tx,

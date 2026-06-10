@@ -13,10 +13,9 @@
 //!   DELETE /api/v0/caps/manifests/:name    — remove a cap.toml
 //!
 //! CRUD operations write to `<config>/backends/<name>.toml` or
-//! `<config>/caps/<name>.toml`. Capability CRUD also triggers a live
-//! `Node::reload_caps_from_manifest_dir()` so the in-memory registry
-//! reflects the change without restart. Backend CRUD still requires a
-//! restart (backend hot-reload is deferred).
+//! `<config>/caps/<name>.toml`. Backend and capability CRUD trigger live
+//! reloads on the in-memory registries. When the planner uses a named
+//! backend, backend saves also hot-reload the planner runtime.
 //!
 //! Lifted from the desktop shell so the headless server exposes the
 //! same Settings surface to the embedded web UI.
@@ -37,12 +36,23 @@ use tracing::warn;
 pub struct SettingsState {
     pub config_dir: PathBuf,
     pub node: n3ur0n_node::Node,
+    /// Present when the node was started with a planner; enables hot-reload
+    /// after backend manifest edits that affect `planner.toml`.
+    pub planner: Option<crate::planner_config::PlannerRuntimeHandle>,
 }
 
-pub fn router(config_dir: PathBuf, node: n3ur0n_node::Node) -> Router {
+pub fn router(
+    config_dir: PathBuf,
+    node: n3ur0n_node::Node,
+    planner: Option<crate::planner_config::PlannerRuntimeHandle>,
+) -> Router {
     use crate::auth::perm;
     use crate::require_perm;
-    let state = SettingsState { config_dir, node };
+    let state = SettingsState {
+        config_dir,
+        node,
+        planner,
+    };
 
     // Mutating backend routes — admin-only.
     let backends_write = Router::new()
@@ -185,9 +195,10 @@ async fn create_backend(
     }
     let body = match req.kind.as_str() {
         "openai_compat" => {
-            let Some(base_url) = req.base_url.as_deref() else {
+            let Some(base_url_raw) = req.base_url.as_deref() else {
                 return settings_error(StatusCode::BAD_REQUEST, "base_url required for openai_compat");
             };
+            let base_url = n3ur0n_adapters::openai::normalize_openai_base_url(base_url_raw);
             let Some(default_model) = req.default_model.as_deref() else {
                 return settings_error(StatusCode::BAD_REQUEST, "default_model required for openai_compat");
             };
@@ -221,7 +232,7 @@ default_model = "{default_model}"
 api_key       = "{api_key}"
 "#,
                 name = name,
-                base_url = toml_escape(base_url),
+                base_url = toml_escape(&base_url),
                 default_model = toml_escape(default_model),
                 api_key = toml_escape(api_key),
             )
@@ -327,6 +338,31 @@ base_url = "{base_url}"
                 (0, 0, Some(e.to_string()))
             }
         };
+    let (planner_reloaded, planner_reload_warning, planner_active) =
+        match state.planner.as_ref() {
+            Some(handle) => match crate::planner_config::hot_reload_planner_after_backend_change(
+                &state.node,
+                &state.config_dir,
+                handle,
+                &name,
+            ) {
+                Ok(Some(resolved)) => (
+                    true,
+                    None,
+                    Some(json!({
+                        "base_url": resolved.openai.base_url,
+                        "model": resolved.model_hint,
+                        "backend": resolved.backend_name,
+                    })),
+                ),
+                Ok(None) => (false, None, None),
+                Err(e) => {
+                    tracing::warn!(error = %e, backend = %name, "planner reload after upsert failed");
+                    (false, Some(e.to_string()), None)
+                }
+            },
+            None => (false, None, None),
+        };
     Json(json!({
         "ok": true,
         "name": name,
@@ -335,6 +371,9 @@ base_url = "{base_url}"
         "backends_loaded": backends_len,
         "caps_loaded": caps_len,
         "reload_warning": reload_warning,
+        "planner_reloaded": planner_reloaded,
+        "planner_reload_warning": planner_reload_warning,
+        "planner_active": planner_active,
     }))
     .into_response()
 }
@@ -399,6 +438,12 @@ async fn delete_backend(
     if let Err(e) = std::fs::remove_file(&target) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
+    let was_planner_backend = {
+        let user = crate::planner_config::load_planner_user_config(&state.config_dir);
+        user.backend.as_deref() == Some(name.as_str())
+    };
+    clear_planner_backend_if_removed(&state.config_dir, &name);
+
     let (backends_len, caps_len, reload_warning) =
         match state.node.reload_backends_from_manifest_dir() {
             Ok((b, c)) => (b, c, None),
@@ -407,14 +452,50 @@ async fn delete_backend(
                 (0, 0, Some(e.to_string()))
             }
         };
+    let (planner_reloaded, planner_reload_warning) =
+        if was_planner_backend {
+            match state.planner.as_ref() {
+                Some(handle) => {
+                    let user = crate::planner_config::load_planner_user_config(&state.config_dir);
+                    match crate::planner_config::hot_reload_planner_runtime(
+                        &state.node,
+                        &state.config_dir,
+                        handle,
+                        &user,
+                    ) {
+                        Ok(_) => (true, None),
+                        Err(e) => {
+                            tracing::warn!(error = %e, backend = %name, "planner reload after delete failed");
+                            (false, Some(e.to_string()))
+                        }
+                    }
+                }
+                None => (false, None),
+            }
+        } else {
+            (false, None)
+        };
     Json(json!({
         "ok": true,
         "name": name,
         "backends_loaded": backends_len,
         "caps_loaded": caps_len,
         "reload_warning": reload_warning,
+        "planner_reloaded": planner_reloaded,
+        "planner_reload_warning": planner_reload_warning,
     }))
     .into_response()
+}
+
+fn clear_planner_backend_if_removed(config_dir: &std::path::Path, name: &str) {
+    let mut user = crate::planner_config::load_planner_user_config(config_dir);
+    if user.backend.as_deref() != Some(name) {
+        return;
+    }
+    user.backend = None;
+    if let Err(e) = crate::planner_config::save_planner_user_config(config_dir, &user) {
+        tracing::warn!(error = %e, backend = %name, "failed to clear planner backend after delete");
+    }
 }
 
 // ---------------------------------------------------------------------------

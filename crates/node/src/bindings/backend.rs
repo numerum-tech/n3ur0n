@@ -48,6 +48,7 @@ pub fn build_backend_instance(m: &BackendManifest) -> NodeResult<BackendInstance
                     Some(cfg.api_key.clone())
                 },
                 description: None,
+                allow_model_override: false,
             };
             let backend = OpenAIBackend::new(cfg)
                 .map_err(|e| NodeError::InvalidPayload(format!("openai backend init: {e}")))?;

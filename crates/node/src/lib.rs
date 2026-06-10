@@ -13,6 +13,8 @@
 
 pub mod backends_registry;
 pub mod bindings;
+pub mod blob_client;
+pub mod blob_resolve;
 pub mod client;
 pub mod conversation;
 pub mod discovery;

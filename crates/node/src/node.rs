@@ -25,6 +25,9 @@ pub struct NodeConfig {
     pub verify: VerifyConfig,
     /// Initial peers to bootstrap from at startup.
     pub bootstrap_peers: Vec<String>,
+    /// Local blob cache directory (`<config>/blobs/sha256/`). Required for
+    /// planner blob orchestration and the Files panel.
+    pub blobs_dir: Option<PathBuf>,
 }
 
 /// Live node state. Cloning a [`Node`] is cheap: the heavy state sits behind
@@ -240,5 +243,21 @@ impl Node {
     /// Borrow the clock.
     pub fn clock(&self) -> &Arc<dyn n3ur0n_core::Clock> {
         &self.clock
+    }
+
+    /// Whether this node was started in manifest mode (`backends/` + `caps/`).
+    pub fn is_manifest_mode(&self) -> bool {
+        self.manifest_dir.is_some()
+    }
+
+    /// True when a named manifest backend is loaded and is `openai_compat`.
+    pub fn has_openai_compat_backend(&self, name: &str) -> bool {
+        let Some(cell) = self.backends.as_ref() else {
+            return false;
+        };
+        matches!(
+            cell.load_full().get(name),
+            Some(crate::bindings::BackendInstance::OpenAI(_))
+        )
     }
 }

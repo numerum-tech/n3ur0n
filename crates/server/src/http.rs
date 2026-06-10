@@ -14,9 +14,11 @@
 //! - `/ui` and `/ui/*`               static HTML chat UI embedded via rust-embed
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Json, Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -29,9 +31,15 @@ use n3ur0n_core::SignedMessage;
 use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_node::client as peer_client;
 use n3ur0n_node::conversation;
-use n3ur0n_node::planner::DispatchEvent;
-use n3ur0n_node::runtime::NodeRuntime;
+use n3ur0n_node::planner::{DispatchEvent, DispatchMode, DispatchOptions};
+use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_node::{Node, NodeError, handle_request};
+
+use crate::bootstrap;
+use crate::planner_config::{
+    PlannerEnvFallback, PlannerRuntimeHandle, PlannerUserConfig, list_openai_compat_backends,
+    load_planner_user_config, resolve_planner_llm, save_planner_user_config,
+};
 use n3ur0n_storage::conversations as conv_repo;
 use n3ur0n_storage::peers as peers_repo;
 use rust_embed::RustEmbed;
@@ -45,13 +53,25 @@ use uuid::Uuid;
 const META_LIMIT: usize = 16 * 1024;
 const INVOKE_LIMIT: usize = 1024 * 1024;
 const LOCAL_API_LIMIT: usize = 256 * 1024;
+/// File upload (`POST /api/v0/files`) and blob PUT — matches §6.1 default per-peer quota.
+const FILE_UPLOAD_LIMIT: usize = 100 * 1024 * 1024;
 const CLIENT_ID_COOKIE: &str = "n3ur0n_client_id";
 const CLIENT_ID_MAX_AGE: u64 = 31_536_000; // 1 year
 
 #[derive(Clone)]
-struct AppState {
-    node: Node,
-    runtime: Option<Arc<NodeRuntime>>,
+pub(crate) struct AppState {
+    pub(crate) node: Node,
+    /// Hot-swappable planner runtime (`None` when planner disabled).
+    pub(crate) runtime: Arc<ArcSwap<Option<Arc<NodeRuntime>>>>,
+    /// Config directory for on-disk blob storage (`<dir>/blobs/sha256/`).
+    pub(crate) config_dir: Option<PathBuf>,
+    /// Env bootstrap defaults for the planner LLM (from `N3UR0N_PLANNER_LLM_*`).
+    pub(crate) planner_env: Option<PlannerEnvFallback>,
+    pub(crate) runtime_config: Option<RuntimeConfig>,
+}
+
+fn load_runtime(state: &AppState) -> Option<Arc<NodeRuntime>> {
+    (*state.runtime.load_full()).clone()
 }
 
 #[derive(Clone, Debug)]
@@ -64,7 +84,15 @@ struct UiAssets;
 /// Build the HTTP router. `runtime` is `None` when the node has no planner
 /// configured — `/api/v0/conversations/:id/messages` returns 503 in that case.
 pub fn app(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
-    app_with_settings(node, runtime, None)
+    let cell = Arc::new(ArcSwap::from_pointee(runtime));
+    app_with_settings(node, cell, None, None, None)
+}
+
+/// Test helper: same router as [`app`] but with auth bypass enabled (no login).
+#[doc(hidden)]
+pub fn app_for_test(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
+    let cell = Arc::new(ArcSwap::from_pointee(runtime));
+    build_app(node, cell, None, None, None, true)
 }
 
 /// Variant of [`app`] that also mounts the settings sub-router under
@@ -72,17 +100,51 @@ pub fn app(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
 /// pass through the same auth middleware stack.
 pub fn app_with_settings(
     node: Node,
-    runtime: Option<Arc<NodeRuntime>>,
-    config_dir: Option<std::path::PathBuf>,
+    runtime: Arc<ArcSwap<Option<Arc<NodeRuntime>>>>,
+    config_dir: Option<PathBuf>,
+    planner_env: Option<PlannerEnvFallback>,
+    runtime_config: Option<RuntimeConfig>,
+) -> Router {
+    build_app(
+        node,
+        runtime,
+        config_dir,
+        planner_env,
+        runtime_config,
+        crate::auth::read_bypass_env(),
+    )
+}
+
+fn build_app(
+    node: Node,
+    runtime: Arc<ArcSwap<Option<Arc<NodeRuntime>>>>,
+    config_dir: Option<PathBuf>,
+    planner_env: Option<PlannerEnvFallback>,
+    runtime_config: Option<RuntimeConfig>,
+    bypass: bool,
 ) -> Router {
     use crate::auth::{require_authed, AuthState};
     use crate::require_perm;
 
     let auth_state = AuthState {
         db: node.db().clone(),
-        bypass: crate::auth::read_bypass_env(),
+        bypass,
     };
-    let state = AppState { node: node.clone(), runtime };
+    let planner_handle = planner_env
+        .as_ref()
+        .zip(runtime_config.as_ref())
+        .map(|(env, rc)| PlannerRuntimeHandle {
+            runtime: runtime.clone(),
+            env: env.clone(),
+            runtime_config: rc.clone(),
+        });
+    let state = AppState {
+        node: node.clone(),
+        runtime,
+        config_dir: config_dir.clone(),
+        planner_env,
+        runtime_config,
+    };
 
     // Public sub-router: unauthenticated endpoints (health checks, locale
     // catalog, login + bootstrap + logout + auth/me). Everything else
@@ -132,11 +194,26 @@ pub fn app_with_settings(
             "/conversations/:id/messages/stream",
             post(conv_messages_stream).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
+        .merge(
+            crate::files_api::routes().layer(DefaultBodyLimit::max(FILE_UPLOAD_LIMIT)),
+        )
+        .merge(
+            Router::new()
+                .route("/planner", get(api_planner_get))
+                .route_layer(require_perm!(crate::auth::perm::BACKENDS_READ))
+                .with_state(state.clone()),
+        )
+        .merge(
+            Router::new()
+                .route("/planner", axum::routing::put(api_planner_put))
+                .route_layer(require_perm!(crate::auth::perm::BACKENDS_WRITE))
+                .with_state(state.clone()),
+        )
         .route_layer(middleware::from_fn(require_authed))
         .with_state(state.clone());
 
     let settings_routes = match config_dir {
-        Some(dir) => crate::settings::router(dir, node),
+        Some(dir) => crate::settings::router(dir, node, planner_handle),
         None => Router::new(),
     };
 
@@ -157,6 +234,9 @@ pub fn app_with_settings(
         .route(
             "/messages",
             post(post_message).layer(DefaultBodyLimit::max(INVOKE_LIMIT)),
+        )
+        .merge(
+            crate::blobs::routes().layer(DefaultBodyLimit::max(FILE_UPLOAD_LIMIT)),
         )
         .with_state(state);
 
@@ -662,8 +742,7 @@ async fn conv_patch(
                 return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
             }
             // Best-effort cache invalidation if runtime is configured.
-            if let Some(rt) = &state.runtime {
-                let rt = rt.clone();
+            if let Some(rt) = load_runtime(&state) {
                 let id_clone = id.clone();
                 tokio::spawn(async move { rt.evict(&id_clone).await });
             }
@@ -687,8 +766,7 @@ async fn conv_delete(
             if let Err(e) = conv_repo::delete(state.node.db(), &id) {
                 return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
             }
-            if let Some(rt) = &state.runtime {
-                let rt = rt.clone();
+            if let Some(rt) = load_runtime(&state) {
                 let id_clone = id.clone();
                 tokio::spawn(async move { rt.evict(&id_clone).await });
             }
@@ -698,9 +776,138 @@ async fn conv_delete(
     }
 }
 
+async fn api_planner_get(State(state): State<AppState>) -> impl IntoResponse {
+    let Some(config_dir) = state.config_dir.as_deref() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "planner settings require a config directory",
+        );
+    };
+    let user = load_planner_user_config(config_dir);
+    let enabled = load_runtime(&state).is_some();
+    let available = list_openai_compat_backends(config_dir);
+    let env_default = state.planner_env.as_ref().map(|e| {
+        json!({
+            "base_url": e.base_url,
+            "model": e.default_model,
+            "has_api_key": e.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+        })
+    });
+    let active = if enabled {
+        state.planner_env.as_ref().and_then(|env| {
+            resolve_planner_llm(&state.node, config_dir, env, &user).ok()
+        })
+    } else {
+        None
+    };
+    Json(json!({
+        "enabled": enabled,
+        "config": {
+            "backend": user.backend,
+            "model": user.model,
+        },
+        "active": active.as_ref().map(|r| json!({
+            "source": r.source,
+            "backend": r.backend_name,
+            "model": r.model_hint,
+            "base_url": r.openai.base_url,
+        })),
+        "env_default": env_default,
+        "available_backends": available,
+        "manifest_mode": state.node.is_manifest_mode(),
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct PlannerPutRequest {
+    #[serde(default)]
+    backend: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+async fn api_planner_put(
+    State(state): State<AppState>,
+    Json(payload): Json<PlannerPutRequest>,
+) -> Response {
+    let Some(config_dir) = state.config_dir.as_deref() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "planner settings require a config directory",
+        );
+    };
+    let Some(env) = state.planner_env.clone() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no planner configured on this node (set N3UR0N_PLANNER_MODE)",
+        );
+    };
+    let Some(runtime_config) = state.runtime_config.clone() else {
+        return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing runtime config");
+    };
+
+    let backend = payload
+        .backend
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let model = payload
+        .model
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let user = PlannerUserConfig { backend, model };
+    if let Err(e) = save_planner_user_config(config_dir, &user) {
+        return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+
+    match bootstrap::build_runtime_with_user_config(
+        state.node.clone(),
+        config_dir,
+        &env,
+        &user,
+        runtime_config,
+    ) {
+        Ok(rt) => {
+            state.runtime.store(Arc::new(Some(Arc::new(rt))));
+            match resolve_planner_llm(&state.node, config_dir, &env, &user) {
+                Ok(resolved) => Json(json!({
+                    "ok": true,
+                    "active": {
+                        "source": resolved.source,
+                        "backend": resolved.backend_name,
+                        "model": resolved.model_hint,
+                        "base_url": resolved.openai.base_url,
+                    }
+                }))
+                .into_response(),
+                Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+            }
+        }
+        Err(e) => api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct MessageAttachment {
+    hash: String,
+    mime: String,
+    size: u64,
+    #[serde(default)]
+    name: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct ConversationMessageRequest {
     message: String,
+    #[serde(default)]
+    attachments: Vec<MessageAttachment>,
+    /// `"auto"` (default) or `"direct"`.
+    #[serde(default)]
+    mode: Option<String>,
+    /// Model override for direct mode only (trimmed, max 128 chars).
+    #[serde(default)]
+    model: Option<String>,
 }
 
 async fn conv_messages(
@@ -712,9 +919,18 @@ async fn conv_messages(
         Ok(v) => v,
         Err(resp) => return resp,
     };
-    let DispatchPrep { cid, runtime, message } = prep;
+    let DispatchPrep {
+        cid,
+        runtime,
+        input,
+        mode,
+        opts,
+    } = prep;
 
-    match runtime.handle_user_message(&cid, &id, message).await {
+    match runtime
+        .handle_user_message_with_opts(&cid, &id, input, mode, opts)
+        .await
+    {
         Ok(outcome) => {
             let trace: Vec<Value> = outcome
                 .trace
@@ -744,7 +960,38 @@ async fn conv_messages(
 struct DispatchPrep {
     cid: String,
     runtime: Arc<NodeRuntime>,
-    message: String,
+    input: n3ur0n_node::conversation::UserInput,
+    mode: DispatchMode,
+    opts: DispatchOptions,
+}
+
+fn parse_dispatch_mode(raw: Option<String>) -> Result<DispatchMode, Response> {
+    match raw.as_deref().unwrap_or("auto").trim() {
+        "auto" => Ok(DispatchMode::Auto),
+        "direct" => Ok(DispatchMode::Direct),
+        other => Err(api_error(
+            StatusCode::BAD_REQUEST,
+            &format!("mode must be 'auto' or 'direct', got '{other}'"),
+        )),
+    }
+}
+
+fn parse_dispatch_opts(mode: DispatchMode, model: Option<String>) -> Result<DispatchOptions, Response> {
+    if mode != DispatchMode::Direct {
+        return Ok(DispatchOptions::default());
+    }
+    let model_override = model
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    if let Some(ref m) = model_override {
+        if m.chars().count() > 128 {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "model must be at most 128 characters",
+            ));
+        }
+    }
+    Ok(DispatchOptions { model_override })
 }
 
 /// Common pre-flight for both `conv_messages` and `conv_messages_stream`:
@@ -759,8 +1006,8 @@ async fn prepare_dispatch(
         Some(v) => v.to_string(),
         None => return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id")),
     };
-    let runtime = match &state.runtime {
-        Some(rt) => rt.clone(),
+    let runtime = match load_runtime(state) {
+        Some(rt) => rt,
         None => {
             return Err(api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -779,9 +1026,28 @@ async fn prepare_dispatch(
         Err(e) => return Err(api_error(StatusCode::BAD_REQUEST, &e.to_string())),
     };
     let message = payload.message.trim().to_string();
-    if message.is_empty() {
-        return Err(api_error(StatusCode::BAD_REQUEST, "message is empty"));
+    let attachments: Vec<n3ur0n_node::conversation::UserAttachment> = payload
+        .attachments
+        .into_iter()
+        .map(|a| n3ur0n_node::conversation::UserAttachment {
+            hash: a.hash,
+            mime: a.mime,
+            size: a.size,
+            name: a.name,
+        })
+        .collect();
+    if message.is_empty() && attachments.is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "message and attachments are both empty",
+        ));
     }
+    let input = n3ur0n_node::conversation::UserInput {
+        text: message.clone(),
+        attachments,
+    };
+    let mode = parse_dispatch_mode(payload.mode)?;
+    let opts = parse_dispatch_opts(mode, payload.model)?;
 
     // Auto-title on first user message if none set.
     match conv_repo::get(state.node.db(), id) {
@@ -790,7 +1056,12 @@ async fn prepare_dispatch(
                 return Err(api_error(StatusCode::NOT_FOUND, "conversation not found"));
             }
             if rec.title.is_none() {
-                let title = auto_title(&message, 8);
+                let title_source = if message.is_empty() {
+                    input.planner_text()
+                } else {
+                    message.clone()
+                };
+                let title = auto_title(&title_source, 8);
                 let now = time::OffsetDateTime::now_utc().unix_timestamp();
                 let _ = conv_repo::update_meta(state.node.db(), id, Some(&title), now);
             }
@@ -799,7 +1070,13 @@ async fn prepare_dispatch(
         Err(_) => return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "db read failed")),
     }
 
-    Ok(DispatchPrep { cid, runtime, message })
+    Ok(DispatchPrep {
+        cid,
+        runtime,
+        input,
+        mode,
+        opts,
+    })
 }
 
 async fn conv_messages_stream(
@@ -811,7 +1088,13 @@ async fn conv_messages_stream(
         Ok(v) => v,
         Err(resp) => return resp,
     };
-    let DispatchPrep { cid, runtime, message } = prep;
+    let DispatchPrep {
+        cid,
+        runtime,
+        input,
+        mode,
+        opts,
+    } = prep;
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<DispatchEvent>();
     let tx_err = tx.clone();
@@ -820,7 +1103,9 @@ async fn conv_messages_stream(
     let id_owned = id.clone();
     tokio::spawn(async move {
         if let Err(e) = runtime
-            .handle_user_message_streaming(&cid_owned, &id_owned, message, tx)
+            .handle_user_message_streaming_with_opts(
+                &cid_owned, &id_owned, input, mode, opts, tx,
+            )
             .await
         {
             let _ = tx_err.send(DispatchEvent::Error { message: e.to_string() });

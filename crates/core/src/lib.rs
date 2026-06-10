@@ -9,6 +9,8 @@
 
 #![deny(missing_docs)]
 
+/// Blob protocol types (BlobRef, tickets, classification).
+pub mod blob;
 /// Capability declaration as exposed by `describe_self`.
 pub mod capability;
 /// Strongly-typed core errors.
@@ -22,6 +24,12 @@ pub mod protocol;
 /// Pure verification of a `SignedMessage` (signature, recipient, clock skew).
 pub mod verify;
 
+pub use blob::{
+    classify_cap_staging, classify_inbound_output, classify_local_cache, classify_outbound_upload,
+    decode_ticket_wire, default_ttl_secs, encode_ticket_wire, hash_bytes, validate_hash,
+    AnchorKind, BlobClassification, BlobOperation, BlobProvenance, BlobPurpose, BlobRef, BlobRole,
+    BlobTicketPayload, ProcessingStatus, BLOB_HASH_PREFIX, BLOB_TICKET_HEADER,
+};
 pub use capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 pub use error::{CoreError, CoreResult};
 pub use identity::{InstanceId, Keypair, PublicKey};

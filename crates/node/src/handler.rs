@@ -56,6 +56,11 @@ pub async fn handle_request(node: &Node, request: SignedMessage) -> NodeResult<S
         ProtocolVerb::Ping => ping(now)?,
         ProtocolVerb::GetKnownPeers => get_known_peers(node, &inbound.envelope.payload)?,
         ProtocolVerb::Invoke => invoke(node, &inbound.envelope).await?,
+        ProtocolVerb::BlobTicket => {
+            return Err(NodeError::InvalidPayload(
+                "blob_ticket is not accepted on /messages; use /n3ur0n/v0/blobs".into(),
+            ));
+        }
     };
 
     // Reverse-announce: if the inbound envelope carried a `sender_endpoint`

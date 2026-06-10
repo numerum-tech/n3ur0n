@@ -162,4 +162,28 @@ print("  trace:", [t.get("capability") for t in trace] or "(no tools — direct 
 '
 green "Capacity planner OK."
 
+# --- 9. Direct chat mode (single LLM call, empty trace) -----------------------
+yellow "Direct chat: mode=direct on same conversation"
+DIRECT_REPLY=$(curl -fsS --max-time 120 -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+    -X POST "http://localhost:4242/api/v0/conversations/$CONV_ID/messages" \
+    -H "content-type: application/json" \
+    -d '{"message":"Reply with exactly: direct","mode":"direct"}')
+
+echo "$DIRECT_REPLY" | python3 -c '
+import sys, json
+b = json.load(sys.stdin)
+assert b.get("reply"), f"empty reply: {b}"
+assert b.get("trace") == [], f"direct mode must have empty trace: {b}"
+print("  reply:", b["reply"][:80])
+print("  trace: (empty)")
+'
+
+yellow "Direct chat: invalid mode returns 400"
+CODE=$(curl -sS -o /dev/null -w "%{http_code}" -c "$COOKIE_FILE" -b "$COOKIE_FILE" \
+    -X POST "http://localhost:4242/api/v0/conversations/$CONV_ID/messages" \
+    -H "content-type: application/json" \
+    -d '{"message":"x","mode":"bogus"}')
+test "$CODE" = "400" || { red "expected HTTP 400 for invalid mode, got $CODE"; exit 1; }
+green "Direct chat mode OK."
+
 green "Cluster smoke test PASSED."

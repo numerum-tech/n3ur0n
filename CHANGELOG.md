@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [Unreleased]
 
+### Added
+- Direct chat mode: `DirectChatPlanner`, `POST .../messages` `{ mode?: "auto"|"direct", model?: string }`, composer toggle + model override in UI (EN/FR).
+- Blob protocol layer (spec `n3ur0n-blob-protocol-v0.md` + 2026-06-04 amendment): hash-addressed transfer on `PUT/GET/HEAD/DELETE /n3ur0n/v0/blobs/*hash` authorized by the new signed `blob_ticket` verb (never dispatched via `/messages`); A–D blob classes; periodic GC; local Files API (`/api/v0/files`, `/api/v0/cap-jobs/blobs`) and Files panel in the UI; message attachments threaded through planners via `UserInput`.
+
+### Changed
+- `OpenAIBackend`: caller-supplied `model` in invoke payloads is now ignored unless `allow_model_override` is set (network-facing backends lock to `default_model`); base URLs are normalized (strips `/v1`, `/api/generate`, `/v1/chat/completions` suffixes).
+
 ## [0.4.0] — open source, i18n, RBAC, settings UX
 
 ### Added

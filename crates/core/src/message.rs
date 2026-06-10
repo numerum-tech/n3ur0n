@@ -11,7 +11,8 @@ use time::OffsetDateTime;
 use crate::error::{CoreError, CoreResult};
 use crate::identity::{InstanceId, Keypair, PublicKey};
 
-/// The four v0.1 protocol verbs (architecture spec §9.3).
+/// Protocol verbs. The four v0.1 verbs plus the blob-layer `blob_ticket`
+/// (authorized only on `/n3ur0n/v0/blobs`, not on `/messages`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolVerb {
@@ -23,6 +24,9 @@ pub enum ProtocolVerb {
     Ping,
     /// Invoke a backend capability.
     Invoke,
+    /// Authorizes a blob HTTP operation (PUT/GET/DELETE). Not dispatched
+    /// via the `/messages` handler.
+    BlobTicket,
 }
 
 /// Authenticated wire envelope (sans signature).

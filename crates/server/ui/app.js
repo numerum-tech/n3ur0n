@@ -1,5 +1,6 @@
 import { initI18n, t, setLocale, listLocales, currentLocale, refresh as i18nRefresh } from "./i18n.js";
 import * as auth from "./auth.js";
+import { applyIcons, iconHtml, mimeIcon } from "./icons.js";
 
 // --- Theme ---------------------------------------------------------------
 // Pref persisted as one of "dark" / "light" / "system". Applied to
@@ -31,7 +32,10 @@ window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", ()
 // Boot i18n before the rest of the app runs. Static `data-i18n` attrs are
 // applied once the catalog loads; dynamic render paths call `t(...)` at
 // build time and re-render on locale-changed events.
-initI18n().then(() => bootAuth()).catch(err => console.warn("i18n init failed:", err));
+initI18n().then(() => {
+    applyIcons();
+    return bootAuth();
+}).catch(err => console.warn("i18n init failed:", err));
 
 // Run after i18n so the auth gate uses translated strings.
 async function bootAuth() {
@@ -56,9 +60,9 @@ document.addEventListener("n3ur0n:auth-changed", () => {
     refreshAuthChrome();
     // Trigger refresh of any currently-mounted view.
     try {
-        const active = document.querySelector("#settings-nav .settings-nav-item.active");
-        if (active && !document.getElementById("settings-page").classList.contains("hidden")) {
-            activateSettingsSection(active.dataset.section);
+        if (document.body.dataset.section === "settings") {
+            const active = document.querySelector("#settings-nav .settings-nav-item.active");
+            if (active) activateSettingsSection(active.dataset.section);
         }
     } catch { /* boot order edge case */ }
 });
@@ -71,10 +75,21 @@ document.addEventListener("n3ur0n:locale-changed", () => {
     // Re-render whatever section is currently visible so dynamic strings
     // refresh. Cheap because every renderer is idempotent + pulls from
     // cached state.
-    const active = document.querySelector("#settings-nav .settings-nav-item.active");
-    if (active && !document.getElementById("settings-page").classList.contains("hidden")) {
-        activateSettingsSection(active.dataset.section);
+    syncComposerModeUi();
+    if (document.body.dataset.section === "settings") {
+        const active = document.querySelector("#settings-nav .settings-nav-item.active");
+        if (active) activateSettingsSection(active.dataset.section);
     }
+    if (document.body.dataset.section === "network" || document.body.dataset.section === "skills") {
+        const hint = document.getElementById("workspace-empty-hint");
+        if (hint) {
+            hint.innerHTML = document.body.dataset.section === "network"
+                ? t("workspace.hint.network")
+                : t("workspace.hint.skills");
+        }
+    }
+    renderFilesList();
+    applyIcons();
 });
 
 const $ = (id) => document.getElementById(id);
@@ -83,15 +98,179 @@ const conv = $("conversation");
 const titleEl = $("conv-title");
 const promptEl = $("prompt");
 const sendBtn = $("send");
+const composerAttachBtn = $("composer-attach");
+const composerFileInput = $("composer-file-input");
+const composerAttachmentsEl = $("composer-attachments");
+const composerMenuBtn = $("composer-menu");
+const composerMenuPopover = $("composer-menu-popover");
+const chatModeDirectEl = $("chat-mode-direct");
+const chatModeToggleEl = $("chat-mode-toggle");
+const directModelEl = $("direct-model");
 const newBtn = $("new-chat");
 const renameBtn = $("rename");
 const deleteBtn = $("delete");
 const selfId = $("self-id");
 
 const LS_CURRENT = "n3ur0n_current_conversation";
+const LS_CHAT_MODE_PREFIX = "n3ur0n_chat_mode:";
+const LS_DIRECT_MODEL = "n3ur0n_direct_model";
 let activeId = localStorage.getItem(LS_CURRENT) || null;
+
+if (directModelEl && localStorage.getItem(LS_DIRECT_MODEL)) {
+    directModelEl.value = localStorage.getItem(LS_DIRECT_MODEL);
+}
+
+function chatModeKey(convId) {
+    return `${LS_CHAT_MODE_PREFIX}${convId}`;
+}
+
+function getChatMode(convId) {
+    if (!convId) return "auto";
+    return localStorage.getItem(chatModeKey(convId)) === "direct" ? "direct" : "auto";
+}
+
+function setChatMode(convId, mode) {
+    if (!convId) return;
+    localStorage.setItem(chatModeKey(convId), mode);
+}
+
+function syncComposerModeUi() {
+    const hasConv = !!activeId;
+    const isDirect = hasConv && getChatMode(activeId) === "direct";
+    if (chatModeDirectEl) {
+        chatModeDirectEl.checked = !!isDirect;
+        chatModeDirectEl.disabled = !hasConv || inFlight;
+    }
+    const directModelField = document.getElementById("direct-model-field");
+    if (directModelEl) {
+        directModelEl.disabled = !hasConv || inFlight || !isDirect;
+        directModelEl.placeholder = t("composer.direct.model_placeholder");
+    }
+    if (directModelField) {
+        directModelField.classList.toggle("hidden", !isDirect);
+    }
+    if (chatModeToggleEl) {
+        chatModeToggleEl.classList.toggle("hidden", !hasConv);
+        chatModeToggleEl.disabled = !hasConv || inFlight;
+        chatModeToggleEl.dataset.mode = isDirect ? "direct" : "auto";
+        chatModeToggleEl.textContent = isDirect
+            ? t("composer.mode.direct")
+            : t("composer.mode.auto");
+        chatModeToggleEl.title = t("composer.mode.direct.tooltip");
+    }
+    updateComposerControls();
+}
+
+function updateComposerControls() {
+    const enabled = !!activeId && !inFlight;
+    const canSend = enabled && (promptEl.value.trim().length > 0 || draftAttachments.length > 0);
+    if (composerMenuBtn) composerMenuBtn.disabled = !enabled;
+    if (composerAttachBtn) composerAttachBtn.disabled = !enabled;
+    if (promptEl) promptEl.disabled = !enabled;
+    if (sendBtn) sendBtn.disabled = !canSend;
+}
+
+function clearDraftAttachments() {
+    draftAttachments = [];
+    renderComposerDraft();
+}
+
+function renderComposerDraft() {
+    if (!composerAttachmentsEl) return;
+    if (draftAttachments.length === 0) {
+        composerAttachmentsEl.classList.add("hidden");
+        composerAttachmentsEl.innerHTML = "";
+        updateComposerControls();
+        return;
+    }
+    composerAttachmentsEl.classList.remove("hidden");
+    composerAttachmentsEl.innerHTML = "";
+    for (const att of draftAttachments) {
+        const chip = document.createElement("div");
+        chip.className = "draft-chip";
+        chip.title = att.hash || "";
+        const icon = document.createElement("span");
+        icon.className = "draft-chip-icon";
+        icon.innerHTML = iconHtml(mimeIcon(att.mime), { size: 14 });
+        chip.appendChild(icon);
+        const label = document.createElement("span");
+        label.className = "draft-chip-label";
+        label.textContent = att.name || att.mime || "file";
+        chip.appendChild(label);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "draft-chip-remove";
+        remove.setAttribute("aria-label", "Remove");
+        remove.textContent = "×";
+        remove.addEventListener("click", () => {
+            draftAttachments = draftAttachments.filter(a => a.hash !== att.hash);
+            renderComposerDraft();
+        });
+        chip.appendChild(remove);
+        composerAttachmentsEl.appendChild(chip);
+    }
+    updateComposerControls();
+}
+
+function attachmentLabel(att) {
+    return att.name || att.mime || "file";
+}
+
+function appendAttachmentCards(container, attachments) {
+    if (!attachments?.length) return;
+    const wrap = document.createElement("div");
+    wrap.className = "bubble-attachments";
+    for (const att of attachments) {
+        const link = document.createElement("a");
+        link.className = "bubble-attachment";
+        link.href = `/api/v0/files/${encodeURIComponent(att.hash)}`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        const icon = document.createElement("span");
+        icon.className = "draft-chip-icon";
+        icon.innerHTML = iconHtml(mimeIcon(att.mime), { size: 14 });
+        link.appendChild(icon);
+        const label = document.createElement("span");
+        label.className = "draft-chip-label";
+        label.textContent = attachmentLabel(att);
+        link.appendChild(label);
+        wrap.appendChild(link);
+    }
+    container.appendChild(wrap);
+}
+
+function resizeComposerTextarea() {
+    if (!promptEl) return;
+    promptEl.style.height = "auto";
+    promptEl.style.height = `${Math.min(promptEl.scrollHeight, 160)}px`;
+}
+
+function toggleComposerMenu(open) {
+    if (!composerMenuPopover) return;
+    const show = open ?? composerMenuPopover.classList.contains("hidden");
+    composerMenuPopover.classList.toggle("hidden", !show);
+}
+
+function setChatModeFromUi(mode) {
+    if (!activeId) return;
+    setChatMode(activeId, mode);
+    if (chatModeDirectEl) chatModeDirectEl.checked = mode === "direct";
+    syncComposerModeUi();
+}
+
+chatModeToggleEl?.addEventListener("click", () => {
+    if (!activeId || inFlight) return;
+    const next = getChatMode(activeId) === "direct" ? "auto" : "direct";
+    setChatModeFromUi(next);
+});
+
+directModelEl?.addEventListener("input", () => {
+    localStorage.setItem(LS_DIRECT_MODEL, directModelEl.value);
+});
 let conversations = [];
 let inFlight = false;
+/** Per-message draft attachments (cleared on send or conversation switch). */
+let draftAttachments = [];
 
 // ---------------------------------------------------------------------------
 // Generic helpers
@@ -203,7 +382,9 @@ async function loadConversations() {
     sidebar.innerHTML = "";
     try {
         const r = await api("GET", "/api/v0/whoami");
-        selfId.textContent = r?.instance_id || "?";
+        const id = r?.instance_id || "?";
+        selfId.textContent = id;
+        selfId.title = id;
     } catch { /* ignore */ }
     try {
         const r = await api("GET", "/api/v0/conversations");
@@ -237,6 +418,8 @@ async function loadConversations() {
 async function selectConversation(id) {
     activeId = id;
     localStorage.setItem(LS_CURRENT, id);
+    clearDraftAttachments();
+    toggleComposerMenu(false);
     document.querySelectorAll(".conv-list li").forEach(li => {
         li.classList.toggle("active", li.dataset.id === id);
     });
@@ -250,6 +433,8 @@ async function renderActive() {
         deleteBtn.disabled = true;
         promptEl.disabled = true;
         sendBtn.disabled = true;
+        clearDraftAttachments();
+        syncComposerModeUi();
         conv.innerHTML = '<p class="empty-hint">Pick a conversation in the sidebar or click <strong>+ New chat</strong>.</p>';
         return;
     }
@@ -271,8 +456,8 @@ async function renderActive() {
     titleEl.textContent = data.title || "(untitled)";
     renameBtn.disabled = false;
     deleteBtn.disabled = false;
-    promptEl.disabled = false;
-    sendBtn.disabled = false;
+    syncComposerModeUi();
+    resizeComposerTextarea();
     promptEl.focus();
     renderTurns(data.turns || []);
 }
@@ -293,7 +478,7 @@ function renderTurns(turns) {
         if (!t || !t.role) continue;
         if (t.role === "user") {
             flushPending();
-            appendBubble("user", "you", t.content);
+            appendBubble("user", "you", t.content, t.attachments);
         } else if (t.role === "assistant") {
             flushPending();
             const who = t.model ? `assistant · ${t.model}` : "assistant";
@@ -418,7 +603,7 @@ function toggleStepDetails(wrap, call, result, chipEl) {
     wrap.appendChild(panel);
 }
 
-function appendBubble(kind, who, text) {
+function appendBubble(kind, who, text, attachments = []) {
     const div = document.createElement("div");
     div.className = `bubble ${kind}`;
     if (who) {
@@ -427,9 +612,12 @@ function appendBubble(kind, who, text) {
         w.textContent = who;
         div.appendChild(w);
     }
-    const t = document.createElement("span");
-    t.textContent = text;
-    div.appendChild(t);
+    if (text) {
+        const body = document.createElement("span");
+        body.textContent = text;
+        div.appendChild(body);
+    }
+    appendAttachmentCards(div, attachments);
     conv.appendChild(div);
     conv.scrollTop = conv.scrollHeight;
     return div;
@@ -462,16 +650,20 @@ async function send() {
         if (!activeId) return;
     }
     const text = promptEl.value.trim();
-    if (!text) return;
+    const attachments = draftAttachments.map(a => ({ ...a }));
+    if (!text && attachments.length === 0) return;
     promptEl.value = "";
+    resizeComposerTextarea();
+    clearDraftAttachments();
     inFlight = true;
-    sendBtn.disabled = true;
+    updateComposerControls();
 
-    appendBubble("user", "you", text);
-    const stepper = appendStepper();
+    appendBubble("user", "you", text, attachments);
+    const mode = getChatMode(activeId);
+    const stepper = appendStepper(mode === "direct");
 
     try {
-        await streamDispatch(activeId, text, stepper);
+        await streamDispatch(activeId, text, attachments, stepper, mode);
         // Refresh sidebar (updated_at + auto-title). Skip conv re-render —
         // stepper stays visible alongside the streamed assistant bubble.
         await loadConversations();
@@ -479,7 +671,7 @@ async function send() {
         stepper.markError(e.message);
     } finally {
         inFlight = false;
-        sendBtn.disabled = false;
+        syncComposerModeUi();
         promptEl.focus();
     }
 }
@@ -488,13 +680,14 @@ async function send() {
 // Streaming dispatch (SSE)
 // ---------------------------------------------------------------------------
 
-function appendStepper() {
+function appendStepper(isDirect = false) {
     const wrap = document.createElement("div");
     wrap.className = "stepper";
+    if (isDirect) wrap.classList.add("direct-mode");
 
     const status = document.createElement("div");
     status.className = "stepper-status";
-    status.textContent = "compiling plan…";
+    status.textContent = isDirect ? t("composer.direct.status") : "compiling plan…";
     wrap.appendChild(status);
 
     const row = document.createElement("div");
@@ -541,6 +734,11 @@ function appendStepper() {
         renderPlan(steps) {
             row.innerHTML = "";
             chips.clear();
+            if (isDirect) {
+                wrap.classList.add("no-plan", "direct-mode");
+                setStatus(t("composer.direct.status"));
+                return;
+            }
             if (!steps || steps.length === 0) {
                 wrap.classList.add("no-plan");
                 setStatus("no plan — answering directly");
@@ -585,14 +783,19 @@ function appendStepper() {
     };
 }
 
-async function streamDispatch(convId, message, stepper) {
+async function streamDispatch(convId, message, attachments, stepper, mode = "auto") {
+    const body = { message, attachments, mode };
+    if (mode === "direct") {
+        const model = directModelEl?.value?.trim();
+        if (model) body.model = model;
+    }
     const res = await fetch(
         `/api/v0/conversations/${encodeURIComponent(convId)}/messages/stream`,
         {
             method: "POST",
             credentials: "same-origin",
             headers: { "content-type": "application/json", accept: "text/event-stream" },
-            body: JSON.stringify({ message }),
+            body: JSON.stringify(body),
         }
     );
     if (!res.ok || !res.body) {
@@ -694,12 +897,27 @@ newBtn.addEventListener("click", newChat);
 renameBtn.addEventListener("click", renameActive);
 deleteBtn.addEventListener("click", deleteActive);
 sendBtn.addEventListener("click", send);
+promptEl.addEventListener("input", () => {
+    resizeComposerTextarea();
+    updateComposerControls();
+});
 promptEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         send();
     }
 });
+composerMenuBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleComposerMenu();
+});
+composerAttachBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleComposerMenu(false);
+    composerFileInput?.click();
+});
+document.addEventListener("click", () => toggleComposerMenu(false));
+composerMenuPopover?.addEventListener("click", (e) => e.stopPropagation());
 
 (async () => {
     await loadConversations();
@@ -722,6 +940,21 @@ function shortId(id) {
     if (!id) return "?";
     const trimmed = id.startsWith("n3:") ? id.slice(3) : id;
     return trimmed.slice(0, 12);
+}
+
+/** Strip mistaken /api/generate or /v1 suffixes from OpenAI-compat base URLs. */
+function normalizeOpenaiBaseUrl(url) {
+    let s = url.trim().replace(/\/+$/, "");
+    for (;;) {
+        const before = s;
+        for (const suffix of ["/v1/chat/completions", "/api/generate", "/v1"]) {
+            if (s.endsWith(suffix)) {
+                s = s.slice(0, -suffix.length).replace(/\/+$/, "");
+            }
+        }
+        if (s === before) break;
+    }
+    return s;
 }
 
 function escapeHtml(s) {
@@ -1131,16 +1364,298 @@ function openRemoteCapInspector(cap, peer) {
     openInspector(`skill · ${cap.name} @ ${shortId(peer.instance_id)}`, html);
 }
 
-function activateTab(name) {
-    document.querySelectorAll(".sidebar-tabs .tab").forEach(t =>
-        t.classList.toggle("active", t.dataset.tab === name)
+let _lastNonSettingsSection = "chats";
+
+function activateSection(section) {
+    if (section !== "settings") _lastNonSettingsSection = section;
+
+    document.body.dataset.section = section;
+
+    document.querySelectorAll("#app-rail .rail-btn").forEach(btn =>
+        btn.classList.toggle("active", btn.dataset.section === section)
     );
-    document.querySelectorAll(".tab-panel").forEach(p =>
-        p.classList.toggle("hidden", p.dataset.panel !== name)
+
+    document.querySelectorAll(".context-section").forEach(el => {
+        const ctx = el.dataset.context;
+        if (section === "settings") {
+            el.classList.toggle("hidden", ctx !== "settings");
+        } else {
+            el.classList.toggle("hidden", ctx !== section);
+        }
+    });
+
+    const chatView = document.getElementById("chat-view");
+    const filesPage = document.getElementById("files-page");
+    const settingsPage = document.getElementById("settings-page");
+    const workspaceEmpty = document.getElementById("workspace-empty");
+    const workspaceHint = document.getElementById("workspace-empty-hint");
+
+    if (section === "chats") {
+        chatView?.classList.remove("hidden");
+        filesPage?.classList.add("hidden");
+        filesPage?.setAttribute("aria-hidden", "true");
+        settingsPage?.classList.add("hidden");
+        settingsPage?.setAttribute("aria-hidden", "true");
+        workspaceEmpty?.classList.add("hidden");
+        workspaceEmpty?.setAttribute("aria-hidden", "true");
+        closeInspector();
+    } else if (section === "files") {
+        chatView?.classList.add("hidden");
+        filesPage?.classList.remove("hidden");
+        filesPage?.setAttribute("aria-hidden", "false");
+        settingsPage?.classList.add("hidden");
+        settingsPage?.setAttribute("aria-hidden", "true");
+        workspaceEmpty?.classList.add("hidden");
+        workspaceEmpty?.setAttribute("aria-hidden", "true");
+        closeInspector();
+        refreshFiles();
+    } else if (section === "settings") {
+        chatView?.classList.add("hidden");
+        filesPage?.classList.add("hidden");
+        filesPage?.setAttribute("aria-hidden", "true");
+        settingsPage?.classList.remove("hidden");
+        settingsPage?.setAttribute("aria-hidden", "false");
+        workspaceEmpty?.classList.add("hidden");
+        workspaceEmpty?.setAttribute("aria-hidden", "true");
+        closeInspector();
+    } else if (section === "network" || section === "skills") {
+        chatView?.classList.add("hidden");
+        filesPage?.classList.add("hidden");
+        filesPage?.setAttribute("aria-hidden", "true");
+        settingsPage?.classList.add("hidden");
+        settingsPage?.setAttribute("aria-hidden", "true");
+        workspaceEmpty?.classList.remove("hidden");
+        workspaceEmpty?.setAttribute("aria-hidden", "false");
+        if (workspaceHint) {
+            workspaceHint.innerHTML = section === "network"
+                ? t("workspace.hint.network")
+                : t("workspace.hint.skills");
+        }
+        if (section === "network") refreshNetwork();
+        if (section === "skills") refreshSkills();
+    }
+}
+
+let _filesCache = [];
+let _filesCategory = "all";
+
+function setFilesCategory(category) {
+    _filesCategory = category;
+    document.querySelectorAll("#files-nav .files-nav-item").forEach(el =>
+        el.classList.toggle("active", el.dataset.category === category)
     );
-    if (name === "chats") closeInspector();
-    if (name === "network") refreshNetwork();
-    if (name === "skills") refreshSkills();
+    renderFilesList();
+}
+
+/** Blob class A/B/D per n3ur0n-blob-protocol-v0 §2.4 (C excluded from user panel). */
+function blobClass(f) {
+    const anchor = f.anchor_kind || "";
+    const prov = f.provenance || "";
+    const role = f.role || "";
+    if (anchor === "local_cache") return "D";
+    if (prov === "outbound" && role === "input" && anchor === "user_session") return "A";
+    if (prov === "inbound" && role === "output" && anchor === "user_session") return "B";
+    return null;
+}
+
+function formatBlobClass(f) {
+    const cls = blobClass(f);
+    if (cls) return t(`files.class.${cls}`);
+    return formatProvenance(f.provenance);
+}
+
+function matchesFileCategory(f, category) {
+    if (category === "all") return true;
+    const cls = blobClass(f);
+    if (category === "class_a") return cls === "A";
+    if (category === "class_b") return cls === "B";
+    if (category === "class_d") return cls === "D";
+    return true;
+}
+
+async function refreshFiles() {
+    try {
+        const d = await api("GET", "/api/v0/files");
+        _filesCache = d?.files || [];
+    } catch (e) {
+        _filesCache = [];
+        const body = document.getElementById("files-page-body");
+        if (body) {
+            body.innerHTML = `<div class="empty-state"><div class="empty-icon">${iconHtml("alert-triangle", { size: 28 })}</div><p class="empty-title">load failed</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
+        }
+        return;
+    }
+    renderFilesList();
+}
+
+function formatProvenance(provenance) {
+    if (provenance === "outbound") return t("files.direction.sent");
+    if (provenance === "inbound") return t("files.direction.received");
+    return provenance || "—";
+}
+
+function formatExpires(expiresAt) {
+    if (!expiresAt) return "—";
+    try {
+        const d = new Date(expiresAt);
+        return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+    } catch {
+        return expiresAt;
+    }
+}
+
+function formatBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileCard(f) {
+    const mime = f.mime || "application/octet-stream";
+    const short = f.hash?.replace(/^sha256:/, "").slice(0, 12) + "…";
+    const status = f.processing_status || "—";
+    const cap = f.capability || "—";
+    return `
+        <article class="card" data-hash="${escapeHtml(f.hash)}">
+            <div class="card-head">
+                <div class="card-icon">${iconHtml(mimeIcon(mime), { size: 18 })}</div>
+                <span class="card-title">${escapeHtml(mime)}</span>
+                <span class="card-kind">${escapeHtml(formatBytes(f.size || 0))}</span>
+            </div>
+            <div class="card-meta">
+                <code>${escapeHtml(short)}</code>
+            </div>
+            <div class="card-meta" style="color: var(--text); font-size: 0.78rem;">
+                ${escapeHtml(formatBlobClass(f))} · ${escapeHtml(status)}
+                ${cap !== "—" ? ` · ${escapeHtml(cap)}` : ""}
+            </div>
+            ${f.expires_at ? `<div class="card-meta">${escapeHtml(t("files.col.expires"))}: ${escapeHtml(formatExpires(f.expires_at))}</div>` : ""}
+            <div class="card-actions">
+                <button type="button" data-action="download">${escapeHtml(t("sidebar.files.download"))}</button>
+                ${f.user_deletable !== false ? `<button type="button" data-action="delete" class="danger">${escapeHtml(t("sidebar.files.delete"))}</button>` : ""}
+            </div>
+        </article>
+    `;
+}
+
+function renderFilesList() {
+    const filter = (document.getElementById("files-filter")?.value || "").toLowerCase();
+    const body = document.getElementById("files-page-body");
+    const subtitle = document.getElementById("files-page-subtitle");
+    if (!body) return;
+
+    const filtered = _filesCache.filter(f => {
+        if (!matchesFileCategory(f, _filesCategory)) return false;
+        if (!filter) return true;
+        const hay = [
+            f.hash, f.mime, f.provenance, f.role, f.processing_status || "",
+            f.capability || "", f.expires_at || "",
+        ].join(" ").toLowerCase();
+        return hay.includes(filter);
+    });
+
+    if (subtitle) {
+        const catKey = `files.nav.${_filesCategory}`;
+        const catLabel = t(catKey);
+        subtitle.textContent = `${catLabel} · ${t("files.subtitle_count", {
+            shown: filtered.length,
+            total: _filesCache.length,
+        })}`;
+    }
+
+    if (filtered.length === 0) {
+        body.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">${iconHtml("folder", { size: 28 })}</div>
+                <p class="empty-title">${escapeHtml(t("sidebar.files.empty"))}</p>
+                <p class="empty-body">${escapeHtml(t("files.empty.body"))}</p>
+                <button class="primary" id="empty-files-upload">${escapeHtml(t("sidebar.files.upload"))}</button>
+            </div>
+        `;
+        document.getElementById("empty-files-upload")?.addEventListener("click", () => {
+            document.getElementById("files-input")?.click();
+        });
+        return;
+    }
+
+    body.innerHTML = `<div class="card-grid">${filtered.map(fileCard).join("")}</div>`;
+    body.querySelectorAll('.card [data-action="download"]').forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const hash = btn.closest(".card")?.dataset.hash;
+            if (!hash) return;
+            try {
+                await downloadFile(hash);
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+    });
+    body.querySelectorAll('.card [data-action="delete"]').forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const hash = btn.closest(".card")?.dataset.hash;
+            if (!hash) return;
+            if (!confirm(t("sidebar.files.deleteConfirm"))) return;
+            try {
+                await api("DELETE", `/api/v0/files/${encodeURIComponent(hash)}`);
+                await refreshFiles();
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+    });
+}
+
+async function downloadFile(hash) {
+    const res = await fetch(`/api/v0/files/${encodeURIComponent(hash)}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = hash.replace(/^sha256:/, "").slice(0, 16);
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function uploadFileBlob(file) {
+    const res = await fetch("/api/v0/files", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": file.type || "application/octet-stream" },
+        body: file,
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        let msg = text;
+        try { msg = JSON.parse(text)?.error || text; } catch { /* ignore */ }
+        throw new Error(msg);
+    }
+    return res.json();
+}
+
+async function uploadFiles(fileList) {
+    for (const file of fileList) {
+        await uploadFileBlob(file);
+    }
+    await refreshFiles();
+}
+
+async function uploadDraftFiles(fileList) {
+    for (const file of fileList) {
+        const meta = await uploadFileBlob(file);
+        const att = {
+            hash: meta.hash,
+            mime: meta.mime || file.type || "application/octet-stream",
+            size: meta.size ?? file.size,
+            name: file.name,
+        };
+        if (!draftAttachments.some(a => a.hash === att.hash)) {
+            draftAttachments.push(att);
+        }
+    }
+    renderComposerDraft();
 }
 
 // ---------------------------------------------------------------------------
@@ -1149,18 +1664,12 @@ function activateTab(name) {
 // ---------------------------------------------------------------------------
 
 function openSettings() {
-    document.getElementById("sidebar-main").classList.add("hidden");
-    document.getElementById("sidebar-settings").classList.remove("hidden");
-    closeInspector();
-    document.getElementById("settings-page").classList.remove("hidden");
+    activateSection("settings");
     activateSettingsSection("backends");
 }
 
 function closeSettings() {
-    document.getElementById("sidebar-settings").classList.add("hidden");
-    document.getElementById("sidebar-main").classList.remove("hidden");
-    document.getElementById("settings-page").classList.add("hidden");
-    closeInspector();
+    activateSection(_lastNonSettingsSection || "chats");
 }
 
 function activateSettingsSection(name) {
@@ -1182,6 +1691,10 @@ function activateSettingsSection(name) {
         actions.innerHTML = `<button class="primary" id="settings-add-backend">${escapeHtml(t("settings.backends.add"))}</button>`;
         document.getElementById("settings-add-backend")?.addEventListener("click", () => openBackendForm());
         renderBackendsCards();
+    } else if (name === "planner") {
+        title.textContent = t("settings.planner.title");
+        sub.textContent = t("settings.planner.subtitle");
+        renderPlannerPage();
     } else if (name === "caps") {
         title.textContent = t("settings.caps.title");
         sub.textContent = t("settings.caps.subtitle");
@@ -1440,7 +1953,7 @@ async function renderGatewaysCards() {
         if (peers.length === 0) {
             body.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-icon">⇄</div>
+                    <div class="empty-icon">${iconHtml("arrow-left-right", { size: 28 })}</div>
                     <p class="empty-title">${escapeHtml(t("settings.gateways.empty.title"))}</p>
                     <p class="empty-body">${escapeHtml(t("settings.gateways.empty.body"))}</p>
                     <button class="primary" id="empty-add-gateway">${escapeHtml(t("settings.gateways.add"))}</button>
@@ -1471,7 +1984,7 @@ async function renderGatewaysCards() {
             });
         });
     } catch (e) {
-        body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">load failed</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
+        body.innerHTML = `<div class="empty-state"><div class="empty-icon">${iconHtml("alert-triangle", { size: 28 })}</div><p class="empty-title">load failed</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
     }
 }
 
@@ -1482,7 +1995,7 @@ function gatewayCard(p) {
     return `
         <article class="card" data-peer="${escapeHtml(p.instance_id)}" style="cursor: pointer;">
             <div class="card-head">
-                <div class="card-icon">⇄</div>
+                <div class="card-icon">${iconHtml("arrow-left-right", { size: 18 })}</div>
                 <span class="card-title">${escapeHtml(shortId(p.instance_id))}</span>
                 <span class="card-kind">${caps} skill${caps !== 1 ? "s" : ""}</span>
             </div>
@@ -1659,6 +2172,95 @@ function openUserEditForm(u) {
             status.textContent = e.message;
         }
     });
+}
+
+async function renderPlannerPage() {
+    const body = document.getElementById("settings-page-body");
+    const actions = document.getElementById("settings-page-actions");
+    actions.innerHTML = "";
+    body.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div></div>';
+
+    let data;
+    try {
+        data = await api("GET", "/api/v0/planner");
+    } catch (e) {
+        body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">${escapeHtml(e.message)}</p></div>`;
+        return;
+    }
+
+    if (!data.enabled) {
+        body.innerHTML = `
+            <article class="card" style="max-width: 720px;">
+                <p class="row-sub">${escapeHtml(t("settings.planner.disabled"))}</p>
+            </article>`;
+        return;
+    }
+
+    const backends = data.available_backends || [];
+    const cfg = data.config || {};
+    const active = data.active || {};
+    const env = data.env_default || {};
+    const selectedBackend = cfg.backend || "";
+
+    const backendOpts = [
+        `<option value="">${escapeHtml(t("settings.planner.backend.env"))}</option>`,
+        ...backends.map(b => {
+            const label = `${b.name} · ${b.default_model}`;
+            const sel = b.name === selectedBackend ? " selected" : "";
+            return `<option value="${escapeHtml(b.name)}"${sel}>${escapeHtml(label)}</option>`;
+        }),
+    ].join("");
+
+    const activeLine = active.model
+        ? `${active.model}${active.backend ? ` · ${active.backend}` : ""} (${active.source})`
+        : "—";
+
+    body.innerHTML = `
+        <article class="card" style="max-width: 720px;">
+            <div class="card-head">
+                <div class="card-icon">${iconHtml("sparkles", { size: 18 })}</div>
+                <span class="card-title">${escapeHtml(t("settings.planner.active"))}</span>
+            </div>
+            <p class="row-sub" style="margin-top: 8px;">${escapeHtml(activeLine)}</p>
+            ${env.model ? `<p class="row-sub">${escapeHtml(t("settings.planner.env_default"))}: ${escapeHtml(env.model)}</p>` : ""}
+        </article>
+        <article class="card" style="max-width: 720px; margin-top: 12px;">
+            <form id="planner-form" class="kv" style="margin-top: 8px;">
+                <label for="planner-backend">${escapeHtml(t("settings.planner.backend"))}</label>
+                <select id="planner-backend" class="select-control">${backendOpts}</select>
+                <label for="planner-model">${escapeHtml(t("settings.planner.model"))}</label>
+                <input type="text" id="planner-model" class="form-control"
+                    value="${escapeHtml(cfg.model || "")}"
+                    placeholder="${escapeHtml(t("composer.direct.model_placeholder"))}" />
+                <p class="row-sub">${escapeHtml(t("settings.planner.model.help"))}</p>
+                ${backends.length === 0 ? `<p class="row-sub">${escapeHtml(t("settings.planner.no_backends"))}</p>` : ""}
+                <button type="submit" class="primary" id="planner-save">${escapeHtml(t("settings.planner.save"))}</button>
+            </form>
+        </article>
+    `;
+
+    document.getElementById("planner-form")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const backend = document.getElementById("planner-backend")?.value || null;
+        const model = document.getElementById("planner-model")?.value?.trim() || null;
+        try {
+            await api("PUT", "/api/v0/planner", {
+                backend: backend || null,
+                model,
+            });
+            await alertModal(t("settings.planner.saved"), {
+                title: t("settings.planner.title"),
+                okLabel: t("button.confirm"),
+            });
+            await renderPlannerPage();
+        } catch (err) {
+            await alertModal(err.message, {
+                title: "Error",
+                okLabel: t("button.confirm"),
+            });
+        }
+    });
+    applyIcons();
 }
 
 async function renderUiPage() {
@@ -2530,7 +3132,8 @@ async function openBackendForm(existingName) {
             <h3>${escapeHtml(t("backend.form.openai.title"))}</h3>
             <form class="kv" onsubmit="return false;">
                 <label for="bf-base">${escapeHtml(t("backend.form.openai.base_url"))}</label>
-                <input id="bf-base" type="url" value="${escapeHtml(prefill?.base_url || "")}" placeholder="https://api.openai.com · http://localhost:11434" />
+                <input id="bf-base" type="url" value="${escapeHtml(prefill?.base_url || "")}" placeholder="https://api.openai.com · http://192.168.4.101:11434" />
+                <p class="row-sub">${escapeHtml(t("backend.form.openai.base_url.help"))}</p>
                 <label for="bf-model">${escapeHtml(t("backend.form.openai.default_model"))}</label>
                 <input id="bf-model" type="text" value="${escapeHtml(prefill?.default_model || "")}" placeholder="gpt-4o-mini · llama3.1:8b · qwen2.5:7b" />
                 <label for="bf-key">${escapeHtml(t("backend.form.openai.api_key"))}</label>
@@ -2591,7 +3194,7 @@ async function openBackendForm(existingName) {
         if (!name) { status.textContent = "name required"; return; }
         const payload = { name, kind };
         if (kind === "openai_compat") {
-            payload.base_url = document.getElementById("bf-base").value.trim();
+            payload.base_url = normalizeOpenaiBaseUrl(document.getElementById("bf-base").value);
             payload.default_model = document.getElementById("bf-model").value.trim();
             const key = document.getElementById("bf-key").value;
             if (!payload.base_url || !payload.default_model) {
@@ -2640,9 +3243,15 @@ async function openBackendForm(existingName) {
         status.textContent = "saving…";
         try {
             const r = await api("POST", "/api/v0/backends", payload);
-            status.textContent = r.reload_warning
-                ? `saved, but reload failed: ${r.reload_warning}`
-                : `saved — ${r.backends_loaded} backend${r.backends_loaded !== 1 ? "s" : ""} live, ${r.caps_loaded} cap${r.caps_loaded !== 1 ? "s" : ""} rebound.`;
+            if (r.planner_reload_warning) {
+                status.textContent = `saved, but planner reload failed: ${r.planner_reload_warning}`;
+            } else if (r.planner_reloaded && r.planner_active) {
+                status.textContent = `saved — planner updated (${r.planner_active.base_url}, ${r.planner_active.model}).`;
+            } else if (r.reload_warning) {
+                status.textContent = `saved, but cap reload failed: ${r.reload_warning}`;
+            } else {
+                status.textContent = `saved — ${r.backends_loaded} backend${r.backends_loaded !== 1 ? "s" : ""} live, ${r.caps_loaded} cap${r.caps_loaded !== 1 ? "s" : ""} rebound.`;
+            }
             await renderBackendsCards();
             setTimeout(closeInspector, 800);
         } catch (e) {
@@ -2651,17 +3260,54 @@ async function openBackendForm(existingName) {
     });
 }
 
-document.getElementById("settings-open")?.addEventListener("click", openSettings);
-document.getElementById("settings-back")?.addEventListener("click", closeSettings);
 document.querySelectorAll("#settings-nav .settings-nav-item").forEach(el => {
     el.addEventListener("click", () => activateSettingsSection(el.dataset.section));
 });
 
-document.querySelectorAll(".sidebar-tabs .tab").forEach(t => {
-    t.addEventListener("click", () => activateTab(t.dataset.tab));
+document.querySelectorAll("#app-rail .rail-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+        const section = btn.dataset.section;
+        if (section === "settings") {
+            openSettings();
+        } else {
+            activateSection(section);
+        }
+    });
 });
+
+applyIcons();
+activateSection("chats");
 document.getElementById("network-refresh")?.addEventListener("click", refreshNetwork);
 document.getElementById("skills-refresh")?.addEventListener("click", refreshSkills);
+document.getElementById("files-refresh")?.addEventListener("click", refreshFiles);
+document.querySelectorAll("#files-nav .files-nav-item").forEach(el => {
+    el.addEventListener("click", () => setFilesCategory(el.dataset.category));
+});
+document.getElementById("files-filter")?.addEventListener("input", renderFilesList);
+document.getElementById("files-upload")?.addEventListener("click", () => {
+    document.getElementById("files-input")?.click();
+});
+document.getElementById("files-input")?.addEventListener("change", async (e) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    try {
+        await uploadFiles(files);
+    } catch (err) {
+        alert(err.message);
+    }
+    e.target.value = "";
+});
+
+composerFileInput?.addEventListener("change", async (e) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    try {
+        await uploadDraftFiles(files);
+    } catch (err) {
+        alert(t("composer.upload.err", { msg: err.message }));
+    }
+    e.target.value = "";
+});
 document.getElementById("network-filter")?.addEventListener("input", renderNetworkList);
 document.getElementById("skills-filter")?.addEventListener("input", renderSkillsList);
 document.getElementById("skills-type-filter")?.addEventListener("change", renderSkillsList);

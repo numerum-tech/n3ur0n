@@ -6,150 +6,286 @@
     <title>N3UR0N</title>
     <link rel="stylesheet" href="/ui/style.css">
 </head>
-<body>
-    <aside class="sidebar" id="sidebar-main">
-        <header class="sidebar-header">
-            <div class="header-row">
-                <h1 data-i18n="app.title">N3UR0N</h1>
-                <span class="header-actions">
-                    <button id="settings-open" class="header-icon" type="button" data-i18n-attr-title="tooltip.settings" data-i18n-attr-aria-label="tooltip.settings" title="Settings" aria-label="Settings">⚙</button>
-                    <button id="user-logout" class="header-icon hidden" type="button" data-i18n-attr-title="auth.logout" data-i18n-attr-aria-label="auth.logout" title="Sign out" aria-label="Sign out">⎋</button>
-                </span>
-            </div>
+<body data-section="chats">
+    <header class="app-header">
+        <div class="app-header-left">
+            <h1 data-i18n="app.title">N3UR0N</h1>
             <span id="user-name" class="user-name"></span>
+        </div>
+        <div class="app-header-right">
             <code id="self-id" class="self-id" title="local instance id">…</code>
-        </header>
-        <nav class="sidebar-tabs" role="tablist">
-            <button class="tab active" data-tab="chats" type="button" data-i18n="sidebar.tab.chats">Chats</button>
-            <button class="tab" data-tab="network" type="button" data-i18n="sidebar.tab.network">Network</button>
-            <button class="tab" data-tab="skills" type="button" data-i18n="sidebar.tab.skills">Skills</button>
-        </nav>
-        <section class="tab-panel" data-panel="chats">
+            <button id="user-logout" class="header-icon hidden" type="button"
+                data-icon="log-out" data-icon-size="18"
+                data-i18n-attr-title="auth.logout" data-i18n-attr-aria-label="auth.logout"
+                title="Sign out" aria-label="Sign out"></button>
+        </div>
+    </header>
+
+    <nav class="app-rail" id="app-rail" aria-label="Main navigation">
+        <button class="rail-btn active" data-section="chats" type="button"
+            data-icon="message-square"
+            data-i18n-attr-title="nav.rail.chats" data-i18n-attr-aria-label="nav.rail.chats"
+            title="Chats" aria-label="Chats"></button>
+        <button class="rail-btn" data-section="network" type="button"
+            data-icon="globe"
+            data-i18n-attr-title="nav.rail.network" data-i18n-attr-aria-label="nav.rail.network"
+            title="Network" aria-label="Network"></button>
+        <button class="rail-btn" data-section="skills" type="button"
+            data-icon="sparkles"
+            data-i18n-attr-title="nav.rail.skills" data-i18n-attr-aria-label="nav.rail.skills"
+            title="Skills" aria-label="Skills"></button>
+        <button class="rail-btn" data-section="files" type="button"
+            data-icon="folder"
+            data-i18n-attr-title="nav.rail.files" data-i18n-attr-aria-label="nav.rail.files"
+            title="Files" aria-label="Files"></button>
+        <button class="rail-btn rail-btn-bottom" data-section="settings" type="button"
+            data-icon="settings"
+            data-i18n-attr-title="nav.rail.settings" data-i18n-attr-aria-label="nav.rail.settings"
+            title="Settings" aria-label="Settings"></button>
+    </nav>
+
+    <aside class="context-panel" id="context-panel">
+        <section class="context-section" data-context="chats">
+            <h2 class="context-section-title" data-i18n="nav.rail.chats">Chats</h2>
             <button id="new-chat" type="button" class="primary" data-i18n="sidebar.newchat">+ New chat</button>
             <ul id="conv-list" class="conv-list"></ul>
         </section>
-        <section class="tab-panel hidden" data-panel="network">
+
+        <section class="context-section hidden" data-context="network">
+            <h2 class="context-section-title" data-i18n="nav.rail.network">Network</h2>
             <div class="panel-toolbar">
-                <input id="network-filter" type="search" class="filter" data-i18n-attr-placeholder="sidebar.network.filter" placeholder="filter peers · id / endpoint / cap…" />
-                <button id="network-refresh" type="button" class="icon-btn" data-i18n-attr-title="tooltip.refresh" title="Refresh">⟳</button>
+                <label class="search-control">
+                    <span class="search-control-icon" data-icon="search" data-icon-size="16" aria-hidden="true"></span>
+                    <input id="network-filter" type="search" class="form-control"
+                        data-i18n-attr-placeholder="sidebar.network.filter"
+                        placeholder="filter peers · id / endpoint / cap…" />
+                </label>
+                <button id="network-refresh" type="button" class="icon-btn"
+                    data-icon="refresh-cw" data-icon-size="16"
+                    data-i18n-attr-title="tooltip.refresh" title="Refresh"></button>
             </div>
             <div id="network-stats" class="panel-stats"></div>
             <ul id="network-list" class="compact-list"></ul>
         </section>
-        <section class="tab-panel hidden" data-panel="skills">
+
+        <section class="context-section hidden" data-context="skills">
+            <h2 class="context-section-title" data-i18n="nav.rail.skills">Skills</h2>
             <div class="panel-toolbar">
-                <input id="skills-filter" type="search" class="filter" data-i18n-attr-placeholder="sidebar.skills.filter" placeholder="filter skills · name / tag / lang…" />
-                <button id="skills-refresh" type="button" class="icon-btn" data-i18n-attr-title="tooltip.refresh" title="Refresh">⟳</button>
+                <label class="search-control">
+                    <span class="search-control-icon" data-icon="search" data-icon-size="16" aria-hidden="true"></span>
+                    <input id="skills-filter" type="search" class="form-control"
+                        data-i18n-attr-placeholder="sidebar.skills.filter"
+                        placeholder="filter skills · name / tag / lang…" />
+                </label>
+                <button id="skills-refresh" type="button" class="icon-btn"
+                    data-icon="refresh-cw" data-icon-size="16"
+                    data-i18n-attr-title="tooltip.refresh" title="Refresh"></button>
             </div>
             <div class="panel-toolbar">
-                <select id="skills-type-filter" class="filter type-filter" data-i18n-attr-title="filter.type.tooltip" title="Filter by type">
-                    <option value="" data-i18n="filter.type.all">All types</option>
-                    <option value="mode:free" data-i18n="filter.type.public">Public</option>
-                    <option value="mode:restricted" data-i18n="filter.type.restricted">Restricted</option>
-                    <option value="mode:private" data-i18n="filter.type.private">Private</option>
-                    <option value="bind:prompt" data-i18n="filter.type.prompt">Binding: prompt</option>
-                    <option value="bind:mcp" data-i18n="filter.type.mcp">Binding: mcp</option>
-                    <option value="bind:http" data-i18n="filter.type.http">Binding: http</option>
-                </select>
+                <label class="select-control">
+                    <span class="select-control-label" data-i18n="filter.type.tooltip">Filter by type</span>
+                    <select id="skills-type-filter" class="form-control form-select" data-i18n-attr-title="filter.type.tooltip" title="Filter by type">
+                        <option value="" data-i18n="filter.type.all">All types</option>
+                        <option value="mode:free" data-i18n="filter.type.public">Public</option>
+                        <option value="mode:restricted" data-i18n="filter.type.restricted">Restricted</option>
+                        <option value="mode:private" data-i18n="filter.type.private">Private</option>
+                        <option value="bind:prompt" data-i18n="filter.type.prompt">Binding: prompt</option>
+                        <option value="bind:mcp" data-i18n="filter.type.mcp">Binding: mcp</option>
+                        <option value="bind:http" data-i18n="filter.type.http">Binding: http</option>
+                    </select>
+                </label>
             </div>
             <div id="skills-stats" class="panel-stats"></div>
             <ul id="skills-list" class="compact-list"></ul>
         </section>
-    </aside>
 
-    <!-- Settings sidebar: master-detail. Click a section in the list,
-         the main pane swaps to a rich settings page for that section. -->
-    <aside class="sidebar hidden" id="sidebar-settings">
-        <header class="sidebar-header">
-            <div class="header-row">
-                <button id="settings-back" class="header-icon" type="button" data-i18n-attr-title="tooltip.back" data-i18n-attr-aria-label="tooltip.back" title="Back" aria-label="Back">←</button>
-                <h1 data-i18n="settings.title">Settings</h1>
-                <span style="width: 28px;"></span>
-            </div>
-        </header>
-        <ul id="settings-nav" class="settings-nav">
-            <li class="settings-nav-item active" data-section="backends" data-perm="backends:read">
-                <span class="nav-icon">⚡</span>
-                <div class="nav-text">
-                    <span class="nav-title" data-i18n="settings.nav.backends">Backends</span>
-                    <span class="nav-sub" data-i18n="settings.nav.backends.sub">LLMs, MCP servers, HTTP APIs</span>
-                </div>
-            </li>
-            <li class="settings-nav-item" data-section="caps" data-perm="caps:read">
-                <span class="nav-icon">✦</span>
-                <div class="nav-text">
-                    <span class="nav-title" data-i18n="settings.nav.caps">Skills</span>
-                    <span class="nav-sub" data-i18n="settings.nav.caps.sub">Capability manifests you publish</span>
-                </div>
-            </li>
-            <li class="settings-nav-item" data-section="gateways" data-perm="peers:write">
-                <span class="nav-icon">⇄</span>
-                <div class="nav-text">
-                    <span class="nav-title" data-i18n="settings.nav.gateways">Gateways</span>
-                    <span class="nav-sub" data-i18n="settings.nav.gateways.sub">Remote n3ur0n peers you trust</span>
-                </div>
-            </li>
-            <li class="settings-nav-item" data-section="ui">
-                <span class="nav-icon">◐</span>
-                <div class="nav-text">
-                    <span class="nav-title" data-i18n="settings.nav.ui">Interface</span>
-                    <span class="nav-sub" data-i18n="settings.nav.ui.sub">Language, theme</span>
-                </div>
-            </li>
-            <li class="settings-nav-item" data-section="users" data-perm="users:read">
-                <span class="nav-icon">👥</span>
-                <div class="nav-text">
-                    <span class="nav-title" data-i18n="settings.nav.users">Users</span>
-                    <span class="nav-sub" data-i18n="settings.nav.users.sub">Manage accounts and roles</span>
-                </div>
-            </li>
-            <li class="settings-nav-item" data-section="identity" data-perm="identity:read">
-                <span class="nav-icon">⊙</span>
-                <div class="nav-text">
-                    <span class="nav-title" data-i18n="settings.nav.identity">Identity</span>
-                    <span class="nav-sub" data-i18n="settings.nav.identity.sub">Your instance key</span>
-                </div>
-            </li>
-            <li class="settings-nav-item" data-section="about">
-                <span class="nav-icon">ⓘ</span>
-                <div class="nav-text">
-                    <span class="nav-title" data-i18n="settings.nav.about">About</span>
-                    <span class="nav-sub" data-i18n="settings.nav.about.sub">Version, license, links</span>
-                </div>
-            </li>
-        </ul>
+        <section class="context-section hidden" data-context="files">
+            <h2 class="context-section-title" data-i18n="nav.rail.files">Files</h2>
+            <ul id="files-nav" class="settings-nav files-nav">
+                <li class="settings-nav-item files-nav-item active" data-category="all">
+                    <span class="nav-icon" data-icon="folder" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="files.nav.all">All files</span>
+                        <span class="nav-sub" data-i18n="files.nav.all.sub">Classes A, B, D (user-visible)</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item files-nav-item" data-category="class_a">
+                    <span class="nav-icon" data-icon="send-horizontal" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="files.nav.class_a">Outbound</span>
+                        <span class="nav-sub" data-i18n="files.nav.class_a.sub">Class A · sent before invoke</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item files-nav-item" data-category="class_b">
+                    <span class="nav-icon" data-icon="inbox" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="files.nav.class_b">Inbound output</span>
+                        <span class="nav-sub" data-i18n="files.nav.class_b.sub">Class B · invoke results</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item files-nav-item" data-category="class_d">
+                    <span class="nav-icon" data-icon="package-open" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="files.nav.class_d">Local cache</span>
+                        <span class="nav-sub" data-i18n="files.nav.class_d.sub">Class D · staged locally</span>
+                    </div>
+                </li>
+            </ul>
+        </section>
+
+        <section class="context-section hidden" data-context="settings">
+            <h2 class="context-section-title" data-i18n="nav.rail.settings">Settings</h2>
+            <ul id="settings-nav" class="settings-nav">
+                <li class="settings-nav-item active" data-section="backends" data-perm="backends:read">
+                    <span class="nav-icon" data-icon="zap" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.backends">Backends</span>
+                        <span class="nav-sub" data-i18n="settings.nav.backends.sub">LLMs, MCP servers, HTTP APIs</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item" data-section="planner" data-perm="backends:read">
+                    <span class="nav-icon" data-icon="message-square" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.planner">Planner</span>
+                        <span class="nav-sub" data-i18n="settings.nav.planner.sub">Model for planning &amp; replies</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item" data-section="caps" data-perm="caps:read">
+                    <span class="nav-icon" data-icon="sparkles" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.caps">Skills</span>
+                        <span class="nav-sub" data-i18n="settings.nav.caps.sub">Capability manifests you publish</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item" data-section="gateways" data-perm="peers:write">
+                    <span class="nav-icon" data-icon="arrow-left-right" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.gateways">Gateways</span>
+                        <span class="nav-sub" data-i18n="settings.nav.gateways.sub">Remote n3ur0n peers you trust</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item" data-section="ui">
+                    <span class="nav-icon" data-icon="palette" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.ui">Interface</span>
+                        <span class="nav-sub" data-i18n="settings.nav.ui.sub">Language, theme</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item" data-section="users" data-perm="users:read">
+                    <span class="nav-icon" data-icon="users" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.users">Users</span>
+                        <span class="nav-sub" data-i18n="settings.nav.users.sub">Manage accounts and roles</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item" data-section="identity" data-perm="identity:read">
+                    <span class="nav-icon" data-icon="fingerprint" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.identity">Identity</span>
+                        <span class="nav-sub" data-i18n="settings.nav.identity.sub">Your instance key</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item" data-section="about">
+                    <span class="nav-icon" data-icon="info" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.about">About</span>
+                        <span class="nav-sub" data-i18n="settings.nav.about.sub">Version, license, links</span>
+                    </div>
+                </li>
+            </ul>
+        </section>
     </aside>
 
     <main class="main-pane">
-        <header class="main-header">
-            <h2 id="conv-title" data-i18n="conv.no_conversation">No conversation</h2>
-            <div class="actions">
-                <button id="rename" type="button" disabled data-i18n="conv.rename">Rename</button>
-                <button id="delete" type="button" disabled data-i18n="conv.delete">Delete</button>
-            </div>
-        </header>
+        <div id="chat-view" class="chat-view">
+            <header class="main-header">
+                <h2 id="conv-title" data-i18n="conv.no_conversation">No conversation</h2>
+                <div class="actions">
+                    <button id="chat-mode-toggle" type="button" class="mode-pill hidden" disabled
+                        data-mode="auto" data-i18n="composer.mode.auto">Auto</button>
+                    <label class="field field-inline hidden" id="direct-model-field" for="direct-model">
+                        <input type="text" id="direct-model" class="form-control direct-model" disabled />
+                    </label>
+                    <button id="rename" type="button" disabled data-i18n="conv.rename">Rename</button>
+                    <button id="delete" type="button" disabled data-i18n="conv.delete">Delete</button>
+                </div>
+            </header>
 
-        <section id="conversation" class="conversation">
-            <p class="empty-hint" data-i18n="conv.empty_hint">Pick a conversation in the sidebar or click <strong>+ New chat</strong>.</p>
+            <section id="conversation" class="conversation">
+                <p class="empty-hint" data-i18n="conv.empty_hint">Pick a conversation in the sidebar or click <strong>+ New chat</strong>.</p>
+            </section>
+
+            <section class="composer">
+                <div id="composer-attachments" class="composer-attachments hidden" aria-live="polite"></div>
+                <div class="composer-capsule">
+                    <div class="composer-menu-wrap">
+                        <button id="composer-menu" type="button" class="icon-btn composer-menu-btn" disabled
+                            data-icon="plus" data-icon-size="18"
+                            data-i18n-attr-title="composer.menu" title="Add"></button>
+                        <div id="composer-menu-popover" class="composer-popover hidden" role="menu">
+                            <button id="composer-attach" type="button" class="composer-popover-item" role="menuitem">
+                                <span class="composer-popover-icon" data-icon="paperclip" data-icon-size="16" aria-hidden="true"></span>
+                                <span class="composer-popover-label" data-i18n="composer.attach">Attach file</span>
+                            </button>
+                            <button id="composer-mic" type="button" class="composer-popover-item" role="menuitem" disabled
+                                data-i18n-attr-title="composer.mic.soon">
+                                <span class="composer-popover-icon" data-icon="mic" data-icon-size="16" aria-hidden="true"></span>
+                                <span class="composer-popover-label" data-i18n="composer.mic">Record audio</span>
+                            </button>
+                        </div>
+                    </div>
+                    <input id="composer-file-input" type="file" class="hidden" multiple />
+                    <textarea id="prompt" class="form-control composer-textarea" rows="1"
+                        data-i18n-attr-placeholder="composer.placeholder"
+                        placeholder="Type your message and press Enter (Shift+Enter = newline)…" disabled></textarea>
+                    <button id="send" type="button" class="icon-btn composer-send" disabled
+                        data-icon="send-horizontal" data-icon-size="18"
+                        data-i18n-attr-title="composer.send" title="Send"></button>
+                </div>
+                <input type="checkbox" id="chat-mode-direct" class="hidden" disabled />
+            </section>
+        </div>
+
+        <section id="workspace-empty" class="workspace-empty hidden" aria-hidden="true">
+            <p id="workspace-empty-hint" class="empty-hint"></p>
         </section>
 
-        <section class="composer">
-            <textarea id="prompt" rows="3" data-i18n-attr-placeholder="composer.placeholder" placeholder="Type your message and press Enter (Shift+Enter = newline)…" disabled></textarea>
-            <button id="send" type="button" disabled data-i18n="composer.send">Send</button>
+        <section id="files-page" class="files-page hidden" aria-hidden="true">
+            <header class="settings-page-header">
+                <div>
+                    <h2 id="files-page-title" data-i18n="nav.rail.files">Files</h2>
+                    <p id="files-page-subtitle" class="settings-page-subtitle" data-i18n="files.subtitle">Your uploaded and received blobs.</p>
+                </div>
+                <div id="files-page-actions" class="settings-page-actions files-page-actions">
+                    <label class="search-control search-control-wide">
+                        <span class="search-control-icon" data-icon="search" data-icon-size="16" aria-hidden="true"></span>
+                        <input id="files-filter" type="search" class="form-control"
+                            data-i18n-attr-placeholder="sidebar.files.filter"
+                            placeholder="filter files · mime / hash…" />
+                    </label>
+                    <button id="files-upload" type="button" class="primary" data-i18n="sidebar.files.upload">Upload</button>
+                    <input id="files-input" type="file" class="hidden" multiple />
+                    <button id="files-refresh" type="button" class="icon-btn"
+                        data-icon="refresh-cw" data-icon-size="16"
+                        data-i18n-attr-title="tooltip.refresh" title="Refresh"></button>
+                </div>
+            </header>
+            <div id="files-page-body" class="settings-page-body"></div>
         </section>
 
-        <!-- Inspector: overlays the chat when a peer or cap is opened from the sidebar. -->
         <section id="inspector" class="inspector hidden" aria-hidden="true">
             <header class="inspector-header">
-                <button id="inspector-back" type="button" class="inspector-back" data-i18n-attr-title="tooltip.back" title="Back to chat">←</button>
+                <button id="inspector-back" type="button" class="inspector-back"
+                    data-icon="arrow-left" data-icon-size="18"
+                    data-i18n-attr-title="tooltip.back" title="Back"></button>
                 <h2 id="inspector-title">…</h2>
-                <button id="inspector-close" type="button" class="inspector-close" data-i18n-attr-title="tooltip.close" title="Close">×</button>
+                <button id="inspector-close" type="button" class="inspector-close"
+                    data-icon="x" data-icon-size="18"
+                    data-i18n-attr-title="tooltip.close" title="Close"></button>
             </header>
             <div id="inspector-body" class="inspector-body"></div>
         </section>
 
-        <!-- Settings page: rendered when the user is in Settings mode and
-             has a section selected. Replaces the chat view. -->
         <section id="settings-page" class="settings-page hidden" aria-hidden="true">
             <header class="settings-page-header">
                 <div>
@@ -162,10 +298,6 @@
         </section>
     </main>
 
-    <!-- Modal dialog for confirms + alerts. Native window.confirm doesn't
-         work in Tauri's WKWebView, so we ship our own. -->
-    <!-- Auth gate: full-screen overlay shown when no valid session.
-         Renders login or bootstrap form via JS. -->
     <div id="auth-gate" class="auth-gate hidden" aria-hidden="false"></div>
 
     <div id="modal" class="modal hidden" aria-hidden="true">

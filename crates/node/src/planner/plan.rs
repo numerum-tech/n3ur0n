@@ -1,9 +1,9 @@
 //! Typed plan + reference resolver + executor for plan-then-execute mode.
 //!
 //! The LLM "compiles" a structured `Plan` upfront (one LLM call). The
-//! executor walks it deterministically: topological order over `depends_on`,
-//! reference resolution from a per-conversation blackboard, sequential
-//! execution v0.1 (parallelism for independent steps = v0.2).
+//! executor walks the dependency graph deterministically: reference
+//! resolution from a per-dispatch blackboard, ready steps running
+//! concurrently up to `MAX_CONCURRENT_STEPS` (see `execute_plan_streaming`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -501,6 +501,7 @@ pub async fn execute_plan_streaming(
     }
 
     let http = peer_client::http_client();
+    let node_for_steps = node.clone();
     let step_sem = Arc::new(Semaphore::new(MAX_CONCURRENT_STEPS));
     let mut blackboard: HashMap<String, Value> = HashMap::new();
     let mut trace_by_id: HashMap<String, TraceEntry> = HashMap::new();
@@ -605,14 +606,15 @@ use raw refs only, let the downstream tool combine values)",
         // outlive the borrow on `blackboard`. A semaphore permit (acquired
         // inside the future) caps concurrent in-flight invocations.
         let id = step.id.clone();
-        let backend = node.backend().clone();
-        let keypair = node.keypair().clone();
+        let backend = node_for_steps.backend().clone();
+        let keypair = node_for_steps.keypair().clone();
         let http_client = http.clone();
-        let our_endpoint = node.config().endpoint.clone();
+        let our_endpoint = node_for_steps.config().endpoint.clone();
         let cap_name = tool.cap.name.clone();
         let endpoint = tool.peer_endpoint.clone();
         let sem = step_sem.clone();
         let evt_tx = events.cloned();
+        let node_exec = node_for_steps.clone();
 
         in_flight.push(
             async move {
@@ -629,14 +631,27 @@ use raw refs only, let the downstream tool combine values)",
                         .await
                         .map_err(|e| e.to_string())
                 } else {
+                    let ep = endpoint.as_deref().unwrap();
+                    let invoke_args = match crate::blob_resolve::prepare_invoke_args(
+                        &node_exec,
+                        &http_client,
+                        ep,
+                        &cap_name,
+                        resolved_args.clone(),
+                    )
+                    .await
+                    {
+                        Ok(a) => a,
+                        Err(e) => return StepCompletion { id, result: Err(e) },
+                    };
                     let payload = json!({
                         "capability": cap_name,
-                        "args": resolved_args,
+                        "args": invoke_args,
                     });
                     match peer_client::send_signed(
                         &http_client,
                         &keypair,
-                        endpoint.as_deref().unwrap(),
+                        ep,
                         ProtocolVerb::Invoke,
                         payload,
                         our_endpoint.as_deref(),
@@ -645,7 +660,11 @@ use raw refs only, let the downstream tool combine values)",
                     {
                         Ok(reply) => {
                             let p = reply.envelope.payload;
-                            Ok(p.get("result").cloned().unwrap_or(p))
+                            let raw = p.get("result").cloned().unwrap_or(p);
+                            crate::blob_resolve::fetch_output_blobs(
+                                &node_exec, &http_client, ep, raw,
+                            )
+                            .await
                         }
                         Err(e) => Err(e.to_string()),
                     }

@@ -319,11 +319,12 @@ fn take_openai_compat(
         .ok_or_else(|| ManifestError::validation(path, "[openai_compat] section missing"))?
         .as_object()
         .ok_or_else(|| ManifestError::validation(path, "[openai_compat] must be a table"))?;
-    let base_url = section
-        .get("base_url")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ManifestError::validation(path, "openai_compat.base_url required"))?
-        .to_string();
+    let base_url = n3ur0n_adapters::openai::normalize_openai_base_url(
+        section
+            .get("base_url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ManifestError::validation(path, "openai_compat.base_url required"))?,
+    );
     let default_model = section
         .get("default_model")
         .and_then(|v| v.as_str())

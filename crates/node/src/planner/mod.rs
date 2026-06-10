@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::conversation::ConversationState;
+use crate::conversation::{ConversationState, UserInput};
 use crate::error::NodeResult;
 use crate::node::Node;
 
@@ -135,7 +135,7 @@ pub trait Planner: Send + Sync + std::fmt::Debug {
         &self,
         node: &Node,
         state: &mut ConversationState,
-        user_message: String,
+        input: UserInput,
         mode: DispatchMode,
         opts: DispatchOptions,
     ) -> NodeResult<DispatchOutcome>;
@@ -147,11 +147,11 @@ pub trait Planner: Send + Sync + std::fmt::Debug {
         &self,
         node: &Node,
         state: &mut ConversationState,
-        user_message: String,
+        input: UserInput,
         mode: DispatchMode,
         opts: DispatchOptions,
         _events: EventSender,
     ) -> NodeResult<DispatchOutcome> {
-        self.dispatch(node, state, user_message, mode, opts).await
+        self.dispatch(node, state, input, mode, opts).await
     }
 }

@@ -6,7 +6,7 @@
 use axum::{Json, Router, extract::State, routing::post};
 use n3ur0n_adapters::{
     Backend,
-    openai::{OpenAIBackend, OpenAIConfig},
+    openai::{OpenAIBackend, OpenAIConfig, normalize_openai_base_url},
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -60,6 +60,7 @@ async fn invoke_with_prompt_string() {
         default_model: "test-model".into(),
         api_key: None,
         description: None,
+        allow_model_override: false,
     })
     .unwrap();
 
@@ -87,6 +88,7 @@ async fn invoke_with_messages_array_locks_model_to_default() {
         default_model: "default".into(),
         api_key: None,
         description: None,
+        allow_model_override: false,
     })
     .unwrap();
 
@@ -117,6 +119,7 @@ async fn passes_tool_fields_through_for_planner_iteration() {
         default_model: "default".into(),
         api_key: None,
         description: None,
+        allow_model_override: false,
     })
     .unwrap();
 
@@ -159,6 +162,7 @@ async fn messages_as_json_string_is_coerced_to_array() {
         default_model: "default".into(),
         api_key: None,
         description: None,
+        allow_model_override: false,
     })
     .unwrap();
 
@@ -180,6 +184,7 @@ async fn messages_as_plain_string_falls_back_to_prompt() {
         default_model: "default".into(),
         api_key: None,
         description: None,
+        allow_model_override: false,
     })
     .unwrap();
 
@@ -198,6 +203,69 @@ async fn unknown_capability_rejected() {
     let backend = OpenAIBackend::new(OpenAIConfig::ollama_local("nope")).unwrap();
     let err = backend.invoke("not-chat", json!({})).await.unwrap_err();
     matches!(err, n3ur0n_adapters::AdapterError::UnknownCapability(_));
+}
+
+#[tokio::test]
+async fn allow_model_override_passes_caller_model() {
+    let (base, state) = spawn_mock().await;
+    let backend = OpenAIBackend::new(OpenAIConfig {
+        base_url: base,
+        default_model: "default".into(),
+        api_key: None,
+        description: None,
+        allow_model_override: true,
+    })
+    .unwrap();
+
+    let _ = backend
+        .invoke(
+            "chat",
+            json!({
+                "model": "custom-llm",
+                "messages": [{"role": "user", "content": "hi"}]
+            }),
+        )
+        .await
+        .unwrap();
+
+    let req = state.last_request.lock().await.clone().unwrap();
+    assert_eq!(req["model"], "custom-llm");
+}
+
+#[tokio::test]
+async fn allow_model_override_falls_back_to_default_when_absent() {
+    let (base, state) = spawn_mock().await;
+    let backend = OpenAIBackend::new(OpenAIConfig {
+        base_url: base,
+        default_model: "default".into(),
+        api_key: None,
+        description: None,
+        allow_model_override: true,
+    })
+    .unwrap();
+
+    let _ = backend
+        .invoke(
+            "chat",
+            json!({"messages": [{"role": "user", "content": "hi"}]}),
+        )
+        .await
+        .unwrap();
+
+    let req = state.last_request.lock().await.clone().unwrap();
+    assert_eq!(req["model"], "default");
+}
+
+#[test]
+fn normalize_strips_ollama_native_api_path() {
+    assert_eq!(
+        normalize_openai_base_url("http://192.168.4.101:11434/api/generate"),
+        "http://192.168.4.101:11434"
+    );
+    assert_eq!(
+        normalize_openai_base_url("http://localhost:11434/v1/"),
+        "http://localhost:11434"
+    );
 }
 
 #[tokio::test]

@@ -12,8 +12,10 @@ use n3ur0n_node::IdentityFile;
 use n3ur0n_node::client as peer_client;
 use n3ur0n_node::discovery;
 use n3ur0n_node::runtime::RuntimeConfig;
-use n3ur0n_server::bootstrap::{BackendKind, PlannerKind};
-use n3ur0n_server::{bootstrap, http};
+use arc_swap::ArcSwap;
+use n3ur0n_server::bootstrap::{self, BackendKind, PlannerKind};
+use n3ur0n_server::http;
+use n3ur0n_server::planner_config::{PlannerEnvFallback, load_planner_user_config};
 use n3ur0n_storage::peers as peers_repo;
 use serde_json::Value;
 
@@ -80,8 +82,8 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "N3UR0N_PLANNER_MODE", default_value = "none")]
     pub(crate) planner_mode: String,
 
-    /// Base URL of the LLM endpoint used by the planner (defaults to the
-    /// chat backend's URL when `--backend ollama|openai`).
+    /// Base URL of the LLM endpoint used by the planner (required when
+    /// `N3UR0N_PLANNER_MODE` is not `none`).
     #[arg(long, env = "N3UR0N_PLANNER_LLM_BASE_URL")]
     pub(crate) planner_llm_base_url: Option<String>,
 
@@ -221,24 +223,52 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
     // Optional planner runtime.
     let planner_kind = parse_planner_kind(
         &args.planner_mode,
-        args.planner_llm_base_url,
-        args.planner_llm_model,
-        args.planner_llm_api_key,
+        args.planner_llm_base_url.clone(),
+        args.planner_llm_model.clone(),
+        args.planner_llm_api_key.clone(),
     )?;
-    let runtime = if let Some(kind) = planner_kind {
-        let cfg = RuntimeConfig {
-            max_concurrent_planners: args.max_concurrent_planners,
-            max_active_conversations: args.max_active_conversations,
-        };
-        let rt = bootstrap::build_runtime(node.clone(), kind, cfg)?;
+    let runtime_config = RuntimeConfig {
+        max_concurrent_planners: args.max_concurrent_planners,
+        max_active_conversations: args.max_active_conversations,
+    };
+    let planner_env = planner_kind.as_ref().map(|kind| {
+        let PlannerKind::PlanExec { backend, model_hint } = kind;
+        PlannerEnvFallback {
+            base_url: backend.base_url.clone(),
+            default_model: model_hint
+                .clone()
+                .unwrap_or_else(|| backend.default_model.clone()),
+            api_key: backend.api_key.clone(),
+        }
+    });
+    let runtime_cell = Arc::new(ArcSwap::from_pointee(None));
+    if let Some(env) = planner_env.as_ref() {
+        let user = load_planner_user_config(&dir);
+        let rt = bootstrap::build_runtime_with_user_config(
+            node.clone(),
+            &dir,
+            env,
+            &user,
+            runtime_config.clone(),
+        )?;
+        runtime_cell.store(Arc::new(Some(Arc::new(rt))));
         tracing::info!("planner runtime configured");
-        Some(Arc::new(rt))
     } else {
         tracing::info!("no planner configured (manual mode only)");
-        None
-    };
+    }
 
-    let app = http::app_with_settings(node, runtime, Some(dir.clone()));
+    let blobs_root = dir.join("blobs").join("sha256");
+    std::fs::create_dir_all(&blobs_root)
+        .with_context(|| format!("creating blob dir {}", blobs_root.display()))?;
+    n3ur0n_server::blob_gc::spawn(node.clone(), blobs_root);
+
+    let app = http::app_with_settings(
+        node,
+        runtime_cell,
+        Some(dir.clone()),
+        planner_env.clone(),
+        planner_env.map(|_| runtime_config),
+    );
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "listening");
     axum::serve(listener, app).await?;
@@ -353,6 +383,7 @@ fn parse_backend_kind(
                 default_model,
                 api_key: openai_api_key,
                 description: None,
+                allow_model_override: false,
             }))
         }
         other => anyhow::bail!("unknown backend: {other}"),
@@ -401,6 +432,7 @@ fn build_openai_config(
         default_model: model,
         api_key,
         description: None,
+        allow_model_override: false,
     })
 }
 

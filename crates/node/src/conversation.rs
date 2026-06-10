@@ -31,12 +31,71 @@ pub enum ConversationError {
 
 pub type ConversationResult<T> = Result<T, ConversationError>;
 
+/// File attached to a user message (blob protocol class D → A on send).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserAttachment {
+    pub hash: String,
+    pub mime: String,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Incoming user message from the conversations API.
+#[derive(Debug, Clone, Default)]
+pub struct UserInput {
+    pub text: String,
+    pub attachments: Vec<UserAttachment>,
+}
+
+impl From<String> for UserInput {
+    fn from(text: String) -> Self {
+        Self {
+            text,
+            attachments: Vec::new(),
+        }
+    }
+}
+
+impl From<&str> for UserInput {
+    fn from(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            attachments: Vec::new(),
+        }
+    }
+}
+
+impl UserInput {
+    pub fn is_empty(&self) -> bool {
+        self.text.trim().is_empty() && self.attachments.is_empty()
+    }
+
+    /// Text passed to the planner / LLM (attachments summarised inline).
+    pub fn planner_text(&self) -> String {
+        let mut text = self.text.trim().to_string();
+        if text.is_empty() && !self.attachments.is_empty() {
+            text = format!("The user sent {} file(s).", self.attachments.len());
+        }
+        for att in &self.attachments {
+            let label = att.name.as_deref().unwrap_or(&att.mime);
+            text.push_str(&format!(
+                "\n[attachment: {label} · {} · {} bytes]",
+                att.hash, att.size
+            ));
+        }
+        text
+    }
+}
+
 /// One step in a conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum Turn {
     User {
         content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<UserAttachment>,
         ts: i64,
     },
     Assistant {
@@ -130,10 +189,22 @@ impl ConversationState {
         self.turns.push(turn);
     }
 
-    /// Record a User turn.
-    pub fn push_user(&mut self, content: String) -> &Turn {
+    /// Record a User turn (text only).
+    pub fn push_user(&mut self, content: impl Into<String>) -> &Turn {
+        self.push_user_input(&UserInput {
+            text: content.into(),
+            attachments: Vec::new(),
+        })
+    }
+
+    /// Record a User turn with optional attachments.
+    pub fn push_user_input(&mut self, input: &UserInput) -> &Turn {
         let ts = OffsetDateTime::now_utc().unix_timestamp();
-        self.push(Turn::User { content, ts });
+        self.push(Turn::User {
+            content: input.text.clone(),
+            attachments: input.attachments.clone(),
+            ts,
+        });
         self.turns.last().expect("just pushed")
     }
 
@@ -441,7 +512,7 @@ mod tests {
     fn create_load_round_trip() {
         let db = open_in_memory().unwrap();
         let mut state = create(&db, "alice", Some("hello".into())).unwrap();
-        state.push_user("hi".into());
+        state.push_user("hi");
         persist_last(&db, &state).unwrap();
         state.push_assistant("hey there".into(), Some("test-model".into()));
         persist_last(&db, &state).unwrap();
@@ -463,7 +534,7 @@ mod tests {
     fn validate_repairs_dangling_tool_call() {
         let db = open_in_memory().unwrap();
         let mut state = create(&db, "alice", None).unwrap();
-        state.push_user("call something".into());
+        state.push_user("call something");
         persist_last(&db, &state).unwrap();
         let _call_id = state.push_tool_call(id(), "echo".into(), json!({}));
         persist_last(&db, &state).unwrap();
@@ -478,7 +549,7 @@ mod tests {
     fn pruning_keeps_pairs() {
         let peer = id();
         let mut state = ConversationState::new("c".into(), "alice".into(), None);
-        state.push_user("hi".into());
+        state.push_user("hi");
         let cid = state.push_tool_call(peer.clone(), "x".into(), json!({}));
         state.push_tool_result(cid, peer, "x".into(), Some(json!("ok")), None);
         state.push_assistant("done".into(), None);
@@ -495,7 +566,7 @@ mod tests {
         // just executed.
         let peer = id();
         let mut state = ConversationState::new("c".into(), "alice".into(), None);
-        state.push_user("u1".into());
+        state.push_user("u1");
         let cid = state.push_tool_call(peer.clone(), "echo".into(), json!({"x": 1}));
         state.push_tool_result(cid, peer, "echo".into(), Some(json!({"x": 1})), None);
         let msgs = state.to_chat_messages(10);
@@ -512,11 +583,11 @@ mod tests {
         // become invisible to subsequent LLM iterations.
         let peer = id();
         let mut state = ConversationState::new("c".into(), "alice".into(), None);
-        state.push_user("u1".into());
+        state.push_user("u1");
         let cid = state.push_tool_call(peer.clone(), "echo".into(), json!({"x": 1}));
         state.push_tool_result(cid, peer, "echo".into(), Some(json!({"x": 1})), None);
         state.push_assistant("first reply".into(), None);
-        state.push_user("u2".into());
+        state.push_user("u2");
         // Mid-second-dispatch: no new tool_call yet.
         let msgs = state.to_chat_messages(10);
         let roles: Vec<&str> = msgs
@@ -533,7 +604,7 @@ mod tests {
         let peer = InstanceId::parse("n3:abcdef1234567890longerthantwelvechars")
             .unwrap_or_else(|_| Keypair::generate().instance_id());
         let mut state = ConversationState::new("c".into(), "alice".into(), None);
-        state.push_user("u1".into());
+        state.push_user("u1");
         let cid = state.push_tool_call(peer.clone(), "chat".into(), json!({}));
         state.push_tool_result(cid, peer, "chat".into(), Some(json!("ok")), None);
         let msgs = state.to_chat_messages(10);

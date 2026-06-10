@@ -29,6 +29,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_conversations.sql"),
     include_str!("../migrations/0003_users_sessions.sql"),
+    include_str!("../migrations/0004_blobs.sql"),
 ];
 
 pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Db> {
@@ -75,6 +76,7 @@ fn migrate(pool: &Db) -> StorageResult<()> {
 }
 
 pub mod auth;
+pub mod blobs;
 pub mod conversations;
 pub mod peers;
 pub mod nonces;

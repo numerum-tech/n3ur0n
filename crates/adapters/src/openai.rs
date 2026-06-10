@@ -29,12 +29,35 @@ pub struct OpenAIConfig {
     /// For Ollama: `http://localhost:11434`.
     /// For OpenAI: `https://api.openai.com`.
     pub base_url: String,
-    /// Default model name. Overridable in each `invoke` payload.
+    /// Default model name. Overridable per `invoke` only when `allow_model_override` is true.
     pub default_model: String,
     /// Optional bearer token. Sent as `Authorization: Bearer <token>` if set.
     pub api_key: Option<String>,
     /// Optional capability description override.
     pub description: Option<String>,
+    /// When true, `invoke` may use a caller-supplied `model` in the payload.
+    /// Default false — network-facing backends lock to `default_model`.
+    pub allow_model_override: bool,
+}
+
+/// Normalize an OpenAI-compat `base_url` (host + optional port only).
+///
+/// Strips common mistaken suffixes such as Ollama's native `/api/generate`
+/// path or a pre-appended `/v1`. The adapter always appends `/v1/chat/completions`.
+pub fn normalize_openai_base_url(url: &str) -> String {
+    let mut s = url.trim().trim_end_matches('/').to_string();
+    loop {
+        let before = s.clone();
+        for suffix in ["/v1/chat/completions", "/api/generate", "/v1"] {
+            if let Some(stripped) = s.strip_suffix(suffix) {
+                s = stripped.trim_end_matches('/').to_string();
+            }
+        }
+        if s == before {
+            break;
+        }
+    }
+    s
 }
 
 impl OpenAIConfig {
@@ -45,6 +68,7 @@ impl OpenAIConfig {
             default_model: model.into(),
             api_key: None,
             description: None,
+            allow_model_override: false,
         }
     }
 }
@@ -67,7 +91,8 @@ impl std::fmt::Debug for OpenAIBackend {
 
 impl OpenAIBackend {
     /// Build a new backend.
-    pub fn new(config: OpenAIConfig) -> AdapterResult<Self> {
+    pub fn new(mut config: OpenAIConfig) -> AdapterResult<Self> {
+        config.base_url = normalize_openai_base_url(&config.base_url);
         let client = Client::builder()
             .timeout(DEFAULT_TIMEOUT)
             .user_agent("n3ur0n-adapter/0.1")
@@ -127,10 +152,7 @@ impl Backend for OpenAIBackend {
 
         // Accept either {"messages": [...]} (OpenAI native) or
         // {"prompt": "..."} (convenience for the smoke test).
-        let mut request = build_request(&args, &self.config.default_model)?;
-        if request.get("model").is_none() {
-            request["model"] = Value::String(self.config.default_model.clone());
-        }
+        let request = build_request(&args, &self.config)?;
         debug!(target: "n3ur0n_adapters::openai", url = %self.chat_url(), "POST chat completions");
 
         let resp = self
@@ -296,6 +318,7 @@ finish reason; the meaningful payload is `message.content`."
 const CHAT_ARG_ALLOWLIST: &[&str] = &[
     "prompt",
     "messages",
+    "model",
     "temperature",
     "max_tokens",
     "top_p",
@@ -321,20 +344,16 @@ const CHAT_ARG_ALLOWLIST: &[&str] = &[
     "format",
 ];
 
-fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
-    // Apply allowlist first — drop tools / tool_choice / model overrides /
-    // anything else exotic.
+fn build_request(args: &Value, config: &OpenAIConfig) -> AdapterResult<Value> {
+    // Apply allowlist first — drop exotic fields. `model` is forwarded then
+    // pinned or honoured in `apply_model_lock` depending on config.
     let sanitised = sanitise_chat_args(args);
 
     // Convenience: a string `prompt` becomes a single user message.
     if let Some(prompt) = sanitised.get("prompt").and_then(|v| v.as_str()) {
         return Ok(json!({
-            // Lock the model to the operator-configured default. Callers
-            // cannot override — they may hallucinate a model name (seen
-            // with llama3.1:8b emitting "text-davinci-003"), which would
-            // 500 against an Ollama upstream that has not pulled that
-            // model. The operator picked what to serve; honour that.
-            "model": default_model,
+            // Prompt shorthand always locks model (smoke / network callers).
+            "model": config.default_model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": false,
         }));
@@ -346,8 +365,7 @@ fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
     }
     let mut obj = sanitised;
     if let Value::Object(map) = &mut obj {
-        // Lock model regardless of what the client sent.
-        map.insert("model".into(), Value::String(default_model.to_string()));
+        apply_model_lock(map, config);
         // We don't support streaming over the protocol envelope yet — force false.
         map.insert("stream".into(), Value::Bool(false));
         // NOTE: messages content is forwarded as-is. `tool_calls` and
@@ -358,6 +376,24 @@ fn build_request(args: &Value, default_model: &str) -> AdapterResult<Value> {
         // that can ignore these fields gracefully — Ollama 0.4+ does so.
     }
     Ok(obj)
+}
+
+/// Honour caller `model` only when `allow_model_override` is set (planner/direct).
+fn apply_model_lock(map: &mut serde_json::Map<String, Value>, config: &OpenAIConfig) {
+    if config.allow_model_override {
+        let caller = map.get("model").and_then(|v| v.as_str());
+        if caller.map(str::is_empty).unwrap_or(true) {
+            map.insert(
+                "model".into(),
+                Value::String(config.default_model.clone()),
+            );
+        }
+    } else {
+        map.insert(
+            "model".into(),
+            Value::String(config.default_model.clone()),
+        );
+    }
 }
 
 fn sanitise_chat_args(args: &Value) -> Value {
