@@ -404,17 +404,11 @@ impl crate::planner::plan::PlanRun {
     pub fn blackboard_summary(&self) -> String {
         let mut out = String::new();
         for entry in &self.trace {
-            let value_str = entry
-                .result
-                .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "?".into()))
-                .unwrap_or_else(|| {
-                    entry
-                        .error
-                        .clone()
-                        .map(|e| format!("ERROR: {e}"))
-                        .unwrap_or_else(|| "(no result)".into())
-                });
+            let value_str = match (&entry.result, &entry.error) {
+                (Some(v), _) => render_blackboard_value(v),
+                (None, Some(e)) => format!("ERROR: {e}"),
+                (None, None) => "(no result)".into(),
+            };
             out.push_str(&format!(
                 "- {}::{} → {}\n",
                 short(&entry.peer_id),
@@ -424,6 +418,36 @@ impl crate::planner::plan::PlanRun {
         }
         out
     }
+}
+
+/// Per-step cap on the reflect-prompt blackboard rendering (~1 KB). A single
+/// step returning a large document otherwise saturates a 7B model's context.
+const BLACKBOARD_ENTRY_CAP: usize = 1024;
+
+/// Render one step result for the reflect prompt under [`BLACKBOARD_ENTRY_CAP`].
+///
+/// If the result carries blob references (P2), surface the reference itself —
+/// hash, size, mime — and never the binary/large content the blob stands for.
+/// Otherwise serialise and defensively truncate on a char boundary.
+fn render_blackboard_value(v: &Value) -> String {
+    let refs = crate::blob_resolve::collect_blob_refs(v);
+    if !refs.is_empty() {
+        return refs
+            .iter()
+            .map(|b| format!("blob {} ({} B, {})", b.hash, b.size, b.mime))
+            .collect::<Vec<_>>()
+            .join("; ");
+    }
+    let s = serde_json::to_string(v).unwrap_or_else(|_| "?".into());
+    if s.len() <= BLACKBOARD_ENTRY_CAP {
+        return s;
+    }
+    let total = s.len();
+    let mut end = BLACKBOARD_ENTRY_CAP;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…[truncated, {total} bytes]", &s[..end])
 }
 
 /// Canonical compile system prompt — moved out of `PlanExecPlanner` so
@@ -688,5 +712,62 @@ mod tests {
         assert!(block.contains("do_NOT_use_for:"));
         assert!(block.contains("translate to French"));
         assert!(block.contains("output_means: input string reversed"));
+    }
+
+    // --- P2: context control in blackboard_summary -------------------------
+
+    fn trace_entry(cap: &str, result: Value) -> TraceEntry {
+        TraceEntry {
+            call_id: "call".into(),
+            peer_id: "n3:abcdef123456ghi".into(),
+            capability: cap.into(),
+            args: json!({}),
+            result: Some(result),
+            error: None,
+        }
+    }
+
+    fn plan_run(trace: Vec<TraceEntry>) -> crate::planner::plan::PlanRun {
+        crate::planner::plan::PlanRun {
+            blackboard: std::collections::HashMap::new(),
+            last_step_id: None,
+            trace,
+        }
+    }
+
+    #[test]
+    fn blackboard_summary_truncates_large_result() {
+        let big = json!({ "data": "x".repeat(100_000) });
+        let run = plan_run(vec![trace_entry("bulk", big)]);
+        let s = run.blackboard_summary();
+        // One entry capped at ~1 KB + header/suffix — never the full 100 KB.
+        assert!(s.len() < 4_000, "summary not bounded: {} bytes", s.len());
+        assert!(s.contains("truncated"), "missing truncation marker: {s}");
+    }
+
+    #[test]
+    fn blackboard_summary_renders_blobref_not_content() {
+        let hash = format!("sha256:{}", "a".repeat(64));
+        let result = json!({
+            "blob": { "hash": hash, "size": 999_999, "mime": "application/pdf" },
+            "noise": "z".repeat(50_000),
+        });
+        let run = plan_run(vec![trace_entry("gen", result)]);
+        let s = run.blackboard_summary();
+        assert!(s.contains(&hash), "blob hash absent: {s}");
+        assert!(s.contains("application/pdf"), "blob mime absent: {s}");
+        // The bulky sibling content must never reach the prompt.
+        assert!(
+            !s.contains(&"z".repeat(2_000)),
+            "blob-bearing result leaked content"
+        );
+    }
+
+    #[test]
+    fn blackboard_summary_preserves_small_results() {
+        let run = plan_run(vec![trace_entry("calc", json!({ "sum": 42 }))]);
+        let s = run.blackboard_summary();
+        assert!(s.contains("\"sum\":42"), "small result altered: {s}");
+        assert!(!s.contains("truncated"), "small result wrongly truncated");
     }
 }
