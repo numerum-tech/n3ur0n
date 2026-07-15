@@ -243,6 +243,9 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            // Brand icon for window chrome / dock (bundled from icons/).
+            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
+                .context("loading desktop brand icon")?;
             let win = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -251,6 +254,7 @@ fn main() {
             .title("N3UR0N")
             .inner_size(1280.0, 800.0)
             .min_inner_size(900.0, 600.0)
+            .icon(icon)?
             .build()?;
             // Best-effort focus.
             let _ = win.set_focus();

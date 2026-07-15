@@ -8,7 +8,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 
-[Download](https://numerum-tech.github.io/n3ur0n/) · [Documentation](docs/) · [Architecture](n3ur0n-architecture-v0.md) · [Capability manifests](n3ur0n-capability-manifest-v0.md)
+[Architecture](n3ur0n-architecture-v0.md) · [Use cases](USE_CASES.md) · [Capability manifests](n3ur0n-capability-manifest-v0.md) · [Blob protocol](n3ur0n-blob-protocol-v0.md) · [Roadmap](ROADMAP.md)
 
 </div>
 
@@ -22,67 +22,59 @@ Capabilities are not shipped with the binary. They are **TOML manifests** users 
 
 > **N3UR0N is not** a model, an inference engine, or a tool format. It is the connective tissue between models, tools, and the people running them.
 
+Sample scenarios (public commons, company capability fabric, vendor↔partner edge) are sketched in [USE_CASES.md](USE_CASES.md).
+
 ### Why
 
 - **No central authority.** Identity is `n3:` + Base32(SHA-256(Ed25519 pubkey)). Every message is signed. Anyone can verify; no one can revoke.
 - **Capabilities are data, not code.** Add a skill by writing a `cap.toml`. No recompile, no plugin SDK.
-- **Bring your own backend.** Local Ollama, OpenAI, Anthropic, Mistral, llama.cpp, vLLM, your own MCP server — anything that speaks OpenAI-compatible HTTP or MCP works as a backend.
+- **Bring your own backend.** Anything that speaks **OpenAI-compatible** HTTP (Ollama, OpenAI, llama.cpp server, vLLM, …) or **MCP** works as a backend. Other vendors work when they expose one of those surfaces.
 - **Two profiles, one core.** A desktop app (Tauri) for consumers; a headless server for publishers. Same Rust core.
 
 ## Quick start
 
-### Desktop app
+Pre-built installers, GitHub Releases artefacts, GitHub Pages downloads, and a published `ghcr.io` image are **not available yet**. A release workflow exists (`.github/workflows/release.yml`); until the first `v*` tag ships artefacts, use **build from source** or **Docker Compose**.
 
-Download the latest installer for your OS from the [releases page](https://github.com/numerum-tech/n3ur0n/releases/latest) or the [project site](https://numerum-tech.github.io/n3ur0n/).
-
-- **macOS** — `n3ur0n_<version>_universal.dmg`
-- **Windows** — `n3ur0n_<version>_x64-setup.exe`
-- **Linux** — `n3ur0n_<version>_amd64.AppImage` or `.deb`
-
-On first launch the app auto-detects a local Ollama server and scaffolds a default backend. Open the chat tab and type — that is it.
-
-### Server (Linux)
+### Server (from source)
 
 ```bash
-# Pre-built binary (replace VERSION + ARCH)
-curl -L -o n3ur0n \
-  https://github.com/numerum-tech/n3ur0n/releases/latest/download/n3ur0n-linux-x86_64
-chmod +x n3ur0n
-
-./n3ur0n init                                    # generate identity + db
-./n3ur0n serve --port 4242 \
-  --endpoint http://your.host:4242 \
+cargo build --release -p n3ur0n-server
+./target/release/n3ur0n init
+./target/release/n3ur0n serve --port 4242 \
+  --endpoint http://127.0.0.1:4242 \
   --backend ollama --openai-model llama3.1:8b
 ```
 
 Open `http://localhost:4242/ui/` in a browser.
 
-### Docker
+Manifest mode (hot-reload backends/caps under a config dir):
 
 ```bash
-docker run -d --name n3ur0n \
-  -p 4242:4242 \
-  -v n3ur0n_data:/var/lib/n3ur0n \
-  ghcr.io/numerum-tech/n3ur0n:latest
+./target/release/n3ur0n serve --port 4242 \
+  --endpoint http://127.0.0.1:4242 \
+  --manifest-dir ~/.config/n3ur0n
 ```
 
-### Build from source
+### Desktop (from source)
+
+Requires [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your OS.
 
 ```bash
-# Workspace check
-cargo check --workspace
-
-# Server binary
-cargo build --release -p n3ur0n-server
-./target/release/n3ur0n --help
-
-# Desktop (requires Tauri prerequisites for your OS:
-# https://tauri.app/start/prerequisites/)
-cargo tauri dev   --manifest-path crates/desktop/Cargo.toml
-cargo tauri build --manifest-path crates/desktop/Cargo.toml
+cargo run -p n3ur0n-desktop
+# or:
+cargo tauri dev --manifest-path crates/desktop/Cargo.toml
 ```
 
-Rust 1.85+ (edition 2024) required.
+On first launch the app probes `http://localhost:11434` and, if Ollama answers, scaffolds a default `local_ollama` backend. Open the chat UI and type.
+
+### Docker (Compose cluster)
+
+```bash
+docker compose -f docker/compose.yml up -d --build
+# planner UI: http://localhost:4242/ui/
+```
+
+This builds the local `n3ur0n:dev` image from `docker/Dockerfile`. See `docker/compose.yml` for the multi-node layout and `docker/cluster-smoke.sh` for a smoke test.
 
 ## How it works
 
@@ -91,20 +83,22 @@ Rust 1.85+ (edition 2024) required.
 │ neuron A   │ ──────────────────────────▶ │ neuron B   │
 │ (user UI)  │     invoke(cap, args)       │ (backend)  │
 └────────────┘ ◀────────────────────────── └────────────┘
-                signed reply               
+                signed reply
 ```
 
 Every message carries `sender_id`, `recipient_id`, `timestamp`, `nonce`, `verb`, `payload`, `sender_public_key`, `signature`. Signatures cover the JCS canonical form (RFC 8785). Verification is pure: `hash(public_key) == sender_id` binds key to identity without a registry.
 
-Four protocol verbs total:
+Protocol verbs:
+
 - `describe_self` — list capabilities + endpoint
 - `get_known_peers` — share peer directory
 - `ping` — liveness
 - `invoke` — call a capability
+- `blob_ticket` — authorize blob HTTP ops on `/n3ur0n/v0/blobs` (never dispatched via `/messages`)
 
-Each instance also runs an optional **planner** that turns user prompts into capability calls. By default it uses a local LLM with native tool-calling.
+Each instance also runs an optional **planner**. By default (**PlanExec**) a local LLM compiles a typed plan, a deterministic executor runs capability invokes (bounded parallelism), then a final LLM call reflects a user-facing reply. A **direct chat** mode skips planning for a single LLM call per message.
 
-See [`n3ur0n-architecture-v0.md`](n3ur0n-architecture-v0.md) for the full protocol spec.
+See [`n3ur0n-architecture-v0.md`](n3ur0n-architecture-v0.md) for the full protocol spec and [`n3ur0n-blob-protocol-v0.md`](n3ur0n-blob-protocol-v0.md) for blobs.
 
 ## Capability manifests
 
@@ -148,13 +142,15 @@ parameters    = { temperature = 0.0 }
 output_parser = "json"
 ```
 
-Drop it in `<config>/caps/`. The runtime picks it up; no restart needed. See [`n3ur0n-capability-manifest-v0.md`](n3ur0n-capability-manifest-v0.md) for the spec.
+In **manifest mode** (desktop, or server `--manifest-dir`), drop files under `<config>/backends/` and `<config>/caps/`. Capability CRUD hot-reloads without restart; backend CRUD reloads the backends registry and rebinds caps. See [`n3ur0n-capability-manifest-v0.md`](n3ur0n-capability-manifest-v0.md) for the conceptual spec (the on-disk layout shipped in 0.3+ diverges slightly — prefer this example and the Settings UI).
 
 ## Project status
 
-**v0.4.0 (current)** — open-source release, EN/FR UI, RBAC phase 1, full capability composer (prompt / mcp / http), backend hot-reload, `AccessMode::Private`. Wire protocol `n3ur0n/0.3` unchanged.
+**v0.4.0** (tagged release line) — open-source scaffolding, EN/FR UI, RBAC phase 1, full capability composer (`prompt` / `mcp` / `http`), backend hot-reload, `AccessMode::Private`. Wire protocol `n3ur0n/0.3` unchanged.
 
-**Not yet** — public registry, lobe governance, marketplace, WASM bindings, OS keychain integration, mobile clients, CLI i18n.
+**On `main` beyond 0.4.0 (see [CHANGELOG](CHANGELOG.md) Unreleased)** — direct chat mode; hash-addressed blob layer + Files panel + message attachments; planner context control and durable plan-run journaling work in progress.
+
+**Not yet** — published release binaries / GHCR image / Pages download site; public registry; lobe governance; marketplace; WASM bindings; OS keychain for API keys; mobile clients; CLI i18n.
 
 See [ROADMAP.md](ROADMAP.md) for the milestone tracker.
 

@@ -1673,6 +1673,10 @@ function closeSettings() {
 }
 
 function activateSettingsSection(name) {
+    // Sub-forms (user edit, backend form, …) live in the inspector overlay;
+    // leave them when switching settings nav items.
+    closeInspector();
+
     document.querySelectorAll("#settings-nav .settings-nav-item").forEach(el =>
         el.classList.toggle("active", el.dataset.section === name)
     );
@@ -2110,9 +2114,9 @@ function openUserCreateForm() {
                     <option value="admin">${escapeHtml(t("role.admin"))}</option>
                 </select>
             </form>
-            <div style="display:flex; gap:8px; margin-top:12px; justify-content:flex-end;">
-                <button class="icon-btn" id="uf-cancel">${escapeHtml(t("button.cancel"))}</button>
-                <button class="primary" id="uf-save">${escapeHtml(t("button.save"))}</button>
+            <div class="form-actions">
+                <button type="button" class="secondary" id="uf-cancel">${escapeHtml(t("button.back"))}</button>
+                <button type="button" class="primary" id="uf-save">${escapeHtml(t("button.save"))}</button>
             </div>
             <p class="row-sub" id="uf-status"></p>
         </section>
@@ -2149,9 +2153,9 @@ function openUserEditForm(u) {
                 <label for="ue-pw">${escapeHtml(t("auth.field.password_new"))} (optional)</label>
                 <input id="ue-pw" type="password" minlength="6" />
             </form>
-            <div style="display:flex; gap:8px; margin-top:12px; justify-content:flex-end;">
-                <button class="icon-btn" id="ue-cancel">${escapeHtml(t("button.cancel"))}</button>
-                <button class="primary" id="ue-save">${escapeHtml(t("button.save_changes"))}</button>
+            <div class="form-actions">
+                <button type="button" class="secondary" id="ue-cancel">${escapeHtml(t("button.back"))}</button>
+                <button type="button" class="primary" id="ue-save">${escapeHtml(t("button.save_changes"))}</button>
             </div>
             <p class="row-sub" id="ue-status"></p>
         </section>
@@ -2225,16 +2229,22 @@ async function renderPlannerPage() {
             ${env.model ? `<p class="row-sub">${escapeHtml(t("settings.planner.env_default"))}: ${escapeHtml(env.model)}</p>` : ""}
         </article>
         <article class="card" style="max-width: 720px; margin-top: 12px;">
-            <form id="planner-form" class="kv" style="margin-top: 8px;">
-                <label for="planner-backend">${escapeHtml(t("settings.planner.backend"))}</label>
-                <select id="planner-backend" class="select-control">${backendOpts}</select>
-                <label for="planner-model">${escapeHtml(t("settings.planner.model"))}</label>
-                <input type="text" id="planner-model" class="form-control"
-                    value="${escapeHtml(cfg.model || "")}"
-                    placeholder="${escapeHtml(t("composer.direct.model_placeholder"))}" />
-                <p class="row-sub">${escapeHtml(t("settings.planner.model.help"))}</p>
+            <form id="planner-form" class="settings-form">
+                <div class="field">
+                    <label class="field-label" for="planner-backend">${escapeHtml(t("settings.planner.backend"))}</label>
+                    <select id="planner-backend" class="form-control form-select">${backendOpts}</select>
+                </div>
+                <div class="field">
+                    <label class="field-label" for="planner-model">${escapeHtml(t("settings.planner.model"))}</label>
+                    <input type="text" id="planner-model" class="form-control"
+                        value="${escapeHtml(cfg.model || "")}"
+                        placeholder="${escapeHtml(t("composer.direct.model_placeholder"))}" />
+                    <p class="row-sub">${escapeHtml(t("settings.planner.model.help"))}</p>
+                </div>
                 ${backends.length === 0 ? `<p class="row-sub">${escapeHtml(t("settings.planner.no_backends"))}</p>` : ""}
-                <button type="submit" class="primary" id="planner-save">${escapeHtml(t("settings.planner.save"))}</button>
+                <div class="form-actions">
+                    <button type="submit" class="primary" id="planner-save">${escapeHtml(t("settings.planner.save"))}</button>
+                </div>
             </form>
         </article>
     `;
@@ -2281,11 +2291,13 @@ async function renderUiPage() {
                 <div class="card-icon">🌐</div>
                 <span class="card-title">${escapeHtml(t("settings.ui.language"))}</span>
             </div>
-            <form class="kv" onsubmit="return false;" style="margin-top: 8px;">
-                <label for="lang-select">${escapeHtml(t("settings.ui.language"))}</label>
-                <select id="lang-select"></select>
+            <form class="settings-form" onsubmit="return false;">
+                <div class="field">
+                    <label class="field-label" for="lang-select">${escapeHtml(t("settings.ui.language"))}</label>
+                    <select id="lang-select" class="form-control form-select"></select>
+                    <p class="row-sub">${t("settings.ui.language.help")}</p>
+                </div>
             </form>
-            <p class="row-sub" style="margin-top: 8px;">${t("settings.ui.language.help")}</p>
         </article>
         <article class="card" style="max-width: 720px; margin-top: 12px;">
             <div class="card-head">
@@ -2336,12 +2348,13 @@ function renderAboutPage() {
     body.innerHTML = `
         <article class="card" style="max-width: 720px;">
             <div class="card-head">
-                <div class="card-icon">ⓘ</div>
-                <span class="card-title">N3UR0N desktop</span>
-                <span class="card-kind">v0.3 alpha</span>
+                <img class="brand-mark" src="/ui/brand-mark.png" width="36" height="36" alt="" aria-hidden="true"
+                    style="border-radius:8px;object-fit:contain;background:transparent;">
+                <span class="card-title">N3UR0N</span>
+                <span class="card-kind">v0.4.0</span>
             </div>
             <div class="card-meta">
-                A consumer client for N3UR0N — connects to local + remote LLMs,
+                A peer-to-peer gateway for AI capabilities — local + remote LLMs,
                 MCP servers, HTTP APIs and remote n3ur0n peers under a single
                 Ed25519-signed protocol. Capabilities live as TOML manifests
                 on disk; they can be invoked locally, shared with peers, or
@@ -2349,8 +2362,8 @@ function renderAboutPage() {
             </div>
             <div class="card-meta">
                 Protocol: <code>n3ur0n/0.3</code><br>
-                License: Apache-2.0 (planned)<br>
-                Source: <code>github.com/&lt;tbd&gt;</code>
+                License: Apache-2.0<br>
+                Source: <code>github.com/numerum-tech/n3ur0n</code>
             </div>
         </article>
     `;
@@ -2368,9 +2381,9 @@ function openGatewayForm() {
                 <label for="gf-url">endpoint</label>
                 <input id="gf-url" type="url" required placeholder="http://node-a:4242 · https://peer.example.com:4242" />
             </form>
-            <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
-                <button id="gf-cancel" type="button" class="icon-btn">Cancel</button>
-                <button id="gf-save" type="button" class="primary" style="margin: 0;">Add</button>
+            <div class="form-actions">
+                <button id="gf-cancel" type="button" class="secondary">${escapeHtml(t("button.back"))}</button>
+                <button id="gf-save" type="button" class="primary">${escapeHtml(t("button.save"))}</button>
             </div>
             <div id="gf-status" class="row-sub" style="margin-top: 8px;"></div>
         </section>
@@ -2643,8 +2656,8 @@ function openCapTemplatePicker() {
                 `).join("")}
             </div>
         </section>
-        <div style="display: flex; gap: 8px; justify-content: flex-end;">
-            <button id="cf-picker-cancel" type="button" class="icon-btn">${escapeHtml(t("button.cancel"))}</button>
+        <div class="form-actions">
+            <button id="cf-picker-cancel" type="button" class="secondary">${escapeHtml(t("button.back"))}</button>
         </div>
     `;
     overlay.classList.remove("hidden");
@@ -2737,7 +2750,7 @@ async function openCapForm(existingName, templateKey) {
     document.getElementById("inspector-body").innerHTML = `
         ${existingName ? "" : `
         <div style="margin-bottom: 10px;">
-            <button id="cf-back-templates" type="button" class="icon-btn">${escapeHtml(t("cap.form.back_to_templates"))}</button>
+            <button id="cf-back-templates" type="button" class="secondary">${escapeHtml(t("cap.form.back_to_templates"))}</button>
         </div>`}
         <section class="section">
             <h3>${escapeHtml(t("cap.form.section.basics"))}</h3>
@@ -2856,9 +2869,9 @@ async function openCapForm(existingName, templateKey) {
             <label for="cf-ex-out" style="color: var(--muted); font-size: 0.72rem; display: block; margin-top: 8px;">${escapeHtml(t("cap.form.field.example.output"))}</label>
             <textarea id="cf-ex-out" class="form-textarea code" rows="3">${escapeHtml(prefill.example_output)}</textarea>
         </section>
-        <div style="display: flex; gap: 8px; justify-content: flex-end;">
-            <button id="cf-cancel" type="button" class="icon-btn">${escapeHtml(t("button.cancel"))}</button>
-            <button id="cf-save" type="button" class="primary" style="margin: 0;">${escapeHtml(existingName ? t("cap.form.button.save_changes") : t("cap.form.button.create"))}</button>
+        <div class="form-actions">
+            <button id="cf-cancel" type="button" class="secondary">${escapeHtml(t("button.back"))}</button>
+            <button id="cf-save" type="button" class="primary">${escapeHtml(existingName ? t("cap.form.button.save_changes") : t("cap.form.button.create"))}</button>
         </div>
         <div id="cf-status" class="row-sub" style="margin-top: 8px;"></div>
     `;
@@ -3165,9 +3178,9 @@ async function openBackendForm(existingName) {
                 <textarea id="bf-http-headers" class="form-textarea code" rows="4" placeholder="Authorization: Bearer YOUR_TOKEN&#10;User-Agent: n3ur0n/0.3">${escapeHtml(Object.entries(prefill?.headers || {}).map(([k,v])=>`${k}: ${v}`).join("\n"))}</textarea>
             </form>
         </section>
-        <div style="display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;">
-            <button id="bf-back" type="button" class="icon-btn">${escapeHtml(t("button.back"))}</button>
-            <button id="bf-save" type="button" class="primary" style="margin: 0;">${escapeHtml(existingName ? t("button.save_changes") : t("button.save"))}</button>
+        <div class="form-actions">
+            <button id="bf-back" type="button" class="secondary">${escapeHtml(t("button.back"))}</button>
+            <button id="bf-save" type="button" class="primary">${escapeHtml(existingName ? t("button.save_changes") : t("button.save"))}</button>
         </div>
         <div id="bf-status" class="row-sub" style="margin-top: 8px;"></div>
     `;

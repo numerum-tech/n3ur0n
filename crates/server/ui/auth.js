@@ -10,7 +10,7 @@
 // to show + whether a button is rendered). Never assume role checks here
 // are security boundaries.
 
-import { t } from "./i18n.js";
+import { t, listLocales, setLocale, currentLocale } from "./i18n.js";
 
 let _state = {
     authenticated: false,
@@ -135,9 +135,58 @@ export function renderAuthGate() {
     return true;
 }
 
+function readAuthDraft(host) {
+    return {
+        user: host.querySelector("#auth-user")?.value ?? "",
+        password: host.querySelector("#auth-pw")?.value ?? "",
+    };
+}
+
+function restoreAuthDraft(host, draft) {
+    if (!draft) return;
+    const user = host.querySelector("#auth-user");
+    const pw = host.querySelector("#auth-pw");
+    if (user && draft.user) user.value = draft.user;
+    if (pw && draft.password) pw.value = draft.password;
+}
+
+async function wireLangToggle(host) {
+    const bar = host.querySelector(".auth-lang-toggle");
+    if (!bar) return;
+    const locales = await listLocales();
+    if (!locales.length) {
+        bar.remove();
+        return;
+    }
+    const cur = currentLocale();
+    bar.innerHTML = locales.map(l => {
+        const code = String(l.code || "").toUpperCase();
+        const on = l.code === cur;
+        return `<button type="button" data-locale="${escapeHtml(l.code)}"
+            class="${on ? "active" : ""}" aria-pressed="${on ? "true" : "false"}"
+            title="${escapeHtml(l.native_name || l.name || l.code)}">${escapeHtml(code)}</button>`;
+    }).join("");
+    bar.querySelectorAll("[data-locale]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            if (btn.dataset.locale === currentLocale()) return;
+            const draft = readAuthDraft(host);
+            await setLocale(btn.dataset.locale);
+            document.documentElement.lang = currentLocale();
+            renderAuthGate();
+            restoreAuthDraft(document.getElementById("auth-gate"), draft);
+        });
+    });
+}
+
+function authLangToggleHtml() {
+    return `<div class="auth-lang-toggle" role="group"
+        aria-label="${escapeHtml(t("settings.ui.language"))}"></div>`;
+}
+
 function renderLoginForm(host) {
     host.innerHTML = `
         <div class="auth-card">
+            <img class="brand-mark" src="/ui/brand-mark.png" width="64" height="64" alt="" aria-hidden="true">
             <h2>${escapeHtml(t("auth.login.title"))}</h2>
             <p class="row-sub">${escapeHtml(t("auth.login.help"))}</p>
             <form class="kv" id="auth-form" onsubmit="return false;">
@@ -151,7 +200,9 @@ function renderLoginForm(host) {
             </div>
             <p class="row-sub auth-status" id="auth-status"></p>
         </div>
+        ${authLangToggleHtml()}
     `;
+    void wireLangToggle(host);
     wireSubmit(host, async (u, p, status) => {
         try {
             await login(u, p);
@@ -167,6 +218,7 @@ function renderLoginForm(host) {
 function renderBootstrapForm(host) {
     host.innerHTML = `
         <div class="auth-card">
+            <img class="brand-mark" src="/ui/brand-mark.png" width="64" height="64" alt="" aria-hidden="true">
             <h2>${escapeHtml(t("auth.bootstrap.title"))}</h2>
             <p class="row-sub">${escapeHtml(t("auth.bootstrap.help"))}</p>
             <form class="kv" id="auth-form" onsubmit="return false;">
@@ -180,7 +232,9 @@ function renderBootstrapForm(host) {
             </div>
             <p class="row-sub auth-status" id="auth-status"></p>
         </div>
+        ${authLangToggleHtml()}
     `;
+    void wireLangToggle(host);
     wireSubmit(host, async (u, p, status) => {
         try {
             await bootstrap(u, p);

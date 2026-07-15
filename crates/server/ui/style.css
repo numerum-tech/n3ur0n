@@ -42,12 +42,15 @@
     inset: 0;
     background: var(--bg);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 14px;
     z-index: 1000;
     padding: 16px;
 }
 .auth-gate .auth-card {
+    order: 0;
     width: 100%;
     max-width: 420px;
     background: var(--panel);
@@ -61,7 +64,55 @@
     font-size: 1.3rem;
     color: var(--accent);
 }
+.auth-gate .brand-mark {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    display: block;
+    margin: 0 auto 14px;
+    object-fit: contain;
+    background: transparent;
+    border: none;
+}
 .auth-gate .row-sub { margin: 0 0 18px; }
+/* Locale chips below the login card — centered, intentionally quiet. */
+.auth-gate .auth-lang-toggle {
+    order: 1;
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--panel);
+    opacity: 0.72;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+.auth-gate .auth-lang-toggle:hover,
+.auth-gate .auth-lang-toggle:focus-within {
+    opacity: 1;
+}
+.auth-gate .auth-lang-toggle button {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 5px 8px;
+    cursor: pointer;
+    line-height: 1;
+}
+.auth-gate .auth-lang-toggle button + button {
+    border-left: 1px solid var(--border);
+}
+.auth-gate .auth-lang-toggle button:hover {
+    color: var(--text);
+}
+.auth-gate .auth-lang-toggle button.active {
+    background: var(--panel-2);
+    color: var(--accent);
+}
 .auth-gate .kv { display: grid; grid-template-columns: 1fr; gap: 6px; }
 .auth-gate .kv label {
     color: var(--muted);
@@ -137,12 +188,25 @@
 }
 .panel-toolbar select.type-filter {
     flex: 1;
-    background: var(--panel-2);
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--panel-2);
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 14px) calc(50% + 2px), calc(100% - 9px) calc(50% + 2px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 7px 28px 7px 10px;
     font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+.panel-toolbar select.type-filter:focus {
+    outline: none;
+    border-color: var(--accent);
 }
 
 .theme-switch {
@@ -205,6 +269,16 @@ body {
     gap: 10px;
     min-width: 0;
 }
+.app-header-left .brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    flex-shrink: 0;
+    display: block;
+    object-fit: contain;
+    background: transparent;
+    border: none;
+}
 .app-header-left h1 {
     margin: 0;
     color: var(--accent);
@@ -250,7 +324,8 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 8px 0;
+    /* Match context title / main-header top band (44px). */
+    padding: 2px 0 8px;
     gap: 4px;
     overflow: hidden;
 }
@@ -331,9 +406,13 @@ body {
 }
 
 /* ---------- form controls ---------- */
-.form-control {
+.form-control,
+.form-select,
+.kv select,
+.card select,
+.inspector-body .kv select {
     width: 100%;
-    background: var(--panel-2);
+    background-color: var(--panel-2);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -342,27 +421,42 @@ body {
     font-size: 0.82rem;
     transition: border-color 0.12s, box-shadow 0.12s;
 }
-.form-control:focus {
+.form-control:focus,
+.form-select:focus,
+.kv select:focus,
+.card select:focus,
+.inspector-body .kv select:focus {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.15);
 }
-:root[data-theme="light"] .form-control:focus {
+:root[data-theme="light"] .form-control:focus,
+:root[data-theme="light"] .form-select:focus,
+:root[data-theme="light"] .kv select:focus,
+:root[data-theme="light"] .card select:focus,
+:root[data-theme="light"] .inspector-body .kv select:focus {
     box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.12);
 }
-.form-select {
+/* Custom chevron — same chrome as inputs, no native blue focus. */
+select.form-control,
+.form-select,
+.kv select,
+.card select,
+.inspector-body .kv select {
     appearance: none;
+    -webkit-appearance: none;
     background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
         linear-gradient(135deg, var(--muted) 50%, transparent 50%);
     background-position: calc(100% - 16px) calc(50% + 2px), calc(100% - 11px) calc(50% + 2px);
     background-size: 5px 5px, 5px 5px;
     background-repeat: no-repeat;
     padding-right: 28px;
+    cursor: pointer;
 }
 .field {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     min-width: 0;
 }
 .field-label {
@@ -370,6 +464,28 @@ body {
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+}
+.settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 4px;
+}
+.settings-form .field .row-sub {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+.settings-form > button.primary,
+.settings-form .form-actions button.primary {
+    margin: 0;
+    align-self: flex-start;
+}
+.settings-form .form-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 4px;
 }
 .search-control {
     display: flex;
@@ -427,9 +543,44 @@ button.primary {
     border: 1px solid var(--accent);
     border-radius: 4px;
     font: inherit;
+    font-size: 0.82rem;
     cursor: pointer;
 }
 button.primary:hover { background: var(--accent); color: var(--bg); }
+
+/* Labeled cancel / back — matches primary chrome, muted border. */
+button.secondary,
+.icon-btn {
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    line-height: 1.2;
+}
+button.secondary:hover,
+.icon-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.inspector-body .form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    justify-content: flex-end;
+}
+.inspector-body .form-actions button.primary {
+    margin: 0;
+}
 
 .context-section {
     display: flex;
@@ -441,13 +592,15 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
 
 .context-section-title {
     margin: 0;
-    padding: 12px 16px 10px;
+    padding: 0 16px;
+    height: 44px;
+    display: flex;
+    align-items: center;
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--accent);
-    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
 }
 
@@ -710,19 +863,7 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
     padding: 6px 8px;
     width: 100%;
 }
-.inspector-body .kv input:focus,
-.inspector-body .kv select:focus,
 .inspector-body .form-textarea:focus { outline: none; border-color: var(--accent); }
-
-.inspector-body .kv select {
-    background: var(--panel);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 6px 8px;
-    width: 100%;
-    font: inherit;
-}
 
 .inspector-body .form-textarea {
     width: 100%;
@@ -1059,7 +1200,8 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
 .conv-list {
     list-style: none;
     margin: 0;
-    padding: 0 8px 16px;
+    /* Match button.primary horizontal margin (16px) so active border lines up. */
+    padding: 0 16px 16px;
     overflow-y: auto;
     flex: 1;
 }
@@ -1150,7 +1292,8 @@ button.primary:hover { background: var(--accent); color: var(--bg); }
 }
 
 .main-header {
-    padding: 12px 32px;
+    padding: 0 32px;
+    height: 44px;
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;

@@ -23,7 +23,7 @@ n3ur0n-adapters = { workspace = true }
 n3ur0n-node = { workspace = true }
 n3ur0n-server = { workspace = true }
 
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["image-png"] }
 axum = { workspace = true }
 semver = { workspace = true }
 tokio = { workspace = true }
