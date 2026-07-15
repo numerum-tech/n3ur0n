@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>N3UR0N — peer-to-peer AI capability network</title>
+  <meta name="description" content="N3UR0N is a peer-to-peer network for publishing and invoking AI capabilities — no central authority, no vendor lock-in. Every message is signed. Every skill is a TOML file.">
+  <meta property="og:title" content="N3UR0N">
+  <meta property="og:description" content="Peer-to-peer AI capability network. Signed invokes. Capabilities as data. Apache-2.0.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="brand-mark.png">
+  <meta name="theme-color" content="#0a0c10">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@500;600;700;800&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <div class="topbar">
+    <div class="topbar-inner">
+      <a class="topbar-brand" href="#">
+        <img src="brand-mark.png" width="28" height="28" alt="">
+        N3UR0N
+      </a>
+      <nav class="topbar-nav" aria-label="Primary">
+        <a href="#what">About</a>
+        <a href="#how">How</a>
+        <a href="#profiles">Profiles</a>
+        <a href="#start">Start</a>
+        <a href="#network">Network</a>
+        <a href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </nav>
+    </div>
+  </div>
+
+  <header class="hero">
+    <div class="hero-stage">
+      <div class="hero-copy">
+        <img class="hero-mark" src="brand-mark.png" width="140" height="140" alt="">
+        <h1 class="hero-wordmark">N3UR0N</h1>
+        <p class="hero-line">A peer-to-peer network for AI capabilities.</p>
+        <p class="hero-support">
+          Publish a skill. Invoke a peer’s skill. No broker, no central registry,
+          no vendor lock-in — every message signed, every capability a TOML file.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#start">Build from source</a>
+          <a class="btn btn-ghost" href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="hero-shot-frame">
+          <img
+            class="hero-shot"
+            src="screenshot.png"
+            width="1600"
+            height="1000"
+            alt="N3UR0N desktop — Settings and Skills panel"
+            decoding="async"
+            fetchpriority="high"
+          >
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="section" id="what">
+      <p class="section-label">What it is</p>
+      <h2>Gateways, not another chatbot.</h2>
+      <div class="split split-2">
+        <div class="prose">
+          <p class="lede">
+            Each participant runs a small <strong>instance</strong> — a neuron —
+            that exposes AI backends as capabilities: a local LLM, an MCP tool,
+            an HTTP API, a prompted skill. Peers discover those capabilities and
+            invoke them with cryptographically signed envelopes.
+          </p>
+          <p>
+            Identity is self-certifying:
+            <strong><code>n3:</code> + Base32(SHA-256(Ed25519 public key))</strong>.
+            Anyone can verify; no one needs a registry to issue an ID.
+          </p>
+          <p>
+            Capabilities are <strong>data on disk</strong>, not plugins in the binary.
+            Add a skill by writing a manifest. Hot-reload. Swap the backend
+            without rewriting callers.
+          </p>
+        </div>
+        <ul class="not-list">
+          <li>
+            <span>Not a model</span>
+            Inference stays in Ollama, OpenAI-compatible servers, MCP, or HTTP backends you choose.
+          </li>
+          <li>
+            <span>Not a tool format</span>
+            The protocol is signed invoke + discovery — not a new schema war.
+          </li>
+          <li>
+            <span>Not a hosted SaaS brain</span>
+            Your keys, your nodes, your peers. Optional public seed when you want a bootstrap point.
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="how">
+      <p class="section-label">How it works</p>
+      <h2>Three beats on the wire.</h2>
+      <p class="lede">
+        Four verbs today: <code>describe_self</code>, <code>get_known_peers</code>,
+        <code>ping</code>, <code>invoke</code> — plus a blob side-channel when bytes
+        are too large for JSON envelopes.
+      </p>
+      <ol class="steps">
+        <li>
+          <h3>Publish</h3>
+          <p>Author a <code>cap.toml</code>, bind it to a backend, and expose an endpoint. Your neuron advertises what it can do.</p>
+        </li>
+        <li>
+          <h3>Discover</h3>
+          <p>Bootstrap from a peer you trust. Cascade depth-1 gossip fills a local directory of capabilities.</p>
+        </li>
+        <li>
+          <h3>Invoke</h3>
+          <p>Send a signed Ed25519 envelope. The peer verifies binding, signature, recipient, and anti-replay — then runs the skill.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="section" id="profiles">
+      <p class="section-label">Profiles</p>
+      <h2>Same core. Two shells.</h2>
+      <p class="lede">One Rust workspace. Consumer and publisher differ by how they listen — not by a second protocol.</p>
+      <div class="profiles">
+        <article class="profile">
+          <span class="tag">Consumer</span>
+          <h3>Desktop</h3>
+          <p>Tauri app on loopback. Chat with your instance; the planner compiles and executes against the network. No public listener by default.</p>
+        </article>
+        <article class="profile">
+          <span class="tag">Publisher</span>
+          <h3>Headless server</h3>
+          <p>CLI on a VPS or homelab. HTTPS listener, manifests on disk, optional restricted access per capability. Expose skills to peers.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="start">
+      <p class="section-label">Get started</p>
+      <h2>Build from source.</h2>
+      <p class="start-note">
+        <strong>No installers yet.</strong>
+        Pre-built desktop packages, GitHub Releases artefacts, and a published container image are not first-class until a tagged release ships.
+        Until then: source or local Compose.
+      </p>
+
+      <div class="start-block">
+        <h3>Server</h3>
+        <p>Requires Rust stable and (optionally) a local Ollama.</p>
+        <pre><code>cargo build --release -p n3ur0n-server
+./target/release/n3ur0n init
+./target/release/n3ur0n serve --port 4242 \
+  --endpoint http://127.0.0.1:4242 \
+  --backend ollama --openai-model llama3.1:8b
+# UI → http://localhost:4242/ui/</code></pre>
+      </div>
+
+      <div class="start-block">
+        <h3>Desktop</h3>
+        <p>Requires <a href="https://tauri.app/start/prerequisites/">Tauri 2 prerequisites</a> for your OS.</p>
+        <pre><code>cargo run -p n3ur0n-desktop</code></pre>
+      </div>
+
+      <div class="start-block">
+        <h3>Docker Compose cluster</h3>
+        <p>Multi-node smoke layout in the repo.</p>
+        <pre><code>docker compose -f docker/compose.yml up -d --build
+# planner UI → http://localhost:4242/ui/</code></pre>
+      </div>
+    </section>
+
+    <section class="section" id="network">
+      <p class="section-label">Network</p>
+      <h2>A public seed, when ready.</h2>
+      <div class="network-box">
+        <p>
+          The project site lives here. A <strong>bootstrap seed peer</strong> —
+          a minimal publisher others can discover from — is planned as a
+          separate host (for example <code>seed.n3uron.com</code>), not this page.
+        </p>
+        <p>
+          Until it is online, bootstrap from peers you run or from Compose neighbours.
+        </p>
+        <div class="seed-placeholder" title="Placeholder — not live yet">
+          <span class="dot" aria-hidden="true"></span>
+          seed.n3uron.com · coming later
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <p>N3UR0N · Apache-2.0 · by <a href="https://github.com/numerum-tech">Numerum</a></p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/numerum-tech/n3ur0n/blob/main/n3ur0n-architecture-v0.md" target="_blank" rel="noopener noreferrer">Architecture</a>
+        <a href="https://github.com/numerum-tech/n3ur0n/blob/main/USE_CASES.md" target="_blank" rel="noopener noreferrer">Use cases</a>
+        <a href="https://github.com/numerum-tech/n3ur0n/blob/main/ROADMAP.md" target="_blank" rel="noopener noreferrer">Roadmap</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>
