@@ -8,12 +8,18 @@
   <meta property="og:title" content="N3UR0N">
   <meta property="og:description" content="Peer-to-peer AI capability network. Signed invokes. Capabilities as data. Apache-2.0.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="brand-mark.png">
+  <meta property="og:url" content="https://n3ur0n.net/">
+  <meta property="og:image" content="https://n3ur0n.net/screenshot.png">
+  <meta property="og:image:width" content="1600">
+  <meta property="og:image:height" content="1000">
+  <meta property="og:image:alt" content="N3UR0N desktop — Settings and Skills panel">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="N3UR0N">
+  <meta name="twitter:description" content="Peer-to-peer AI capability network. Signed invokes. Capabilities as data. Apache-2.0.">
+  <meta name="twitter:image" content="https://n3ur0n.net/screenshot.png">
   <meta name="theme-color" content="#0a0c10">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@500;600;700;800&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="fonts.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -22,11 +28,12 @@
 
   <div class="topbar">
     <div class="topbar-inner">
-      <a class="topbar-brand" href="#">
+      <a class="topbar-brand" href="#top">
         <img src="brand-mark.png" width="28" height="28" alt="">
         N3UR0N
       </a>
       <nav class="topbar-nav" aria-label="Primary">
+        <a href="#why">Why</a>
         <a href="#what">About</a>
         <a href="#how">How</a>
         <a href="#profiles">Profiles</a>
@@ -37,19 +44,20 @@
     </div>
   </div>
 
-  <header class="hero">
+  <header class="hero" id="top">
     <div class="hero-stage">
       <div class="hero-copy">
         <img class="hero-mark" src="brand-mark.png" width="140" height="140" alt="">
         <h1 class="hero-wordmark">N3UR0N</h1>
-        <p class="hero-line">A peer-to-peer network for AI capabilities.</p>
+        <p class="hero-line">AI skills, shared peer to peer.</p>
         <p class="hero-support">
-          Publish a skill. Invoke a peer’s skill. No broker, no central registry,
-          no vendor lock-in — every message signed, every capability a TOML file.
+          Run a small gateway — a neuron — that turns your local LLM, tools, or APIs
+          into skills any peer can call, and call theirs back. No platform in the
+          middle: your keys, your nodes, signed end to end.
         </p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="#start">Build from source</a>
-          <a class="btn btn-ghost" href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+          <a class="btn btn-primary" href="#start">Get started</a>
+          <a class="btn btn-ghost" href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">Build with us on GitHub</a>
         </div>
       </div>
       <div class="hero-visual">
@@ -69,6 +77,46 @@
   </header>
 
   <main id="main">
+    <section class="section" id="why">
+      <p class="section-label">Why it exists</p>
+      <h2>AI capabilities shouldn’t need a landlord.</h2>
+      <p class="lede">
+        Calling someone else’s model or tool usually means routing through a platform
+        that hosts it, meters it, and can revoke it. N3UR0N removes that middle.
+        Capabilities stay on the machines that run them, and any peer can discover and
+        invoke them directly — with cryptographic proof of who sent what.
+      </p>
+      <div class="split split-2">
+        <ul class="not-list why-list">
+          <li>
+            <span>Own your stack</span>
+            Your keys, your nodes, your peers. Swap the backend behind a skill without touching the callers.
+          </li>
+          <li>
+            <span>Portable skills</span>
+            A capability is a manifest on disk, not code baked into a binary. Share it, hot-reload it, move it.
+          </li>
+          <li>
+            <span>Trust without a broker</span>
+            Every invoke is an Ed25519-signed envelope. The sender ID <em>is</em> the key hash — nothing to register, no one to trust.
+          </li>
+        </ul>
+        <div class="why-demo">
+          <p class="why-demo-cap">One signed invoke, end to end:</p>
+          <pre><code># call a peer's "chat" capability
+n3ur0n send --endpoint https://peer.example \
+  --verb invoke \
+  --payload '{"capability":"chat",
+              "args":{"prompt":"Summarise this repo."}}'
+
+# → signed reply, verified against the sender's ID
+# {"model":"llama3.1:8b",
+#  "message":{"role":"assistant","content":"…"},
+#  "finish_reason":"stop"}</code></pre>
+        </div>
+      </div>
+    </section>
+
     <section class="section" id="what">
       <p class="section-label">What it is</p>
       <h2>Gateways, not another chatbot.</h2>
@@ -110,7 +158,7 @@
 
     <section class="section" id="how">
       <p class="section-label">How it works</p>
-      <h2>Three beats on the wire.</h2>
+      <h2>Publish, discover, invoke.</h2>
       <p class="lede">
         Four verbs today: <code>describe_self</code>, <code>get_known_peers</code>,
         <code>ping</code>, <code>invoke</code> — plus a blob side-channel when bytes
@@ -156,7 +204,7 @@
       <p class="start-note">
         <strong>No installers yet.</strong>
         Pre-built desktop packages, GitHub Releases artefacts, and a published container image are not first-class until a tagged release ships.
-        Until then: source or local Compose.
+        What works today: build from source, run a node, publish capabilities, and invoke peers — everything below is live.
       </p>
 
       <div class="start-block">
@@ -166,7 +214,8 @@
 ./target/release/n3ur0n init
 ./target/release/n3ur0n serve --port 4242 \
   --endpoint http://127.0.0.1:4242 \
-  --backend ollama --openai-model llama3.1:8b
+  --backend ollama --openai-model llama3.1:8b \
+  --bootstrap https://seed.n3ur0n.net
 # UI → http://localhost:4242/ui/</code></pre>
       </div>
 
@@ -186,20 +235,31 @@
 
     <section class="section" id="network">
       <p class="section-label">Network</p>
-      <h2>A public seed, when ready.</h2>
+      <h2>Bootstrap from the public seed.</h2>
       <div class="network-box">
         <p>
-          The project site lives here. A <strong>bootstrap seed peer</strong> —
-          a minimal publisher others can discover from — is planned as a
-          separate host (for example <code>seed.n3uron.com</code>), not this page.
+          A public <strong>bootstrap seed peer</strong> runs at
+          <code>seed.n3ur0n.net</code> — a minimal, protocol-only publisher.
+          Point a fresh node at it to discover your first peers and their capabilities.
         </p>
         <p>
-          Until it is online, bootstrap from peers you run or from Compose neighbours.
+          It carries no UI and answers protocol paths only; discovery cascades
+          from there to the rest of the network.
         </p>
-        <div class="seed-placeholder" title="Placeholder — not live yet">
+        <pre><code>n3ur0n serve --port 4242 \
+  --endpoint https://your-host.example \
+  --bootstrap https://seed.n3ur0n.net</code></pre>
+        <a
+          class="seed-live is-checking"
+          id="seed-status"
+          href="https://seed.n3ur0n.net/n3ur0n/v0/health"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Seed peer status: checking"
+        >
           <span class="dot" aria-hidden="true"></span>
-          seed.n3uron.com · coming later
-        </div>
+          seed.n3ur0n.net
+        </a>
       </div>
     </section>
   </main>
@@ -215,5 +275,25 @@
       </nav>
     </div>
   </footer>
+
+  <script>
+    (function () {
+      var el = document.getElementById("seed-status");
+      if (!el || !window.fetch) return;
+      var url = "https://seed.n3ur0n.net/n3ur0n/v0/health";
+      var ctrl = new AbortController();
+      var timer = setTimeout(function () { ctrl.abort(); }, 5000);
+      function set(state, label) {
+        clearTimeout(timer);
+        el.classList.remove("is-checking", "is-live", "is-down");
+        el.classList.add(state);
+        el.setAttribute("aria-label", "Seed peer status: " + label);
+      }
+      fetch(url, { signal: ctrl.signal, cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function () { set("is-live", "live"); })
+        .catch(function () { set("is-down", "unreachable"); });
+    })();
+  </script>
 </body>
 </html>

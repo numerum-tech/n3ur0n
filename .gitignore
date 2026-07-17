@@ -74,3 +74,6 @@ tmp/
 SESSION_STATE.md
 WORK_PLAN.md
 WORK_HISTORY/
+
+# local editing backups
+www/*.bak

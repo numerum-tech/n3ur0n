@@ -1,0 +1,50 @@
+# N3UR0N seed / publisher — systemd unit
+#
+# Install:
+#   sudo useradd --system --home /var/lib/n3ur0n --shell /usr/sbin/nologin n3ur0n
+#   sudo mkdir -p /var/lib/n3ur0n /etc/n3ur0n
+#   sudo chown -R n3ur0n:n3ur0n /var/lib/n3ur0n
+#   # put the release binary somewhere stable:
+#   sudo install -m 755 ./n3ur0n /usr/local/bin/n3ur0n
+#   sudo cp deploy/systemd/n3ur0n-seed.service /etc/systemd/system/
+#   sudo cp deploy/systemd/n3ur0n-seed.env.example /etc/n3ur0n/seed.env
+#   sudo nano /etc/n3ur0n/seed.env   # set ENDPOINT etc.
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now n3ur0n-seed
+#
+# Ops:
+#   sudo systemctl status n3ur0n-seed
+#   journalctl -u n3ur0n-seed -f
+#   curl -fsS http://127.0.0.1:4242/n3ur0n/v0/health
+
+[Unit]
+Description=N3UR0N seed publisher
+Documentation=https://github.com/numerum-tech/n3ur0n
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=n3ur0n
+Group=n3ur0n
+WorkingDirectory=/var/lib/n3ur0n
+EnvironmentFile=-/etc/n3ur0n/seed.env
+ExecStartPre=/bin/sh -c 'test -f ${N3UR0N_CONFIG_DIR}/keys.json || /usr/local/bin/n3ur0n init --config-dir ${N3UR0N_CONFIG_DIR}'
+ExecStart=/usr/local/bin/n3ur0n serve \
+    --config-dir ${N3UR0N_CONFIG_DIR} \
+    --port ${N3UR0N_PORT} \
+    --endpoint ${N3UR0N_ENDPOINT}
+Restart=on-failure
+RestartSec=3
+# Hardening (adjust if you need outbound quirks)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/n3ur0n
+# Listen only on loopback if nginx terminates TLS on the same host
+# (bind address is currently all interfaces via --port; firewall to 127.0.0.1
+# or put nginx + n3ur0n on the same machine and block 4242 from WAN.)
+
+[Install]
+WantedBy=multi-user.target

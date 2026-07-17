@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-15  
 **Status:** approved for implementation  
-**Role:** Canonical informative site for **n3uron.com**. Seed peer (e.g. `seed.n3uron.com`) is separate.
+**Role:** Canonical informative site for **n3ur0n.net** (project page). Seed peer (e.g. `seed.n3ur0n.net`) is separate.
 
 ## Decision
 

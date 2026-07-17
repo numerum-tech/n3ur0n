@@ -25,6 +25,8 @@
 
 html {
   scroll-behavior: smooth;
+  /* Offset anchor targets so headings clear the fixed topbar */
+  scroll-padding-top: 4.5rem;
 }
 
 body {
@@ -45,8 +47,7 @@ img {
 
 a {
   color: var(--teal);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.18em;
+  text-decoration: none;
 }
 
 a:hover {
@@ -297,7 +298,7 @@ a:hover {
   padding: 0.8rem 1.25rem;
   border-radius: 4px;
   font-family: var(--font-display);
-  font-weight: 650;
+  font-weight: 700;
   font-size: 0.95rem;
   letter-spacing: 0.02em;
   text-decoration: none;
@@ -446,8 +447,31 @@ main {
   display: block;
   color: var(--ink);
   font-family: var(--font-display);
-  font-weight: 650;
+  font-weight: 700;
   margin-bottom: 0.15rem;
+}
+
+/* Why — benefit list + live demo */
+.why-list {
+  align-content: start;
+}
+
+.why-list em {
+  font-style: normal;
+  color: var(--ink);
+}
+
+.why-demo {
+  min-width: 0;
+}
+
+.why-demo-cap {
+  margin: 0 0 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--teal);
 }
 
 /* Steps */
@@ -600,25 +624,71 @@ pre code {
   color: var(--muted);
 }
 
-.seed-placeholder {
+.seed-live {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 0.5rem;
+  margin-top: 1rem;
   font-family: var(--font-mono);
   font-size: 0.85rem;
-  color: var(--muted);
-  border: 1px dashed var(--line);
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid var(--line);
   padding: 0.55rem 0.8rem;
   border-radius: 4px;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 
-.seed-placeholder .dot {
-  width: 0.45rem;
-  height: 0.45rem;
+.seed-live .dot {
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 50%;
   background: var(--muted);
-  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+/* Checking — amber, no claim yet */
+.seed-live.is-checking {
+  border-color: rgba(232, 160, 84, 0.35);
+  background: rgba(232, 160, 84, 0.06);
+}
+.seed-live.is-checking .dot {
+  background: var(--amber);
+}
+
+/* Live — teal, pulsing */
+.seed-live.is-live {
+  border-color: rgba(94, 234, 212, 0.35);
+  background: rgba(94, 234, 212, 0.06);
+}
+.seed-live.is-live .dot {
+  background: var(--teal);
+  box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.5);
+  animation: pulse 2s ease-out infinite;
+}
+
+/* Down — muted red */
+.seed-live.is-down {
+  border-color: rgba(239, 120, 120, 0.35);
+  background: rgba(239, 120, 120, 0.06);
+  color: var(--muted);
+}
+.seed-live.is-down .dot {
+  background: #ef7878;
+}
+
+.seed-live:hover {
+  border-color: var(--teal);
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.5); }
+  70% { box-shadow: 0 0 0 0.5rem rgba(94, 234, 212, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(94, 234, 212, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seed-live .dot { animation: none; }
 }
 
 /* Footer */
