@@ -4,8 +4,8 @@
 #   sudo useradd --system --home /var/lib/n3ur0n --shell /usr/sbin/nologin n3ur0n
 #   sudo mkdir -p /var/lib/n3ur0n /etc/n3ur0n
 #   sudo chown -R n3ur0n:n3ur0n /var/lib/n3ur0n
-#   # put the release binary somewhere stable:
-#   sudo install -m 755 ./n3ur0n /usr/local/bin/n3ur0n
+#   # from repo after: cargo build --release -p n3ur0n-server
+#   sudo install -m 755 ./target/release/n3ur0n /usr/local/bin/n3ur0n
 #   sudo cp deploy/systemd/n3ur0n-seed.service /etc/systemd/system/
 #   sudo cp deploy/systemd/n3ur0n-seed.env.example /etc/n3ur0n/seed.env
 #   sudo nano /etc/n3ur0n/seed.env   # set ENDPOINT etc.
