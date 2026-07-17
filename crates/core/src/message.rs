@@ -204,4 +204,54 @@ mod tests {
         let env = sample(&kp1, json!({}));
         assert!(env.sign(&kp2).is_err());
     }
+
+    /// A fully deterministic envelope exercising the JCS edge cases that
+    /// matter to the signature: out-of-order object keys, nested
+    /// object/array, float vs integer number formatting, unicode escaping,
+    /// booleans and null. Built from parsed ids + a fixed timestamp so it
+    /// carries no random or clock state.
+    fn golden_envelope() -> Envelope {
+        Envelope {
+            sender_id: InstanceId::parse(
+                "n3:eytey6vdqdeoodtcpx3ugxsqyy3dxpjwp2dtgdjoauggdvjnyuaa",
+            )
+            .unwrap(),
+            recipient_id: InstanceId::parse(
+                "n3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .unwrap(),
+            timestamp: OffsetDateTime::parse(
+                "2026-01-02T03:04:05Z",
+                &time::format_description::well_known::Rfc3339,
+            )
+            .unwrap(),
+            nonce: "nonce-Ω-123".into(),
+            verb: ProtocolVerb::Invoke,
+            payload: json!({
+                "z": 1,
+                "a": { "nested": true, "list": [3, 2, 1], "flt": 1.5 },
+                "unicode": "héllo→",
+                "int": 42,
+                "empty": null,
+                "big": 1000000
+            }),
+            sender_endpoint: Some("https://seed.example/n3ur0n/v0".into()),
+        }
+    }
+
+    /// Golden JCS vector. The signature covers exactly these bytes, so this
+    /// string MUST NOT change across `serde_jcs` upgrades — a diff here means
+    /// canonicalization drifted and every signature on the network would
+    /// silently diverge. Regenerate only with a deliberate protocol bump.
+    const GOLDEN_JCS: &str = r#"{"nonce":"nonce-Ω-123","payload":{"a":{"flt":1.5,"list":[3,2,1],"nested":true},"big":1000000,"empty":null,"int":42,"unicode":"héllo→","z":1},"recipient_id":"n3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sender_endpoint":"https://seed.example/n3ur0n/v0","sender_id":"n3:eytey6vdqdeoodtcpx3ugxsqyy3dxpjwp2dtgdjoauggdvjnyuaa","timestamp":"2026-01-02T03:04:05Z","verb":"invoke"}"#;
+
+    #[test]
+    fn jcs_canonicalization_is_stable() {
+        let bytes = golden_envelope().canonical_bytes().unwrap();
+        let got = String::from_utf8(bytes).expect("JCS output is valid UTF-8");
+        assert_eq!(
+            got, GOLDEN_JCS,
+            "serde_jcs canonical output drifted — signatures would diverge network-wide"
+        );
+    }
 }
