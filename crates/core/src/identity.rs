@@ -6,7 +6,6 @@
 
 use data_encoding::BASE32_NOPAD;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -86,8 +85,12 @@ pub struct Keypair {
 impl Keypair {
     /// Generate a fresh random keypair using the operating system RNG.
     pub fn generate() -> Self {
-        let signing = SigningKey::generate(&mut OsRng);
-        Self { signing }
+        // rand 0.10 dropped `OsRng`; seed the key directly from the OS CSPRNG.
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed).expect("operating system RNG unavailable");
+        Self {
+            signing: SigningKey::from_bytes(&seed),
+        }
     }
 
     /// Reconstruct a keypair from its 32-byte secret seed.

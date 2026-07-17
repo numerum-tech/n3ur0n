@@ -4,10 +4,9 @@
 //! the node/server layer. This module knows only how to store + verify
 //! credentials and how to mint / lookup / revoke opaque session tokens.
 
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use data_encoding::BASE32_NOPAD;
-use rand::RngCore;
 use rusqlite::params;
 use sha2::{Digest, Sha256};
 
@@ -54,7 +53,11 @@ pub struct UserRecord {
 /// Hash a password using argon2id, PHC string format. Salt is generated
 /// per call. Result is safe to store verbatim.
 pub fn hash_password(password: &str) -> StorageResult<String> {
-    let salt = SaltString::generate(&mut OsRng);
+    // rand 0.10 removed OsRng; draw the 16-byte salt straight from the OS CSPRNG.
+    let mut salt_bytes = [0u8; 16];
+    getrandom::fill(&mut salt_bytes).expect("operating system RNG unavailable");
+    let salt = SaltString::encode_b64(&salt_bytes)
+        .map_err(|e| StorageError::Migration(format!("argon2 salt: {e}")))?;
     let argon = Argon2::default();
     argon
         .hash_password(password.as_bytes(), &salt)
@@ -78,7 +81,7 @@ pub fn verify_password(password: &str, stored: &str) -> StorageResult<bool> {
 /// token_hash)`. Only the hash is persisted.
 pub fn mint_session_token() -> (String, String) {
     let mut raw = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut raw);
+    getrandom::fill(&mut raw).expect("operating system RNG unavailable");
     let plaintext = BASE32_NOPAD.encode(&raw).to_lowercase();
     let hash = hash_session_token(&plaintext);
     (plaintext, hash)

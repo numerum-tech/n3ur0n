@@ -252,7 +252,7 @@ pub async fn discover_capability(node: &Node, capability: &str) -> NodeResult<us
 
     // ThreadRng is !Send; scope it so the future stays Send across awaits.
     let sample: Vec<&PeerRecord> = {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut s: Vec<&PeerRecord> = local_peers.iter().collect();
         s.shuffle(&mut rng);
         s.truncate(CASCADE_FAN_OUT);

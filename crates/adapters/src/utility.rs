@@ -10,7 +10,7 @@
 
 use async_trait::async_trait;
 use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
-use rand::Rng;
+use rand::RngExt;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -38,7 +38,7 @@ impl Backend for UtilityBackend {
                         "max must be >= min".into(),
                     ));
                 }
-                let n: i64 = rand::thread_rng().gen_range(min..=max);
+                let n: i64 = rand::rng().random_range(min..=max);
                 Ok(json!({ "value": n, "min": min, "max": max }))
             }
             "reverse" => {

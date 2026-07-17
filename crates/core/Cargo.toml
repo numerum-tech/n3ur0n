@@ -16,7 +16,7 @@ serde_jcs = { workspace = true }
 ed25519-dalek = { workspace = true }
 sha2 = { workspace = true }
 data-encoding = { workspace = true }
-rand = { workspace = true }
+getrandom = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
