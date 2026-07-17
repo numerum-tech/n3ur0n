@@ -5,6 +5,7 @@ pub mod auth;
 pub mod blob_gc;
 pub mod blobs;
 pub mod bootstrap;
+pub mod bootstrap_config;
 pub mod planner_config;
 pub mod files_api;
 pub mod http;

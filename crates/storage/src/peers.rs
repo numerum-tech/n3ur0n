@@ -88,6 +88,13 @@ pub fn list(db: &Db, limit: i64) -> StorageResult<Vec<PeerRecord>> {
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
 }
 
+/// Delete a peer by instance id. Returns `true` if a row was removed.
+pub fn delete(db: &Db, id: &str) -> StorageResult<bool> {
+    let conn = db.get()?;
+    let n = conn.execute("DELETE FROM peers WHERE id = ?1", [id])?;
+    Ok(n > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +116,8 @@ mod tests {
         upsert(&db, &rec).unwrap();
         let got = get(&db, "n3:abc").unwrap().unwrap();
         assert_eq!(got.endpoint, rec.endpoint);
+        assert!(delete(&db, "n3:abc").unwrap());
+        assert!(get(&db, "n3:abc").unwrap().is_none());
+        assert!(!delete(&db, "n3:abc").unwrap());
     }
 }

@@ -8,6 +8,8 @@
 //! - `/api/v0/peers`                 returns local peer directory
 //! - `/api/v0/peers/refresh`         signed describe_self + upsert
 //! - `/api/v0/peers/discover`        cascade depth-1
+//! - `/api/v0/peers/:id`            DELETE removes peer from directory only
+//! - `/api/v0/settings/bootstrap/remove`  drop one startup seed (no crawl)
 //! - `/api/v0/chat`                  proxies a signed invoke to a chosen peer
 //! - `/api/v0/invoke`                generic signed invoke
 //! - `/api/v0/conversations*`        conversation CRUD + dispatch (cookie scoped)
@@ -170,6 +172,11 @@ fn build_app(
             post(api_peers_discover).route_layer(require_perm!(crate::auth::perm::PEERS_WRITE)),
         )
         .route(
+            "/peers/:id",
+            axum::routing::delete(api_peers_delete)
+                .route_layer(require_perm!(crate::auth::perm::PEERS_WRITE)),
+        )
+        .route(
             "/chat",
             post(api_chat)
                 .layer(DefaultBodyLimit::max(LOCAL_API_LIMIT))
@@ -207,6 +214,22 @@ fn build_app(
             Router::new()
                 .route("/planner", axum::routing::put(api_planner_put))
                 .route_layer(require_perm!(crate::auth::perm::BACKENDS_WRITE))
+                .with_state(state.clone()),
+        )
+        .merge(
+            Router::new()
+                .route("/settings/bootstrap", get(api_bootstrap_get))
+                .route_layer(require_perm!(crate::auth::perm::PEERS_READ))
+                .with_state(state.clone()),
+        )
+        .merge(
+            Router::new()
+                .route("/settings/bootstrap", axum::routing::put(api_bootstrap_put))
+                .route(
+                    "/settings/bootstrap/remove",
+                    post(api_bootstrap_remove_seed),
+                )
+                .route_layer(require_perm!(crate::auth::perm::PEERS_WRITE))
                 .with_state(state.clone()),
         )
         .route_layer(middleware::from_fn(require_authed))
@@ -567,6 +590,39 @@ async fn api_peers_refresh(
     }
 }
 
+async fn api_peers_delete(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let endpoint = match peers_repo::get(state.node.db(), &id) {
+        Ok(Some(p)) => p.endpoint,
+        Ok(None) => {
+            return api_error(StatusCode::NOT_FOUND, "peer not found");
+        }
+        Err(e) => {
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+        }
+    };
+
+    match peers_repo::delete(state.node.db(), &id) {
+        Ok(true) => {}
+        Ok(false) => {
+            return api_error(StatusCode::NOT_FOUND, "peer not found");
+        }
+        Err(e) => {
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+        }
+    }
+
+    // Peer directory only — seed list is managed separately on the detail view.
+    Json(json!({
+        "ok": true,
+        "instance_id": id,
+        "endpoint": endpoint,
+    }))
+    .into_response()
+}
+
 #[derive(Debug, Deserialize)]
 struct InvokeRequest {
     peer_endpoint: String,
@@ -885,6 +941,120 @@ async fn api_planner_put(
             }
         }
         Err(e) => api_error(StatusCode::BAD_REQUEST, &e.to_string()),
+    }
+}
+
+async fn api_bootstrap_get(State(state): State<AppState>) -> impl IntoResponse {
+    let Some(config_dir) = state.config_dir.as_deref() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "bootstrap settings require a config directory",
+        );
+    };
+    let (peers, source) = crate::bootstrap_config::form_bootstrap_peers(config_dir);
+    let env_peers = crate::bootstrap_config::env_bootstrap_peers();
+    Json(json!({
+        "peers": peers,
+        "source": source,
+        "env_peers": env_peers,
+        "public_seed": crate::bootstrap_config::PUBLIC_SEED_ENDPOINT,
+        "saved": crate::bootstrap_config::load_bootstrap_user_config(config_dir).is_some(),
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapPutRequest {
+    #[serde(default)]
+    peers: Vec<String>,
+    /// Optional raw textarea (CSV / whitespace). Merged with `peers` when set.
+    #[serde(default)]
+    peers_text: Option<String>,
+}
+
+async fn api_bootstrap_put(
+    State(state): State<AppState>,
+    Json(payload): Json<BootstrapPutRequest>,
+) -> impl IntoResponse {
+    let Some(config_dir) = state.config_dir.as_deref() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "bootstrap settings require a config directory",
+        );
+    };
+
+    let mut raw = payload.peers;
+    if let Some(text) = payload.peers_text.as_deref() {
+        raw.extend(crate::bootstrap_config::parse_peer_list(text));
+    }
+    let peers = crate::bootstrap_config::normalize_peer_list(raw);
+
+    let cfg = crate::bootstrap_config::BootstrapUserConfig {
+        peers: peers.clone(),
+    };
+    if let Err(e) = crate::bootstrap_config::save_bootstrap_user_config(config_dir, &cfg) {
+        return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+
+    let outcomes = if peers.is_empty() {
+        Vec::new()
+    } else {
+        n3ur0n_node::discovery::bootstrap_transitive(
+            &state.node,
+            &peers,
+            n3ur0n_node::discovery::DEFAULT_BOOTSTRAP_DEPTH,
+        )
+        .await
+    };
+
+    let results: Vec<Value> = outcomes
+        .iter()
+        .map(|o| {
+            json!({
+                "endpoint": o.endpoint,
+                "instance_id": o.instance_id,
+                "error": o.error,
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "ok": true,
+        "peers": peers,
+        "outcomes": results,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapRemoveRequest {
+    endpoint: String,
+}
+
+/// Drop one endpoint from `bootstrap.toml` without re-crawling.
+async fn api_bootstrap_remove_seed(
+    State(state): State<AppState>,
+    Json(payload): Json<BootstrapRemoveRequest>,
+) -> impl IntoResponse {
+    let Some(config_dir) = state.config_dir.as_deref() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "bootstrap settings require a config directory",
+        );
+    };
+    let endpoint = payload.endpoint.trim().trim_end_matches('/').to_string();
+    if endpoint.is_empty() {
+        return api_error(StatusCode::BAD_REQUEST, "endpoint required");
+    }
+    match crate::bootstrap_config::remove_endpoint_from_bootstrap(config_dir, &endpoint) {
+        Ok(removed) => Json(json!({
+            "ok": true,
+            "endpoint": endpoint,
+            "removed": removed,
+            "peers": crate::bootstrap_config::form_bootstrap_peers(config_dir).0,
+        }))
+        .into_response(),
+        Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 

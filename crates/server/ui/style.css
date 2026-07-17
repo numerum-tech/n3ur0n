@@ -486,6 +486,19 @@ select.form-control,
     display: flex;
     gap: 8px;
     padding-top: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.settings-form .form-actions button.secondary {
+    margin: 0;
+}
+textarea.form-control,
+.settings-form .form-textarea {
+    resize: vertical;
+    min-height: 4.5rem;
+    line-height: 1.45;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
 }
 .search-control {
     display: flex;

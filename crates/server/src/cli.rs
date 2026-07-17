@@ -177,12 +177,14 @@ pub(crate) async fn init(args: InitArgs) -> Result<()> {
 
 pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
     let dir = args.config_dir.unwrap_or_else(bootstrap::default_config_dir);
-    let bootstrap_peers: Vec<String> = args
+    let cli_peers: Vec<String> = args
         .bootstrap
         .into_iter()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
+    let bootstrap_peers =
+        n3ur0n_server::bootstrap_config::resolve_startup_peers(&cli_peers, &dir);
 
     // v0.3 manifest mode trumps the compile-time --backend selector.
     let backend_kind = if let Some(manifest_dir) = args.manifest_dir.clone() {

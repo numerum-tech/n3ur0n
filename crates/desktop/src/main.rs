@@ -151,18 +151,53 @@ async fn start_server() -> Result<u16> {
     maybe_scaffold_ollama_backend(&config_dir).await.ok();
 
     // Consumer profile: load_node in manifest mode pointed at config_dir
-    // (which now contains backends/ + caps/). No public endpoint, no
-    // bootstrap peers by default.
+    // (which now contains backends/ + caps/). No public endpoint.
+    // Bootstrap peers: saved bootstrap.toml, else empty (CLI/env N/A here;
+    // Settings → Gateways can set seeds; env still fills the form via API).
+    let bootstrap_peers =
+        n3ur0n_server::bootstrap_config::resolve_startup_peers(&[], &config_dir);
+    // Also honour process env when no file yet (desktop without CLI flags).
+    let bootstrap_peers = if bootstrap_peers.is_empty() {
+        n3ur0n_server::bootstrap_config::env_bootstrap_peers()
+    } else {
+        bootstrap_peers
+    };
+
     let node = bootstrap::load_node(
         &config_dir,
         None, // endpoint = None: consumer, no public listener
-        Vec::new(),
+        bootstrap_peers.clone(),
         BackendKind::Manifest {
             dir: config_dir.clone(),
         },
     )
     .await
     .context("loading node")?;
+
+    if !bootstrap_peers.is_empty() {
+        let bg = node.clone();
+        let seeds = bootstrap_peers.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let outcomes = n3ur0n_node::discovery::bootstrap_transitive(
+                &bg,
+                &seeds,
+                n3ur0n_node::discovery::DEFAULT_BOOTSTRAP_DEPTH,
+            )
+            .await;
+            for o in &outcomes {
+                match (&o.instance_id, &o.error) {
+                    (Some(id), _) => {
+                        info!(endpoint = %o.endpoint, peer = %id, "bootstrap ok")
+                    }
+                    (None, Some(err)) => {
+                        warn!(endpoint = %o.endpoint, error = %err, "bootstrap failed")
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
 
     // Pick a free local port.
     let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))

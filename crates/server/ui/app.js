@@ -1205,8 +1205,18 @@ function closeInspector() {
     overlay.setAttribute("aria-hidden", "true");
 }
 
-function openPeerInspector(peerId) {
-    const peer = _peersCache.peers.find(p => p.instance_id === peerId);
+async function openPeerInspector(peerId) {
+    let peer = _peersCache.peers.find(p => p.instance_id === peerId);
+    if (!peer) {
+        // Gateways page may open detail without Network having loaded the cache.
+        try {
+            const d = await api("GET", "/api/v0/peers");
+            _peersCache = { self: d.self || "?", peers: d.peers || [] };
+            peer = _peersCache.peers.find(p => p.instance_id === peerId);
+        } catch {
+            /* fall through */
+        }
+    }
     if (!peer) {
         openInspector("Peer not found", `<div class="section">${escapeHtml(peerId)}</div>`);
         return;
@@ -1216,6 +1226,15 @@ function openPeerInspector(peerId) {
         ? caps.map(c => `<span class="badge" data-cap="${escapeHtml(c.name)}">${escapeHtml(c.name)}</span>`).join("")
         : '<span class="row-sub">no cached caps</span>';
 
+    let isSeeder = false;
+    try {
+        const cfg = await api("GET", "/api/v0/settings/bootstrap");
+        const seeds = (cfg.peers || []).map(normalizeGatewayEndpoint);
+        isSeeder = seeds.includes(normalizeGatewayEndpoint(peer.endpoint));
+    } catch {
+        /* ignore — seed status optional */
+    }
+
     const html = `
         <section class="section">
             <h3>identity</h3>
@@ -1223,7 +1242,16 @@ function openPeerInspector(peerId) {
                 <dt>instance_id</dt><dd><code>${escapeHtml(peer.instance_id)}</code></dd>
                 <dt>endpoint</dt><dd><code>${escapeHtml(peer.endpoint)}</code></dd>
                 <dt>alias</dt><dd>${peer.alias ? escapeHtml(peer.alias) : "<em>none</em>"}</dd>
+                <dt>${escapeHtml(t("settings.gateways.seeder.label"))}</dt>
+                <dd>${isSeeder
+                    ? escapeHtml(t("settings.gateways.seeder.yes"))
+                    : escapeHtml(t("settings.gateways.seeder.no"))}</dd>
             </dl>
+            <div class="card-actions" style="margin-top: 10px;">
+                ${isSeeder ? `<button type="button" id="pi-unseed">${escapeHtml(t("settings.gateways.unseed"))}</button>` : ""}
+                <button type="button" id="pi-delete" class="danger">${escapeHtml(t("settings.gateways.delete"))}</button>
+            </div>
+            <div id="pi-status" class="row-sub" hidden></div>
         </section>
         <section class="section">
             <h3>capabilities (${caps.length})</h3>
@@ -1242,6 +1270,52 @@ function openPeerInspector(peerId) {
         </section>` : ""}
     `;
     openInspector(`peer · ${shortId(peer.instance_id)}`, html);
+
+    document.getElementById("pi-unseed")?.addEventListener("click", async () => {
+        const status = document.getElementById("pi-status");
+        if (!(await confirmModal(
+            t("settings.gateways.unseed_confirm", { endpoint: peer.endpoint }),
+            { title: t("settings.gateways.unseed"), okLabel: t("settings.gateways.unseed"), danger: false },
+        ))) return;
+        try {
+            await api("POST", "/api/v0/settings/bootstrap/remove", { endpoint: peer.endpoint });
+            if (status) {
+                status.hidden = false;
+                status.textContent = t("settings.gateways.unseed_done");
+            }
+            await openPeerInspector(peer.instance_id);
+        } catch (err) {
+            if (status) {
+                status.hidden = false;
+                status.textContent = err.message || String(err);
+            }
+        }
+    });
+
+    document.getElementById("pi-delete")?.addEventListener("click", async () => {
+        const status = document.getElementById("pi-status");
+        if (!(await confirmModal(
+            t("settings.gateways.delete_confirm", { endpoint: peer.endpoint }),
+            { title: t("settings.gateways.delete_title"), okLabel: t("button.delete"), danger: true },
+        ))) return;
+        try {
+            await api("DELETE", `/api/v0/peers/${encodeURIComponent(peer.instance_id)}`);
+            _peersCache.peers = _peersCache.peers.filter(p => p.instance_id !== peer.instance_id);
+            closeInspector();
+            // Refresh Gateways cards if that page is visible.
+            const settingsBody = document.getElementById("settings-page-body");
+            if (settingsBody && document.getElementById("settings-page-title")?.textContent === t("settings.gateways.title")) {
+                await renderGatewaysCards();
+            } else if (typeof renderNetworkList === "function") {
+                renderNetworkList();
+            }
+        } catch (err) {
+            if (status) {
+                status.hidden = false;
+                status.textContent = err.message || String(err);
+            }
+        }
+    });
 
     // Cross-link: clicking a cap chip jumps to the cap inspector if the
     // cap exists locally (Skills cache). Falls back to a "remote cap"
@@ -1953,7 +2027,15 @@ async function renderGatewaysCards() {
     const body = document.getElementById("settings-page-body");
     try {
         const d = await api("GET", "/api/v0/peers");
-        const peers = d.peers || [];
+        _peersCache = { self: d.self || "?", peers: d.peers || [] };
+        // One card per gateway: prefer instance_id, fall back to normalized endpoint.
+        const seen = new Set();
+        const peers = (d.peers || []).filter((p) => {
+            const key = p.instance_id || normalizeGatewayEndpoint(p.endpoint);
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
         if (peers.length === 0) {
             body.innerHTML = `
                 <div class="empty-state">
@@ -2369,19 +2451,24 @@ function renderAboutPage() {
     `;
 }
 
+function normalizeGatewayEndpoint(url) {
+    return (url || "").trim().replace(/\/+$/, "");
+}
+
 function openGatewayForm() {
     const overlay = document.getElementById("inspector");
-    document.getElementById("inspector-title").textContent = "Add gateway (remote n3ur0n peer)";
+    document.getElementById("inspector-title").textContent = t("settings.gateways.add_title");
     document.getElementById("inspector-body").innerHTML = `
         <section class="section">
-            <p>Pull <code>describe_self</code> from a remote n3ur0n endpoint and add it to
-            your peer directory. The endpoint will be signed-pinged immediately to verify it
-            is reachable.</p>
-            <form class="kv" onsubmit="return false;">
-                <label for="gf-url">endpoint</label>
-                <input id="gf-url" type="url" required placeholder="http://node-a:4242 · https://peer.example.com:4242" />
+            <p>${escapeHtml(t("settings.gateways.add_help"))}</p>
+            <form class="kv" id="gateway-add-form" onsubmit="return false;">
+                <label for="gf-url">${escapeHtml(t("settings.gateways.endpoint"))}</label>
+                <input id="gf-url" class="form-control" type="url" required
+                    placeholder="${escapeHtml(t("settings.gateways.endpoint_placeholder"))}" />
             </form>
+            <p class="row-sub" id="gf-hint"></p>
             <div class="form-actions">
+                <button id="gf-use-public" type="button" class="secondary">${escapeHtml(t("settings.gateways.bootstrap.use_public"))}</button>
                 <button id="gf-cancel" type="button" class="secondary">${escapeHtml(t("button.back"))}</button>
                 <button id="gf-save" type="button" class="primary">${escapeHtml(t("button.save"))}</button>
             </div>
@@ -2390,19 +2477,75 @@ function openGatewayForm() {
     `;
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
+
+    const urlInput = document.getElementById("gf-url");
+    const hint = document.getElementById("gf-hint");
+    const usePublicBtn = document.getElementById("gf-use-public");
+    let publicSeed = "https://seed.n3ur0n.net";
+    /** @type {Set<string>} */
+    let knownEndpoints = new Set();
+
+    (async () => {
+        try {
+            const [cfg, peersResp] = await Promise.all([
+                api("GET", "/api/v0/settings/bootstrap").catch(() => null),
+                api("GET", "/api/v0/peers").catch(() => ({ peers: [] })),
+            ]);
+            if (cfg?.public_seed) publicSeed = cfg.public_seed;
+            knownEndpoints = new Set(
+                (peersResp.peers || [])
+                    .map((p) => normalizeGatewayEndpoint(p.endpoint))
+                    .filter(Boolean),
+            );
+            // Public seed already a gateway → no need to offer it again.
+            if (knownEndpoints.has(normalizeGatewayEndpoint(publicSeed)) && usePublicBtn) {
+                usePublicBtn.disabled = true;
+                usePublicBtn.title = t("settings.gateways.public_already");
+                if (hint) hint.textContent = t("settings.gateways.public_already");
+            }
+        } catch {
+            /* ignore */
+        }
+    })();
+
+    usePublicBtn?.addEventListener("click", () => {
+        const norm = normalizeGatewayEndpoint(publicSeed);
+        if (knownEndpoints.has(norm)) {
+            if (hint) hint.textContent = t("settings.gateways.public_already");
+            return;
+        }
+        if (urlInput) urlInput.value = publicSeed;
+        if (hint) hint.textContent = "";
+    });
     document.getElementById("gf-cancel")?.addEventListener("click", closeInspector);
     document.getElementById("gf-save")?.addEventListener("click", async () => {
-        const url = document.getElementById("gf-url").value.trim();
+        const url = normalizeGatewayEndpoint(urlInput?.value || "");
         const status = document.getElementById("gf-status");
-        if (!url) { status.textContent = "endpoint required"; return; }
-        status.textContent = "adding…";
+        if (!url) { status.textContent = t("settings.gateways.endpoint_required"); return; }
+        if (knownEndpoints.has(url)) {
+            status.textContent = t("settings.gateways.already_added");
+            return;
+        }
+        status.textContent = t("settings.gateways.adding");
         try {
             const r = await api("POST", "/api/v0/peers/refresh", { endpoint: url });
-            status.textContent = `added · ${r.instance_id || "ok"}`;
-            await renderGatewaysList();
+            // Remember as a startup seed (deduped) for next cold start crawl.
+            try {
+                const cfg = await api("GET", "/api/v0/settings/bootstrap");
+                const peers = Array.isArray(cfg.peers) ? cfg.peers.slice() : [];
+                if (!peers.some((p) => normalizeGatewayEndpoint(p) === url)) {
+                    peers.push(url);
+                    await api("PUT", "/api/v0/settings/bootstrap", { peers });
+                }
+            } catch {
+                /* peer was added; bootstrap.toml update is best-effort */
+            }
+            knownEndpoints.add(url);
+            status.textContent = t("settings.gateways.added", { id: r.instance_id || "ok" });
+            await renderGatewaysCards();
             setTimeout(closeInspector, 600);
         } catch (e) {
-            status.textContent = `failed: ${e.message}`;
+            status.textContent = t("settings.gateways.add_failed", { msg: e.message || "" });
         }
     });
 }
