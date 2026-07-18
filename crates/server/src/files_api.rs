@@ -19,7 +19,7 @@ const CLIENT_ID_COOKIE: &str = "n3ur0n_client_id";
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/files", get(list_files).post(upload_file))
-        .route("/files/*hash", get(get_file_meta).delete(delete_file))
+        .route("/files/{*hash}", get(get_file_meta).delete(delete_file))
         .route("/cap-jobs/blobs", get(list_cap_job_blobs))
 }
 

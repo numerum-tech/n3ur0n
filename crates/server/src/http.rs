@@ -172,7 +172,7 @@ fn build_app(
             post(api_peers_discover).route_layer(require_perm!(crate::auth::perm::PEERS_WRITE)),
         )
         .route(
-            "/peers/:id",
+            "/peers/{id}",
             axum::routing::delete(api_peers_delete)
                 .route_layer(require_perm!(crate::auth::perm::PEERS_WRITE)),
         )
@@ -190,15 +190,15 @@ fn build_app(
         )
         .route("/conversations", get(conv_list).post(conv_create))
         .route(
-            "/conversations/:id",
+            "/conversations/{id}",
             get(conv_get).patch(conv_patch).delete(conv_delete),
         )
         .route(
-            "/conversations/:id/messages",
+            "/conversations/{id}/messages",
             post(conv_messages).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
         .route(
-            "/conversations/:id/messages/stream",
+            "/conversations/{id}/messages/stream",
             post(conv_messages_stream).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
         .merge(
@@ -269,7 +269,7 @@ fn build_app(
         .route("/", get(|| async { Redirect::permanent("/ui/") }))
         .route("/ui", get(ui_index))
         .route("/ui/", get(ui_index))
-        .route("/ui/*path", get(ui_static))
+        .route("/ui/{*path}", get(ui_static))
         .layer(TraceLayer::new_for_http())
 }
 

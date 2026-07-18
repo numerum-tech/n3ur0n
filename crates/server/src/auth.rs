@@ -249,7 +249,7 @@ pub fn router(state: AuthState) -> Router {
     use crate::require_perm;
     let users_routes = Router::new()
         .route("/users", get(list_users).post(create_user_route))
-        .route("/users/:id", axum::routing::patch(update_user_route).delete(delete_user_route))
+        .route("/users/{id}", axum::routing::patch(update_user_route).delete(delete_user_route))
         .route_layer(require_perm!(perm::USERS_WRITE))
         .with_state(state.clone());
     Router::new()

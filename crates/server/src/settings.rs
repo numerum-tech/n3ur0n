@@ -58,7 +58,7 @@ pub fn router(
     let backends_write = Router::new()
         .route("/backends", axum::routing::post(create_backend))
         .route(
-            "/backends/:name",
+            "/backends/{name}",
             axum::routing::delete(delete_backend),
         )
         .route_layer(require_perm!(perm::BACKENDS_WRITE))
@@ -66,7 +66,7 @@ pub fn router(
     // Read-only backend routes — any authenticated user (BACKENDS_READ).
     let backends_read = Router::new()
         .route("/backends", get(list_backends))
-        .route("/backends/:name", get(get_backend))
+        .route("/backends/{name}", get(get_backend))
         .route_layer(require_perm!(perm::BACKENDS_READ))
         .with_state(state.clone());
 
@@ -74,7 +74,7 @@ pub fn router(
     let caps_write = Router::new()
         .route("/caps/manifests", axum::routing::post(upsert_cap_manifest))
         .route(
-            "/caps/manifests/:name",
+            "/caps/manifests/{name}",
             axum::routing::delete(delete_cap_manifest),
         )
         .route_layer(require_perm!(perm::CAPS_WRITE))
@@ -82,7 +82,7 @@ pub fn router(
     // Read-only cap manifest routes — any authenticated user.
     let caps_read = Router::new()
         .route("/caps/manifests", get(list_cap_manifests))
-        .route("/caps/manifests/:name", get(get_cap_manifest))
+        .route("/caps/manifests/{name}", get(get_cap_manifest))
         .route_layer(require_perm!(perm::CAPS_READ))
         .with_state(state);
 

@@ -28,7 +28,7 @@ const DEFAULT_PER_PEER_BLOBS: i64 = 50;
 /// Blob protocol routes (mount under `/n3ur0n/v0` with shared [`AppState`]).
 pub(crate) fn routes() -> Router<AppState> {
     Router::new().route(
-        "/blobs/*hash",
+        "/blobs/{*hash}",
         put(put_blob).get(get_blob).head(head_blob).delete(delete_blob),
     )
 }
