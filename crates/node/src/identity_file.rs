@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use data_encoding::HEXLOWER;
 use n3ur0n_core::{InstanceId, Keypair};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::error::{NodeError, NodeResult};
 
@@ -16,7 +17,8 @@ use crate::error::{NodeError, NodeResult};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdentityFile {
     /// Canonical id derived from the public key. Stored for human readability;
-    /// it is recomputed on load and mismatches reject the file.
+    /// it is recomputed from the secret on load — a stale value warns and
+    /// self-heals rather than rejecting the file.
     pub instance_id: InstanceId,
     /// Hex-lower of the 32-byte Ed25519 secret seed.
     pub secret_hex: String,
@@ -35,6 +37,13 @@ impl IdentityFile {
     }
 
     /// Reconstruct the keypair encoded by this file.
+    ///
+    /// The secret is the source of truth; `instance_id` is a derived,
+    /// human-readable cache. A mismatch means the cache is stale — e.g. after
+    /// a change to the id-derivation (see the 2026-07-18 truncation) — or the
+    /// field was hand-edited. Neither affects identity, since the running id is
+    /// always recomputed from the secret. We therefore warn and self-heal
+    /// rather than reject, so existing `keys.json` files survive the change.
     pub fn into_keypair(self) -> NodeResult<Keypair> {
         let bytes = HEXLOWER
             .decode(self.secret_hex.as_bytes())
@@ -44,11 +53,11 @@ impl IdentityFile {
             .map_err(|_| NodeError::Identity("secret must be 32 bytes".into()))?;
         let kp = Keypair::from_secret_bytes(&arr);
         if kp.instance_id() != self.instance_id {
-            return Err(NodeError::Identity(format!(
-                "stored instance_id {} does not match secret-derived {}",
-                self.instance_id,
-                kp.instance_id()
-            )));
+            warn!(
+                stored = %self.instance_id,
+                derived = %kp.instance_id(),
+                "keys.json instance_id is stale; using secret-derived id"
+            );
         }
         Ok(kp)
     }
@@ -126,13 +135,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_tampered_instance_id() {
+    fn self_heals_stale_instance_id() {
+        // A stale/edited instance_id must not brick the file: the secret is
+        // authoritative and the loaded keypair derives the correct id.
         let kp = Keypair::generate();
         let file = IdentityFile {
-            instance_id: Keypair::generate().instance_id(),
+            instance_id: Keypair::generate().instance_id(), // wrong/stale
             secret_hex: HEXLOWER.encode(&kp.secret_bytes()),
             public_hex: HEXLOWER.encode(kp.public_key().0.as_bytes()),
         };
-        assert!(file.into_keypair().is_err());
+        let loaded = file.into_keypair().expect("loads despite stale id");
+        assert_eq!(loaded.instance_id(), kp.instance_id());
     }
 }
