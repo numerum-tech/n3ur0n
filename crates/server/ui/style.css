@@ -1414,8 +1414,8 @@ button.secondary:hover,
     border-radius: 6px;
     max-width: 85%;
     white-space: pre-wrap;
-    font-size: var(--fs-md);
-    line-height: 1.45;
+    font-size: var(--fs-sm);
+    line-height: 1.5;
     word-wrap: break-word;
 }
 
