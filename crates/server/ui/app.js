@@ -2407,7 +2407,7 @@ async function renderAboutPage() {
                 <img class="brand-mark" src="/ui/brand-mark.png" width="36" height="36" alt="" aria-hidden="true"
                     style="border-radius:8px;object-fit:contain;background:transparent;">
                 <span class="card-title">N3UR0N</span>
-                <span class="card-kind">v0.4.0</span>
+                <span class="card-kind">v0.4.1</span>
             </div>
             <div class="card-meta">
                 A peer-to-peer gateway for AI capabilities — local + remote LLMs,
