@@ -1,4 +1,0 @@
-# Disable Jekyll processing — docs/ is a hand-written static site.
-# This avoids Jekyll choking on filenames it doesn't understand and
-# speeds up Pages deploys.
-theme: null
