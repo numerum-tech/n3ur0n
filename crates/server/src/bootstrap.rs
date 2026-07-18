@@ -158,9 +158,10 @@ async fn load_manifest_registry(dir: &Path) -> Result<(CapabilityRegistry, Backe
 }
 
 /// Backend selector resolved from CLI flags / env at startup.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum BackendKind {
     /// Identity-style adapter; useful for cluster smoke and tests.
+    #[default]
     Echo,
     /// Multi-cap utility backend: time, random_int, reverse, string_length.
     Utility,
@@ -171,12 +172,6 @@ pub enum BackendKind {
     /// The single compile-time backend slot is filled with an inert
     /// placeholder (EchoBackend) and never invoked.
     Manifest { dir: PathBuf },
-}
-
-impl Default for BackendKind {
-    fn default() -> Self {
-        Self::Echo
-    }
 }
 
 fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {

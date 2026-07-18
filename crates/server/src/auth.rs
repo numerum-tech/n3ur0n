@@ -266,7 +266,6 @@ fn forbidden(perm: &str) -> Response {
 // ---------------------------------------------------------------------------
 
 pub fn router(state: AuthState) -> Router {
-    use crate::require_perm;
     let users_routes = Router::new()
         .route("/users", get(list_users).post(create_user_route))
         .route(
