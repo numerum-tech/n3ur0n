@@ -1159,6 +1159,19 @@ button.secondary:hover,
     font-size: var(--fs-sm);
     line-height: 1.5;
 }
+/* Emphasised card-meta: same size, brighter text (was inline overrides). */
+.card-meta.strong {
+    color: var(--text);
+}
+/* Form field label — muted caption above an input (was repeated inline). */
+.field-label {
+    display: block;
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+}
+.field-label.tight { margin-top: 8px; }
+.field-label.flush { margin-top: 0; }
 .card-meta code {
     color: var(--text);
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
