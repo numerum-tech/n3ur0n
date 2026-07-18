@@ -58,28 +58,28 @@ jobs:
             target: x86_64-unknown-linux-gnu
             label: linux-x86_64
             artifact: n3ur0n
-            asset: n3ur0n-linux-x86_64
+            asset: n3ur0n-server-linux-x86_64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             label: linux-aarch64
             artifact: n3ur0n
-            asset: n3ur0n-linux-aarch64
+            asset: n3ur0n-server-linux-aarch64
             cross: true
           - os: macos-latest
             target: x86_64-apple-darwin
             label: macos-x86_64
             artifact: n3ur0n
-            asset: n3ur0n-macos-x86_64
+            asset: n3ur0n-server-macos-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
             label: macos-aarch64
             artifact: n3ur0n
-            asset: n3ur0n-macos-aarch64
+            asset: n3ur0n-server-macos-aarch64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             label: windows-x86_64
             artifact: n3ur0n.exe
-            asset: n3ur0n-windows-x86_64.exe
+            asset: n3ur0n-server-windows-x86_64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -180,17 +180,36 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "crates/desktop -> target"
+      # Build only (no tagName -> tauri-action does not upload); we rename the
+      # installers to n3ur0n-desktop-<label>.<ext> and upload them ourselves.
       - name: Build desktop installer
+        id: tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: crates/desktop
-          tagName: ${{ needs.create-release.outputs.tag }}
-          releaseName: ${{ needs.create-release.outputs.tag }}
-          releaseDraft: true
-          prerelease: false
           args: ${{ matrix.tauri_args }}
+      - name: Rename installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          # jq is preinstalled on all GitHub-hosted runners. Keep only the
+          # end-user installers (drop updater .app.tar.gz / .sig artefacts).
+          echo '${{ steps.tauri.outputs.artifactPaths }}' | jq -r '.[]' | while read -r p; do
+            case "$p" in
+              *.dmg)      cp "$p" "dist/n3ur0n-desktop-${{ matrix.label }}.dmg" ;;
+              *.AppImage) cp "$p" "dist/n3ur0n-desktop-${{ matrix.label }}.AppImage" ;;
+              *.deb)      cp "$p" "dist/n3ur0n-desktop-${{ matrix.label }}.deb" ;;
+              *.msi)      cp "$p" "dist/n3ur0n-desktop-${{ matrix.label }}.msi" ;;
+            esac
+          done
+          ls -la dist/
+      - name: Upload installers
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: dist/*
 
   publish-release:
     name: Publish release
