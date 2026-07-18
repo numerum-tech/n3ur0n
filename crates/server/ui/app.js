@@ -1788,6 +1788,10 @@ function activateSettingsSection(name) {
     } else if (name === "ui") {
         renderUiPage();
     } else if (name === "users") {
+        title.textContent = t("settings.users.title");
+        sub.textContent = t("settings.users.subtitle");
+        actions.innerHTML = `<button class="primary" id="users-add">${escapeHtml(t("settings.users.add"))}</button>`;
+        document.getElementById("users-add")?.addEventListener("click", () => openUserCreateForm());
         renderUsersPage();
     } else if (name === "about") {
         renderAboutPage();
@@ -2099,8 +2103,6 @@ function gatewayCard(p) {
 
 async function renderUsersPage() {
     const body = document.getElementById("settings-page-body");
-    document.getElementById("settings-page-title").textContent = t("settings.users.title");
-    document.getElementById("settings-page-subtitle").textContent = t("settings.users.subtitle");
     let users = [];
     try {
         const r = await api("GET", "/api/v0/users");
@@ -2111,9 +2113,6 @@ async function renderUsersPage() {
     }
     const me = auth.state();
     body.innerHTML = `
-        <div class="caps-toolbar">
-            <button class="primary" id="users-add">${escapeHtml(t("settings.users.add"))}</button>
-        </div>
         <div class="card-grid">
             ${users.map(u => `
                 <article class="card" data-user="${u.id}">
@@ -2131,7 +2130,6 @@ async function renderUsersPage() {
             `).join("")}
         </div>
     `;
-    document.getElementById("users-add")?.addEventListener("click", () => openUserCreateForm());
     body.querySelectorAll('.card [data-action="delete"]').forEach(btn => {
         btn.addEventListener("click", async () => {
             const id = btn.closest(".card").dataset.user;
