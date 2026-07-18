@@ -74,8 +74,6 @@
   "settings.nav.caps.sub": "Capability manifests you publish",
   "settings.nav.gateways": "Gateways",
   "settings.nav.gateways.sub": "Remote n3ur0n peers you trust",
-  "settings.nav.identity": "Identity",
-  "settings.nav.identity.sub": "Your instance key",
   "settings.nav.ui": "Interface",
   "settings.nav.ui.sub": "Language, theme",
   "settings.nav.about": "About",

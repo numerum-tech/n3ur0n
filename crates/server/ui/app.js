@@ -1789,8 +1789,6 @@ function activateSettingsSection(name) {
         renderUiPage();
     } else if (name === "users") {
         renderUsersPage();
-    } else if (name === "identity") {
-        renderIdentityPage();
     } else if (name === "about") {
         renderAboutPage();
     }
@@ -2099,30 +2097,6 @@ function gatewayCard(p) {
 
 // ---- Identity + About sections ----
 
-async function renderIdentityPage() {
-    const body = document.getElementById("settings-page-body");
-    document.getElementById("settings-page-title").textContent = "Identity";
-    document.getElementById("settings-page-subtitle").textContent =
-        "Your cryptographic identity. Used to sign every call you make. Treat the private key like a password — it lives in the app config dir.";
-    let me = { instance_id: "?" };
-    try { me = await api("GET", "/api/v0/whoami"); } catch { /* ignore */ }
-    body.innerHTML = `
-        <article class="card" style="max-width: 720px;">
-            <div class="card-head">
-                <div class="card-icon">⊙</div>
-                <span class="card-title">Instance ID</span>
-            </div>
-            <div class="card-meta">
-                <code style="word-break: break-all; display: block; padding: 8px;">${escapeHtml(me.instance_id || "?")}</code>
-            </div>
-            <p class="card-meta">
-                Derived from your public key. Anyone receiving a signed call from you sees this id.
-                Keys live in <code>keys.json</code> in your config dir (file mode 0600).
-            </p>
-        </article>
-    `;
-}
-
 async function renderUsersPage() {
     const body = document.getElementById("settings-page-body");
     document.getElementById("settings-page-title").textContent = t("settings.users.title");
@@ -2422,11 +2396,13 @@ async function renderUiPage() {
     });
 }
 
-function renderAboutPage() {
+async function renderAboutPage() {
     const body = document.getElementById("settings-page-body");
     document.getElementById("settings-page-title").textContent = "About N3UR0N";
     document.getElementById("settings-page-subtitle").textContent =
         "Federated AI gateway. One manifest per skill, signed protocol, optional peer network.";
+    let me = { instance_id: "?" };
+    try { me = await api("GET", "/api/v0/whoami"); } catch { /* ignore */ }
     body.innerHTML = `
         <article class="card" style="max-width: 720px;">
             <div class="card-head">
@@ -2447,6 +2423,21 @@ function renderAboutPage() {
                 License: Apache-2.0<br>
                 Source: <code>github.com/numerum-tech/n3ur0n</code>
             </div>
+        </article>
+        <article class="card" style="max-width: 720px; margin-top: 12px;">
+            <div class="card-head">
+                <div class="card-icon">${iconHtml("fingerprint", { size: 18 })}</div>
+                <span class="card-title">Instance ID</span>
+            </div>
+            <div class="card-meta">
+                <code style="word-break: break-all; display: block; padding: 8px;">${escapeHtml(me.instance_id || "?")}</code>
+            </div>
+            <p class="card-meta">
+                Your cryptographic identity — derived from your public key and used to
+                sign every call you make. Anyone receiving a signed call from you sees
+                this id. The private key lives in <code>keys.json</code> in the app
+                config dir (file mode 0600); treat it like a password.
+            </p>
         </article>
     `;
 }
