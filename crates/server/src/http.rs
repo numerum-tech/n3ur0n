@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use arc_swap::ArcSwap;
+use axum::Router;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Json, Path, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -28,7 +29,6 @@ use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use n3ur0n_core::SignedMessage;
 use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_node::client as peer_client;
@@ -47,8 +47,8 @@ use n3ur0n_storage::peers as peers_repo;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
@@ -125,7 +125,7 @@ fn build_app(
     runtime_config: Option<RuntimeConfig>,
     bypass: bool,
 ) -> Router {
-    use crate::auth::{require_authed, AuthState};
+    use crate::auth::{AuthState, require_authed};
     use crate::require_perm;
 
     let auth_state = AuthState {
@@ -161,8 +161,14 @@ fn build_app(
     // settings/auth sub-routers.
     let authed_api = Router::new()
         .route("/whoami", get(whoami))
-        .route("/caps", get(api_caps).route_layer(require_perm!(crate::auth::perm::CAPS_READ)))
-        .route("/peers", get(api_peers).route_layer(require_perm!(crate::auth::perm::PEERS_READ)))
+        .route(
+            "/caps",
+            get(api_caps).route_layer(require_perm!(crate::auth::perm::CAPS_READ)),
+        )
+        .route(
+            "/peers",
+            get(api_peers).route_layer(require_perm!(crate::auth::perm::PEERS_READ)),
+        )
         .route(
             "/peers/refresh",
             post(api_peers_refresh).route_layer(require_perm!(crate::auth::perm::PEERS_WRITE)),
@@ -201,9 +207,7 @@ fn build_app(
             "/conversations/{id}/messages/stream",
             post(conv_messages_stream).layer(DefaultBodyLimit::max(LOCAL_API_LIMIT)),
         )
-        .merge(
-            crate::files_api::routes().layer(DefaultBodyLimit::max(FILE_UPLOAD_LIMIT)),
-        )
+        .merge(crate::files_api::routes().layer(DefaultBodyLimit::max(FILE_UPLOAD_LIMIT)))
         .merge(
             Router::new()
                 .route("/planner", get(api_planner_get))
@@ -258,9 +262,7 @@ fn build_app(
             "/messages",
             post(post_message).layer(DefaultBodyLimit::max(INVOKE_LIMIT)),
         )
-        .merge(
-            crate::blobs::routes().layer(DefaultBodyLimit::max(FILE_UPLOAD_LIMIT)),
-        )
+        .merge(crate::blobs::routes().layer(DefaultBodyLimit::max(FILE_UPLOAD_LIMIT)))
         .with_state(state);
 
     Router::new()
@@ -273,11 +275,7 @@ fn build_app(
         .layer(TraceLayer::new_for_http())
 }
 
-pub async fn serve(
-    addr: SocketAddr,
-    node: Node,
-    runtime: Option<Arc<NodeRuntime>>,
-) -> Result<()> {
+pub async fn serve(addr: SocketAddr, node: Node, runtime: Option<Arc<NodeRuntime>>) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "listening");
     axum::serve(listener, app(node, runtime)).await?;
@@ -322,10 +320,10 @@ async fn client_id_middleware(mut req: Request, next: Next) -> Response {
 fn parse_client_cookie(raw: &str) -> Option<String> {
     for part in raw.split(';') {
         let trimmed = part.trim();
-        if let Some(rest) = trimmed.strip_prefix(&format!("{CLIENT_ID_COOKIE}=")) {
-            if !rest.is_empty() {
-                return Some(rest.to_string());
-            }
+        if let Some(rest) = trimmed.strip_prefix(&format!("{CLIENT_ID_COOKIE}="))
+            && !rest.is_empty()
+        {
+            return Some(rest.to_string());
         }
     }
     None
@@ -367,7 +365,9 @@ async fn api_locales() -> impl IntoResponse {
         if !p.starts_with("locales/") || !p.ends_with(".json") {
             continue;
         }
-        let Some(file) = UiAssets::get(p) else { continue };
+        let Some(file) = UiAssets::get(p) else {
+            continue;
+        };
         let parsed: serde_json::Value = match serde_json::from_slice(&file.data) {
             Ok(v) => v,
             Err(_) => continue,
@@ -456,11 +456,7 @@ async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
                         .describe_self_cached
                         .as_deref()
                         .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-                        .and_then(|d| {
-                            d.get("capabilities")
-                                .and_then(|c| c.as_array())
-                                .cloned()
-                        })
+                        .and_then(|d| d.get("capabilities").and_then(|c| c.as_array()).cloned())
                         .unwrap_or_default();
                     let summarised: Vec<Value> = caps
                         .into_iter()
@@ -480,7 +476,8 @@ async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
                     })
                 })
                 .collect();
-            Json(json!({ "self": state.node.instance_id().as_str(), "peers": body })).into_response()
+            Json(json!({ "self": state.node.instance_id().as_str(), "peers": body }))
+                .into_response()
         }
         Err(e) => api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
@@ -670,10 +667,7 @@ struct CreateConversationRequest {
     title: Option<String>,
 }
 
-async fn conv_create(
-    State(state): State<AppState>,
-    req: Request,
-) -> Response {
+async fn conv_create(State(state): State<AppState>, req: Request) -> Response {
     let cid = match extract_client_id(&req) {
         Some(v) => v.to_string(),
         None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
@@ -712,10 +706,7 @@ async fn conv_create(
     }
 }
 
-async fn conv_list(
-    State(state): State<AppState>,
-    req: Request,
-) -> Response {
+async fn conv_list(State(state): State<AppState>, req: Request) -> Response {
     let cid = match extract_client_id(&req) {
         Some(v) => v.to_string(),
         None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
@@ -739,11 +730,7 @@ async fn conv_list(
     }
 }
 
-async fn conv_get(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    req: Request,
-) -> Response {
+async fn conv_get(State(state): State<AppState>, Path(id): Path<String>, req: Request) -> Response {
     let cid = match extract_client_id(&req) {
         Some(v) => v.to_string(),
         None => return api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id"),
@@ -789,12 +776,9 @@ async fn conv_patch(
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     match conversation::load(state.node.db(), &id, &cid) {
         Ok(_) => {
-            if let Err(e) = conv_repo::update_meta(
-                state.node.db(),
-                &id,
-                payload.title.as_deref(),
-                now,
-            ) {
+            if let Err(e) =
+                conv_repo::update_meta(state.node.db(), &id, payload.title.as_deref(), now)
+            {
                 return api_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
             }
             // Best-effort cache invalidation if runtime is configured.
@@ -850,9 +834,10 @@ async fn api_planner_get(State(state): State<AppState>) -> impl IntoResponse {
         })
     });
     let active = if enabled {
-        state.planner_env.as_ref().and_then(|env| {
-            resolve_planner_llm(&state.node, config_dir, env, &user).ok()
-        })
+        state
+            .planner_env
+            .as_ref()
+            .and_then(|env| resolve_planner_llm(&state.node, config_dir, env, &user).ok())
     } else {
         None
     };
@@ -1146,20 +1131,23 @@ fn parse_dispatch_mode(raw: Option<String>) -> Result<DispatchMode, Response> {
     }
 }
 
-fn parse_dispatch_opts(mode: DispatchMode, model: Option<String>) -> Result<DispatchOptions, Response> {
+fn parse_dispatch_opts(
+    mode: DispatchMode,
+    model: Option<String>,
+) -> Result<DispatchOptions, Response> {
     if mode != DispatchMode::Direct {
         return Ok(DispatchOptions::default());
     }
     let model_override = model
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty());
-    if let Some(ref m) = model_override {
-        if m.chars().count() > 128 {
-            return Err(api_error(
-                StatusCode::BAD_REQUEST,
-                "model must be at most 128 characters",
-            ));
-        }
+    if let Some(ref m) = model_override
+        && m.chars().count() > 128
+    {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "model must be at most 128 characters",
+        ));
     }
     Ok(DispatchOptions { model_override })
 }
@@ -1174,7 +1162,12 @@ async fn prepare_dispatch(
 ) -> Result<DispatchPrep, Response> {
     let cid = match extract_client_id(&req) {
         Some(v) => v.to_string(),
-        None => return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "missing client_id")),
+        None => {
+            return Err(api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "missing client_id",
+            ));
+        }
     };
     let runtime = match load_runtime(state) {
         Some(rt) => rt,
@@ -1237,7 +1230,12 @@ async fn prepare_dispatch(
             }
         }
         Ok(None) => return Err(api_error(StatusCode::NOT_FOUND, "conversation not found")),
-        Err(_) => return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "db read failed")),
+        Err(_) => {
+            return Err(api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "db read failed",
+            ));
+        }
     }
 
     Ok(DispatchPrep {
@@ -1273,12 +1271,12 @@ async fn conv_messages_stream(
     let id_owned = id.clone();
     tokio::spawn(async move {
         if let Err(e) = runtime
-            .handle_user_message_streaming_with_opts(
-                &cid_owned, &id_owned, input, mode, opts, tx,
-            )
+            .handle_user_message_streaming_with_opts(&cid_owned, &id_owned, input, mode, opts, tx)
             .await
         {
-            let _ = tx_err.send(DispatchEvent::Error { message: e.to_string() });
+            let _ = tx_err.send(DispatchEvent::Error {
+                message: e.to_string(),
+            });
         }
         // Drop tx_err to close the channel.
         drop(tx_err);

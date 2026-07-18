@@ -10,12 +10,12 @@ use async_trait::async_trait;
 use n3ur0n_adapters::Backend;
 use serde_json::json;
 
-use crate::conversation::{persist_last, ConversationState};
+use crate::conversation::{ConversationState, persist_last};
 use crate::error::NodeResult;
 use crate::node::Node;
 use crate::planner::{
-    DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, Planner,
-    MAX_CONTEXT_TURNS,
+    DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, MAX_CONTEXT_TURNS,
+    Planner,
 };
 
 /// Direct chat planner: calls LLM once per message without plan compilation.
@@ -62,7 +62,7 @@ impl DirectChatPlanner {
     fn system_prompt() -> String {
         String::from(
             "You are a helpful assistant. Answer the user's question directly and honestly. \
-            Do not claim to have executed any actions or tools — you can only provide advice."
+            Do not claim to have executed any actions or tools — you can only provide advice.",
         )
     }
 }
@@ -147,8 +147,9 @@ impl DirectChatPlanner {
 
         // Push assistant turn and persist
         state.push_assistant(content.clone(), response_model.clone());
-        persist_last(node.db(), state)
-            .map_err(|e| crate::error::NodeError::InvalidPayload(format!("persist assistant: {e}")))?;
+        persist_last(node.db(), state).map_err(|e| {
+            crate::error::NodeError::InvalidPayload(format!("persist assistant: {e}"))
+        })?;
 
         // Return outcome with empty trace
         Ok(DispatchOutcome {
@@ -266,11 +267,11 @@ mod tests {
 
     /// Helper to create an in-memory test node.
     fn test_node() -> Node {
+        use crate::node::NodeConfig;
+        use crate::registry::CapabilityRegistry;
+        use n3ur0n_adapters::echo::EchoBackend;
         use n3ur0n_core::identity::Keypair;
         use std::sync::Arc;
-        use crate::registry::CapabilityRegistry;
-        use crate::node::NodeConfig;
-        use n3ur0n_adapters::echo::EchoBackend;
 
         let keypair = Keypair::generate();
         let db = n3ur0n_storage::open_in_memory().expect("Failed to create in-memory DB");
@@ -310,7 +311,11 @@ mod tests {
         // Verify outcome
         assert_eq!(outcome.reply, "Hello, this is a test response");
         assert_eq!(outcome.model, Some("test-llm".to_string()));
-        assert_eq!(outcome.trace.len(), 0, "Direct mode should have empty trace");
+        assert_eq!(
+            outcome.trace.len(),
+            0,
+            "Direct mode should have empty trace"
+        );
 
         // Verify turns: should have User + Assistant (2 turns)
         assert_eq!(state.turns.len(), 2);
@@ -337,9 +342,8 @@ mod tests {
         });
         let planner = DirectChatPlanner::new(backend, Some("default-model".to_string()));
 
-        let mut state =
-            crate::conversation::create(node.db(), "client_1", None)
-                .expect("Failed to create conversation");
+        let mut state = crate::conversation::create(node.db(), "client_1", None)
+            .expect("Failed to create conversation");
 
         let outcome = planner
             .dispatch(
@@ -364,9 +368,8 @@ mod tests {
         let backend = Arc::new(ErrorBackend);
         let planner = DirectChatPlanner::new(backend, None);
 
-        let mut state =
-            crate::conversation::create(node.db(), "client_1", None)
-                .expect("Failed to create conversation");
+        let mut state = crate::conversation::create(node.db(), "client_1", None)
+            .expect("Failed to create conversation");
 
         let result = planner
             .dispatch(
@@ -400,9 +403,8 @@ mod tests {
         });
         let planner = DirectChatPlanner::new(backend, None);
 
-        let mut state =
-            crate::conversation::create(node.db(), "client_1", None)
-                .expect("Failed to create conversation");
+        let mut state = crate::conversation::create(node.db(), "client_1", None)
+            .expect("Failed to create conversation");
 
         // Create event channel
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

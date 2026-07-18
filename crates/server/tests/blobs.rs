@@ -3,8 +3,8 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use n3ur0n_core::blob::{hash_bytes, BLOB_TICKET_HEADER};
 use n3ur0n_adapters::Backend;
+use n3ur0n_core::blob::{BLOB_TICKET_HEADER, hash_bytes};
 use n3ur0n_node::blob_client::{forge_get_ticket, forge_put_ticket};
 use n3ur0n_node::{CapabilityRegistry, Node, NodeConfig};
 use n3ur0n_server::http;
@@ -18,8 +18,10 @@ async fn test_node(dir: &std::path::Path) -> Node {
     let backend = std::sync::Arc::new(n3ur0n_adapters::echo::EchoBackend);
     let decls = backend.describe().await.unwrap();
     let registry = CapabilityRegistry::from_decls(decls);
-    let mut config = NodeConfig::default();
-    config.endpoint = Some("http://localhost:4242".into());
+    let config = NodeConfig {
+        endpoint: Some("http://localhost:4242".into()),
+        ..Default::default()
+    };
     let _ = dir;
     Node::new(kp, db, backend, registry, config)
 }

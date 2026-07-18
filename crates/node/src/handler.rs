@@ -68,60 +68,61 @@ pub async fn handle_request(node: &Node, request: SignedMessage) -> NodeResult<S
     // info into our peer directory. From now on we can call them back.
     // Self-calls are silently ignored. Errors are logged but never block
     // the reply.
-    if let Some(claimed_endpoint) = &inbound.envelope.sender_endpoint {
-        if inbound.envelope.sender_id != node.instance_id() && !claimed_endpoint.is_empty() {
-            // Fast path: upsert (id, endpoint) so we know where the caller
-            // lives. We do NOT block the reply on a describe_self
-            // round-trip — that runs asynchronously in the background and
-            // fills the caps cache on next read.
-            let already_known = n3ur0n_storage::peers::get(
-                node.db(),
-                &inbound.envelope.sender_id.to_string(),
-            )
-            .ok()
-            .flatten()
-            .is_some();
-            let now_unix = now.unix_timestamp();
-            let record = n3ur0n_storage::peers::PeerRecord {
-                id: inbound.envelope.sender_id.to_string(),
-                endpoint: claimed_endpoint.clone(),
-                alias: None,
-                last_seen: Some(now_unix),
-                tls_fingerprint: None,
-                describe_self_cached: None,
-                describe_self_fetched_at: None,
-                source: Some("reverse_announce".into()),
-            };
-            if let Err(e) = n3ur0n_storage::peers::upsert(node.db(), &record) {
-                tracing::warn!(
-                    error = %e,
-                    peer = %inbound.envelope.sender_id,
-                    "reverse-announce upsert failed"
-                );
-            } else {
-                tracing::debug!(
-                    peer = %inbound.envelope.sender_id,
-                    endpoint = %claimed_endpoint,
-                    "reverse-announce: cached caller"
-                );
-                // Async describe_self pull on first sighting so caps
-                // surface in the UI without a manual refresh. Skipped
-                // when the peer was already known to avoid hammering
-                // upstreams on every signed call.
-                if !already_known {
-                    let node_for_pull = node.clone();
-                    let ep = claimed_endpoint.clone();
-                    tokio::spawn(async move {
-                        let client = crate::client::http_client();
-                        if let Err(e) = crate::discovery::refresh_peer(&node_for_pull, &client, &ep).await {
-                            tracing::debug!(
-                                endpoint = %ep,
-                                error = %e,
-                                "reverse-announce: background describe_self failed (will retry on next call)"
-                            );
-                        }
-                    });
-                }
+    if let Some(claimed_endpoint) = &inbound.envelope.sender_endpoint
+        && inbound.envelope.sender_id != node.instance_id()
+        && !claimed_endpoint.is_empty()
+    {
+        // Fast path: upsert (id, endpoint) so we know where the caller
+        // lives. We do NOT block the reply on a describe_self
+        // round-trip — that runs asynchronously in the background and
+        // fills the caps cache on next read.
+        let already_known =
+            n3ur0n_storage::peers::get(node.db(), &inbound.envelope.sender_id.to_string())
+                .ok()
+                .flatten()
+                .is_some();
+        let now_unix = now.unix_timestamp();
+        let record = n3ur0n_storage::peers::PeerRecord {
+            id: inbound.envelope.sender_id.to_string(),
+            endpoint: claimed_endpoint.clone(),
+            alias: None,
+            last_seen: Some(now_unix),
+            tls_fingerprint: None,
+            describe_self_cached: None,
+            describe_self_fetched_at: None,
+            source: Some("reverse_announce".into()),
+        };
+        if let Err(e) = n3ur0n_storage::peers::upsert(node.db(), &record) {
+            tracing::warn!(
+                error = %e,
+                peer = %inbound.envelope.sender_id,
+                "reverse-announce upsert failed"
+            );
+        } else {
+            tracing::debug!(
+                peer = %inbound.envelope.sender_id,
+                endpoint = %claimed_endpoint,
+                "reverse-announce: cached caller"
+            );
+            // Async describe_self pull on first sighting so caps
+            // surface in the UI without a manual refresh. Skipped
+            // when the peer was already known to avoid hammering
+            // upstreams on every signed call.
+            if !already_known {
+                let node_for_pull = node.clone();
+                let ep = claimed_endpoint.clone();
+                tokio::spawn(async move {
+                    let client = crate::client::http_client();
+                    if let Err(e) =
+                        crate::discovery::refresh_peer(&node_for_pull, &client, &ep).await
+                    {
+                        tracing::debug!(
+                            endpoint = %ep,
+                            error = %e,
+                            "reverse-announce: background describe_self failed (will retry on next call)"
+                        );
+                    }
+                });
             }
         }
     }

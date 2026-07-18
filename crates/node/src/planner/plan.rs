@@ -123,13 +123,13 @@ pub fn validate_plan(plan: &Plan, catalog: &Catalog) -> Result<(), PlanError> {
         // args validate against the cap's input schema — but only if the
         // args contain no unresolved templates. Templates are checked + run
         // at execution time when the blackboard is populated.
-        if first_unresolved_template(&step.args).is_none() {
-            if let Err(e) = validate_args_against_schema(&step.args, &tool.cap.schema_in) {
-                return Err(PlanError::Validation(format!(
-                    "step `{}`: args do not conform to `{}` schema_in: {}",
-                    step.id, tool_name, e
-                )));
-            }
+        if first_unresolved_template(&step.args).is_none()
+            && let Err(e) = validate_args_against_schema(&step.args, &tool.cap.schema_in)
+        {
+            return Err(PlanError::Validation(format!(
+                "step `{}`: args do not conform to `{}` schema_in: {}",
+                step.id, tool_name, e
+            )));
         }
 
         // depends_on refs known
@@ -264,26 +264,28 @@ fn extract_template_keys(s: &str) -> Vec<String> {
     let mut i = 0;
     while i < bytes.len() {
         // Preferred `${...}`
-        if i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{' {
-            if let Some(end) = s[i + 2..].find('}') {
-                let inner = &s[i + 2..i + 2 + end];
-                keys.push(inner.to_string());
-                i = i + 2 + end + 1;
-                continue;
-            }
+        if i + 1 < bytes.len()
+            && bytes[i] == b'$'
+            && bytes[i + 1] == b'{'
+            && let Some(end) = s[i + 2..].find('}')
+        {
+            let inner = &s[i + 2..i + 2 + end];
+            keys.push(inner.to_string());
+            i = i + 2 + end + 1;
+            continue;
         }
         // Lenient bare `{stepid.path}` — head must look like a step id
         // (alphanum, starts with letter, no whitespace).
-        if bytes[i] == b'{' {
-            if let Some(end) = s[i + 1..].find('}') {
-                let inner = &s[i + 1..i + 1 + end];
-                let head = inner.split('.').next().unwrap_or("");
-                if looks_like_step_id(head) {
-                    keys.push(inner.to_string());
-                }
-                i = i + 1 + end + 1;
-                continue;
+        if bytes[i] == b'{'
+            && let Some(end) = s[i + 1..].find('}')
+        {
+            let inner = &s[i + 1..i + 1 + end];
+            let head = inner.split('.').next().unwrap_or("");
+            if looks_like_step_id(head) {
+                keys.push(inner.to_string());
             }
+            i = i + 1 + end + 1;
+            continue;
         }
         i += 1;
     }
@@ -303,10 +305,10 @@ pub(crate) fn first_unresolved_template(v: &Value) -> Option<String> {
     match v {
         Value::String(s) => {
             // Look for `${...}` substring
-            if let Some(start) = s.find("${") {
-                if let Some(end_rel) = s[start + 2..].find('}') {
-                    return Some(s[start..start + 2 + end_rel + 1].to_string());
-                }
+            if let Some(start) = s.find("${")
+                && let Some(end_rel) = s[start + 2..].find('}')
+            {
+                return Some(s[start..start + 2 + end_rel + 1].to_string());
             }
             None
         }
@@ -332,12 +334,12 @@ pub fn resolve_value(v: &Value, blackboard: &HashMap<String, Value>) -> Value {
     match v {
         Value::String(s) => {
             // Whole-string single ref?
-            if let Some(inner) = whole_template(s) {
-                if let Some(resolved) = lookup_path(&inner, blackboard) {
-                    return resolved;
-                }
-                // ref unresolved → fall through to inline form (renders as text)
+            if let Some(inner) = whole_template(s)
+                && let Some(resolved) = lookup_path(&inner, blackboard)
+            {
+                return resolved;
             }
+            // ref unresolved → fall through to inline form (renders as text)
             // Inline substitution.
             Value::String(substitute_inline(s, blackboard))
         }
@@ -391,32 +393,34 @@ fn substitute_inline(s: &str, blackboard: &HashMap<String, Value>) -> String {
     let mut i = 0;
     while i < bytes.len() {
         // Preferred form: `${stepid.path}`
-        if i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{' {
-            if let Some(end) = s[i + 2..].find('}') {
-                let inner = &s[i + 2..i + 2 + end];
-                let rendered = lookup_path(inner, blackboard)
-                    .map(value_to_text)
-                    .unwrap_or_else(|| format!("${{{inner}}}"));
-                out.push_str(&rendered);
-                i = i + 2 + end + 1;
-                continue;
-            }
+        if i + 1 < bytes.len()
+            && bytes[i] == b'$'
+            && bytes[i + 1] == b'{'
+            && let Some(end) = s[i + 2..].find('}')
+        {
+            let inner = &s[i + 2..i + 2 + end];
+            let rendered = lookup_path(inner, blackboard)
+                .map(value_to_text)
+                .unwrap_or_else(|| format!("${{{inner}}}"));
+            out.push_str(&rendered);
+            i = i + 2 + end + 1;
+            continue;
         }
         // Lenient fallback: bare `{stepid.path}` — only when the inner
         // first segment matches a known blackboard key (avoids triggering
         // on legitimate curly-brace literals like "see {readme}").
-        if bytes[i] == b'{' {
-            if let Some(end) = s[i + 1..].find('}') {
-                let inner = &s[i + 1..i + 1 + end];
-                let head = inner.split('.').next().unwrap_or("");
-                if !head.is_empty() && blackboard.contains_key(head) {
-                    let rendered = lookup_path(inner, blackboard)
-                        .map(value_to_text)
-                        .unwrap_or_else(|| format!("{{{inner}}}"));
-                    out.push_str(&rendered);
-                    i = i + 1 + end + 1;
-                    continue;
-                }
+        if bytes[i] == b'{'
+            && let Some(end) = s[i + 1..].find('}')
+        {
+            let inner = &s[i + 1..i + 1 + end];
+            let head = inner.split('.').next().unwrap_or("");
+            if !head.is_empty() && blackboard.contains_key(head) {
+                let rendered = lookup_path(inner, blackboard)
+                    .map(value_to_text)
+                    .unwrap_or_else(|| format!("{{{inner}}}"));
+                out.push_str(&rendered);
+                i = i + 1 + end + 1;
+                continue;
             }
         }
         out.push(bytes[i] as char);
@@ -459,6 +463,7 @@ pub async fn execute_plan(node: &Node, plan: &Plan, catalog: &Catalog) -> NodeRe
 /// at a reserved seq (so a crash mid-run leaves a partial, correctly-ordered
 /// trace). The index is the step's position in `plan.plan`, not its completion
 /// order.
+#[allow(clippy::type_complexity)] // the on_step_done callback type is clearer inline than aliased
 pub async fn execute_plan_streaming(
     node: &Node,
     plan: &Plan,

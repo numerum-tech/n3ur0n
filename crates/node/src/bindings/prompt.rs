@@ -18,14 +18,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use n3ur0n_adapters::{openai::OpenAIBackend, Backend};
-use serde_json::{json, Value};
+use n3ur0n_adapters::{Backend, openai::OpenAIBackend};
+use serde_json::{Value, json};
 
 use crate::error::{NodeError, NodeResult};
 use crate::manifest::{BindingSpec, OutputParser};
 
-use super::template;
 use super::Binding;
+use super::template;
 
 #[derive(Clone)]
 pub struct PromptBinding {
@@ -75,7 +75,9 @@ impl PromptBinding {
 
 #[async_trait]
 impl Binding for PromptBinding {
-    fn kind(&self) -> &'static str { "prompt" }
+    fn kind(&self) -> &'static str {
+        "prompt"
+    }
 
     async fn invoke(&self, args: Value) -> NodeResult<Value> {
         // 1. Render the user-facing message.
@@ -195,7 +197,9 @@ mod tests {
 
     #[async_trait]
     impl Binding for DirectBinding {
-        fn kind(&self) -> &'static str { "prompt" }
+        fn kind(&self) -> &'static str {
+            "prompt"
+        }
 
         async fn invoke(&self, args: Value) -> NodeResult<Value> {
             let user = match &self.user_tmpl {
@@ -221,11 +225,8 @@ mod tests {
             let content = resp["message"]["content"].as_str().unwrap().to_string();
             match self.parser {
                 OutputParser::Text => Ok(json!({"text": content})),
-                OutputParser::Json => {
-                    Ok(serde_json::from_str(&content).map_err(|e| {
-                        NodeError::InvalidPayload(e.to_string())
-                    })?)
-                }
+                OutputParser::Json => Ok(serde_json::from_str(&content)
+                    .map_err(|e| NodeError::InvalidPayload(e.to_string()))?),
             }
         }
     }
@@ -242,10 +243,7 @@ mod tests {
             user_tmpl: Some("Translate: {{args.text}}".into()),
             parser: OutputParser::Text,
         };
-        let out = b
-            .invoke(json!({"text": "Hello, world."}))
-            .await
-            .unwrap();
+        let out = b.invoke(json!({"text": "Hello, world."})).await.unwrap();
         assert_eq!(out, json!({"text": "Bonjour, monde."}));
     }
 

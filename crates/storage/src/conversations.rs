@@ -85,16 +85,12 @@ pub fn list_for_client(
             updated_at: row.get(4)?,
         })
     })?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 /// Update title and/or updated_at.
-pub fn update_meta(
-    db: &Db,
-    id: &str,
-    title: Option<&str>,
-    updated_at: i64,
-) -> StorageResult<()> {
+pub fn update_meta(db: &Db, id: &str, title: Option<&str>, updated_at: i64) -> StorageResult<()> {
     let conn = db.get()?;
     if let Some(title) = title {
         conn.execute(
@@ -157,7 +153,8 @@ pub fn load_turns(db: &Db, conversation_id: &str) -> StorageResult<Vec<TurnRecor
             created_at: row.get(4)?,
         })
     })?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 /// Highest seq currently stored, or `None` if no turns.

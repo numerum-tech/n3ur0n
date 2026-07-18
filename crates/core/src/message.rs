@@ -212,10 +212,8 @@ mod tests {
     /// carries no random or clock state.
     fn golden_envelope() -> Envelope {
         Envelope {
-            sender_id: InstanceId::parse(
-                "n3:eytey6vdqdeoodtcpx3ugxsqyy3dxpjwp2dtgdjoauggdvjnyuaa",
-            )
-            .unwrap(),
+            sender_id: InstanceId::parse("n3:eytey6vdqdeoodtcpx3ugxsqyy3dxpjwp2dtgdjoauggdvjnyuaa")
+                .unwrap(),
             recipient_id: InstanceId::parse(
                 "n3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )

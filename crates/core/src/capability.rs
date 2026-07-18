@@ -132,11 +132,26 @@ mod tests {
     fn access_mode_wire_literals() {
         // Wire literal stability matters for cross-version peer compat.
         // `Free` MUST stay `"free"` even though the UI labels it "Public".
-        assert_eq!(serde_json::to_string(&AccessMode::Free).unwrap(), "\"free\"");
-        assert_eq!(serde_json::to_string(&AccessMode::Restricted).unwrap(), "\"restricted\"");
-        assert_eq!(serde_json::to_string(&AccessMode::Private).unwrap(), "\"private\"");
-        assert_eq!(serde_json::from_str::<AccessMode>("\"free\"").unwrap(), AccessMode::Free);
-        assert_eq!(serde_json::from_str::<AccessMode>("\"private\"").unwrap(), AccessMode::Private);
+        assert_eq!(
+            serde_json::to_string(&AccessMode::Free).unwrap(),
+            "\"free\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AccessMode::Restricted).unwrap(),
+            "\"restricted\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AccessMode::Private).unwrap(),
+            "\"private\""
+        );
+        assert_eq!(
+            serde_json::from_str::<AccessMode>("\"free\"").unwrap(),
+            AccessMode::Free
+        );
+        assert_eq!(
+            serde_json::from_str::<AccessMode>("\"private\"").unwrap(),
+            AccessMode::Private
+        );
     }
 
     #[test]

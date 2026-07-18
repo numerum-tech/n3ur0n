@@ -300,22 +300,21 @@ impl ConversationState {
     /// sees a coherent state on resume after a crash.
     pub fn validate(&mut self) {
         let needs_repair = matches!(self.turns.last(), Some(Turn::ToolCall { .. }));
-        if needs_repair {
-            if let Some(Turn::ToolCall {
+        if needs_repair
+            && let Some(Turn::ToolCall {
                 id,
                 peer_id,
                 capability,
                 ..
             }) = self.turns.last().cloned()
-            {
-                self.push_tool_result(
-                    id,
-                    peer_id,
-                    capability,
-                    None,
-                    Some("instance restarted before result was persisted".into()),
-                );
-            }
+        {
+            self.push_tool_result(
+                id,
+                peer_id,
+                capability,
+                None,
+                Some("instance restarted before result was persisted".into()),
+            );
         }
     }
 }
@@ -380,24 +379,17 @@ pub(crate) fn tool_name(peer_id: &str, capability: &str) -> String {
 /// ToolCall / ToolResult pair. v0.1: doesn't preserve leading systems
 /// separately — system prompts are injected fresh by the planner at each
 /// dispatch, so only persisted Turns matter here.
-pub(crate) fn prune_context(turns: &[Turn], max_turns: usize) -> Vec<&Turn> {
-    let refs: Vec<&Turn> = turns.iter().collect();
-    prune_context_refs(&refs, max_turns)
-}
-
 pub(crate) fn prune_context_refs<'a>(refs: &[&'a Turn], max_turns: usize) -> Vec<&'a Turn> {
     if refs.len() <= max_turns {
         return refs.to_vec();
     }
     let mut start = refs.len() - max_turns;
     // If we'd start at a ToolResult whose ToolCall is just outside, rewind.
-    if start > 0 {
-        if let Some(Turn::ToolResult { call_id, .. }) = refs.get(start).copied() {
-            if matches!(refs.get(start - 1).copied(), Some(Turn::ToolCall { id, .. }) if id == call_id)
-            {
-                start -= 1;
-            }
-        }
+    if start > 0
+        && let Some(Turn::ToolResult { call_id, .. }) = refs.get(start).copied()
+        && matches!(refs.get(start - 1).copied(), Some(Turn::ToolCall { id, .. }) if id == call_id)
+    {
+        start -= 1;
     }
     refs[start..].to_vec()
 }

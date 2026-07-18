@@ -13,6 +13,7 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)] // CLI command enum; boxing args hurts ergonomics for a one-shot parse
 enum Command {
     /// Generate identity, init config + SQLite store.
     Init(cli::InitArgs),

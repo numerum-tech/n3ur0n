@@ -191,7 +191,10 @@ mod tests {
     #[test]
     fn tokenise_drops_short_tokens_and_lowercases() {
         let toks = tokenise("Hello World! Now is the moment a b cd");
-        assert_eq!(toks, vec!["hello", "world", "now", "is", "the", "moment", "cd"]);
+        assert_eq!(
+            toks,
+            vec!["hello", "world", "now", "is", "the", "moment", "cd"]
+        );
     }
 
     #[test]

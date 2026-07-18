@@ -85,7 +85,8 @@ pub fn list(db: &Db, limit: i64) -> StorageResult<Vec<PeerRecord>> {
             source: row.get(7)?,
         })
     })?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 /// Delete a peer by instance id. Returns `true` if a row was removed.

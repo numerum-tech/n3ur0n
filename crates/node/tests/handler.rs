@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex};
 use n3ur0n_adapters::Backend;
 use n3ur0n_adapters::echo::EchoBackend;
 use n3ur0n_core::message::{Envelope, ProtocolVerb};
-use n3ur0n_core::protocol::{
-    DescribeSelfResponse, InvokeRequest, InvokeResponse, PingResponse,
-};
+use n3ur0n_core::protocol::{DescribeSelfResponse, InvokeRequest, InvokeResponse, PingResponse};
 use n3ur0n_core::{Clock, Keypair};
 use n3ur0n_node::{CapabilityRegistry, Node, NodeConfig, handle_request};
 use n3ur0n_storage::open_in_memory;
@@ -72,7 +70,13 @@ async fn ping_round_trip() {
     let client = Keypair::generate();
     let now = node.clock().now();
 
-    let req = signed(&client, &node.instance_id(), ProtocolVerb::Ping, json!({}), now);
+    let req = signed(
+        &client,
+        &node.instance_id(),
+        ProtocolVerb::Ping,
+        json!({}),
+        now,
+    );
     let reply = handle_request(&node, req).await.unwrap();
 
     reply.verify_signature().unwrap();
@@ -109,7 +113,13 @@ async fn replay_rejected() {
     let client = Keypair::generate();
     let now = node.clock().now();
 
-    let req = signed(&client, &node.instance_id(), ProtocolVerb::Ping, json!({}), now);
+    let req = signed(
+        &client,
+        &node.instance_id(),
+        ProtocolVerb::Ping,
+        json!({}),
+        now,
+    );
     handle_request(&node, req.clone()).await.unwrap();
     let err = handle_request(&node, req).await.unwrap_err();
     assert!(matches!(err, n3ur0n_node::NodeError::Replay));
@@ -128,7 +138,13 @@ async fn invoke_echoes_args() {
     })
     .unwrap();
 
-    let req = signed(&client, &node.instance_id(), ProtocolVerb::Invoke, payload, now);
+    let req = signed(
+        &client,
+        &node.instance_id(),
+        ProtocolVerb::Invoke,
+        payload,
+        now,
+    );
     let reply = handle_request(&node, req).await.unwrap();
     let body: InvokeResponse = serde_json::from_value(reply.envelope.payload).unwrap();
     assert_eq!(body.result, json!({"hello": "world"}));
@@ -147,7 +163,13 @@ async fn invoke_unknown_capability_errors() {
     })
     .unwrap();
 
-    let req = signed(&client, &node.instance_id(), ProtocolVerb::Invoke, payload, now);
+    let req = signed(
+        &client,
+        &node.instance_id(),
+        ProtocolVerb::Invoke,
+        payload,
+        now,
+    );
     let err = handle_request(&node, req).await.unwrap_err();
     assert!(matches!(err, n3ur0n_node::NodeError::UnknownCapability(_)));
 }
@@ -239,7 +261,13 @@ async fn invoke_dispatches_via_manifest_binding() {
         subscription_token: None,
     })
     .unwrap();
-    let req = signed(&client, &node.instance_id(), ProtocolVerb::Invoke, payload, now);
+    let req = signed(
+        &client,
+        &node.instance_id(),
+        ProtocolVerb::Invoke,
+        payload,
+        now,
+    );
     let reply = handle_request(&node, req).await.unwrap();
     let body: InvokeResponse = serde_json::from_value(reply.envelope.payload).unwrap();
     // Came from the wiremock, not from EchoBackend.

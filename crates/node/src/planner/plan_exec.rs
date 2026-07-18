@@ -173,10 +173,10 @@ impl PlanExecPlanner {
         // appears precisely when a cascade *would* have triggered an
         // escalation — useful even when no remote fallback is configured.
         let confidence = self.compiler.confidence(&plan, &catalog).await;
-        if confidence < 0.5 {
-            if let Some(tx) = events {
-                let _ = tx.send(DispatchEvent::LowConfidence { confidence });
-            }
+        if confidence < 0.5
+            && let Some(tx) = events
+        {
+            let _ = tx.send(DispatchEvent::LowConfidence { confidence });
         }
 
         // 4. Validate.
@@ -583,10 +583,10 @@ pub(crate) fn parse_plan(raw: &str) -> Result<Plan, String> {
     }
 
     // Try to extract the first JSON object substring.
-    if let Some(json_str) = extract_first_json_object(cleaned) {
-        if let Ok(p) = serde_json::from_str::<Plan>(&json_str) {
-            return Ok(p);
-        }
+    if let Some(json_str) = extract_first_json_object(cleaned)
+        && let Ok(p) = serde_json::from_str::<Plan>(&json_str)
+    {
+        return Ok(p);
     }
 
     Err(format!(

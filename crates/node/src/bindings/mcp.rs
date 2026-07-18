@@ -18,9 +18,9 @@ use tracing::warn;
 use crate::error::{NodeError, NodeResult};
 use crate::manifest::{BindingSpec, McpServerConfig, McpTransport};
 
+use super::Binding;
 use super::mcp_client::{McpSession, SharedSession};
 use super::template;
-use super::Binding;
 
 /// Live MCP backend handle. Holds the server config + a lazily-spawned
 /// session. `Mutex<Option<SharedSession>>` so first-invocation spawn is
@@ -127,7 +127,9 @@ impl McpBinding {
 
 #[async_trait]
 impl Binding for McpBinding {
-    fn kind(&self) -> &'static str { "mcp" }
+    fn kind(&self) -> &'static str {
+        "mcp"
+    }
 
     async fn invoke(&self, args: Value) -> NodeResult<Value> {
         let mapped = self.map_args(args)?;
@@ -142,7 +144,11 @@ impl Binding for McpBinding {
         // We surface the result as-is for v0.3.0 and let cap authors
         // shape it via `schema_out` + (later) `result_mapping`. Log a
         // warning on isError=true so the trace surfaces it.
-        if raw.get("isError").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if raw
+            .get("isError")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             warn!(tool = %self.tool_name, raw = %raw, "mcp tool reported isError=true");
         }
         Ok(raw)
@@ -209,9 +215,7 @@ mod tests {
         };
         let backend = Arc::new(McpBackend::new(cfg));
         let b = McpBinding::new(spec, backend).unwrap();
-        let out = b
-            .map_args(json!({"q": "leak", "n": 10}))
-            .unwrap();
+        let out = b.map_args(json!({"q": "leak", "n": 10})).unwrap();
         assert_eq!(out["mcp_query"], "leak");
         assert_eq!(out["limit"], 10);
     }

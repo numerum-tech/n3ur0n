@@ -28,18 +28,13 @@ pub use plan_exec::PlanExecPlanner;
 pub const MAX_CONTEXT_TURNS: usize = 16;
 
 /// Dispatch mode: determines how the planner processes a user message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DispatchMode {
     /// Default mode: compile a plan and execute it (PlanExecPlanner).
+    #[default]
     Auto,
     /// Direct mode: skip planning, call LLM directly (DirectChatPlanner).
     Direct,
-}
-
-impl Default for DispatchMode {
-    fn default() -> Self {
-        DispatchMode::Auto
-    }
 }
 
 /// Options passed to the planner's dispatch methods.

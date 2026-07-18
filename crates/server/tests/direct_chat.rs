@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use axum::{Json, Router, extract::State, routing::post};
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use axum::{Json, Router, extract::State, routing::post};
 use http_body_util::BodyExt;
 use n3ur0n_adapters::{Backend, echo::EchoBackend, openai::OpenAIConfig};
-use n3ur0n_node::{CapabilityRegistry, Node, NodeConfig};
 use n3ur0n_node::runtime::RuntimeConfig;
+use n3ur0n_node::{CapabilityRegistry, Node, NodeConfig};
 use n3ur0n_server::bootstrap::{self, PlannerKind};
 use n3ur0n_server::http::app_for_test;
 use n3ur0n_storage::open_in_memory;
@@ -57,13 +57,7 @@ async fn build_test_app(mock_base: String, _mock_state: MockLlmState) -> axum::R
     let db = open_in_memory().unwrap();
     let backend: Arc<dyn Backend> = Arc::new(EchoBackend);
     let registry = CapabilityRegistry::from_decls(backend.describe().await.unwrap());
-    let node = Node::new(
-        kp,
-        db,
-        backend,
-        registry,
-        NodeConfig::default(),
-    );
+    let node = Node::new(kp, db, backend, registry, NodeConfig::default());
     let rt = bootstrap::build_runtime(
         node.clone(),
         PlannerKind::PlanExec {
@@ -104,14 +98,16 @@ async fn post_json(
     if let Some(c) = cookie {
         req = req.header("cookie", c);
     }
-    let req = req.body(Body::from(serde_json::to_vec(&body).unwrap())).unwrap();
+    let req = req
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
     let resp = router.clone().oneshot(req).await.unwrap();
     let status = resp.status();
     let set_cookie = resp
         .headers()
         .get("set-cookie")
         .and_then(|h| h.to_str().ok())
-        .map(|s| cookie_header(s));
+        .map(cookie_header);
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let body: Value = if bytes.is_empty() {
         json!({})
@@ -126,9 +122,15 @@ async fn direct_mode_returns_reply_with_empty_trace() {
     let (mock_base, llm_state) = spawn_mock_llm().await;
     let router = build_test_app(mock_base, llm_state.clone()).await;
 
-    let (_, create_body, cookie) =
-        post_json(&router, Method::POST, "/api/v0/conversations", json!({}), None).await;
-    assert_eq!(create_body["id"].as_str().is_some(), true);
+    let (_, create_body, cookie) = post_json(
+        &router,
+        Method::POST,
+        "/api/v0/conversations",
+        json!({}),
+        None,
+    )
+    .await;
+    assert!(create_body["id"].as_str().is_some());
     let cookie = cookie.expect("client_id cookie");
     let conv_id = create_body["id"].as_str().unwrap();
 
@@ -154,8 +156,14 @@ async fn direct_mode_respects_model_override() {
     let (mock_base, llm_state) = spawn_mock_llm().await;
     let router = build_test_app(mock_base, llm_state.clone()).await;
 
-    let (_, create_body, cookie) =
-        post_json(&router, Method::POST, "/api/v0/conversations", json!({}), None).await;
+    let (_, create_body, cookie) = post_json(
+        &router,
+        Method::POST,
+        "/api/v0/conversations",
+        json!({}),
+        None,
+    )
+    .await;
     let cookie = cookie.unwrap();
     let conv_id = create_body["id"].as_str().unwrap();
 
@@ -183,8 +191,14 @@ async fn invalid_mode_returns_400() {
     let (mock_base, llm_state) = spawn_mock_llm().await;
     let router = build_test_app(mock_base, llm_state).await;
 
-    let (_, create_body, cookie) =
-        post_json(&router, Method::POST, "/api/v0/conversations", json!({}), None).await;
+    let (_, create_body, cookie) = post_json(
+        &router,
+        Method::POST,
+        "/api/v0/conversations",
+        json!({}),
+        None,
+    )
+    .await;
     let cookie = cookie.unwrap();
     let conv_id = create_body["id"].as_str().unwrap();
 
@@ -208,8 +222,14 @@ async fn no_planner_runtime_returns_503() {
     let node = Node::new(kp, db, backend, registry, NodeConfig::default());
     let router = app_for_test(node, None);
 
-    let (_, create_body, cookie) =
-        post_json(&router, Method::POST, "/api/v0/conversations", json!({}), None).await;
+    let (_, create_body, cookie) = post_json(
+        &router,
+        Method::POST,
+        "/api/v0/conversations",
+        json!({}),
+        None,
+    )
+    .await;
     let cookie = cookie.unwrap();
     let conv_id = create_body["id"].as_str().unwrap();
 

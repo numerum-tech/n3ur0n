@@ -22,14 +22,14 @@
 )]
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use n3ur0n_adapters::openai::OpenAIConfig;
-use n3ur0n_node::manifest::{load_backend_dir, BackendKind as MfBackendKind};
 use arc_swap::ArcSwap;
+use n3ur0n_adapters::openai::OpenAIConfig;
+use n3ur0n_node::manifest::{BackendKind as MfBackendKind, load_backend_dir};
 use n3ur0n_node::runtime::RuntimeConfig;
 use n3ur0n_server::bootstrap::{self, BackendKind};
 use n3ur0n_server::http;
@@ -67,7 +67,7 @@ async fn detect_ollama() -> bool {
 
 /// Write a default `local_ollama` backend manifest the first time the app
 /// boots (only when none exists and Ollama is reachable). Idempotent.
-async fn maybe_scaffold_ollama_backend(config_dir: &PathBuf) -> Result<()> {
+async fn maybe_scaffold_ollama_backend(config_dir: &Path) -> Result<()> {
     let backends_dir = config_dir.join("backends");
     let caps_dir = config_dir.join("caps");
     std::fs::create_dir_all(&backends_dir)?;
@@ -113,7 +113,7 @@ api_key       = ""
 /// found, materialised as an `OpenAIConfig`. Used to auto-wire the
 /// planner runtime so the chat tab works out of the box when an LLM
 /// endpoint is reachable.
-fn pick_planner_backend(backends_dir: &PathBuf) -> Option<OpenAIConfig> {
+fn pick_planner_backend(backends_dir: &Path) -> Option<OpenAIConfig> {
     if !backends_dir.exists() {
         return None;
     }
@@ -154,8 +154,7 @@ async fn start_server() -> Result<u16> {
     // (which now contains backends/ + caps/). No public endpoint.
     // Bootstrap peers: saved bootstrap.toml, else empty (CLI/env N/A here;
     // Settings → Gateways can set seeds; env still fills the form via API).
-    let bootstrap_peers =
-        n3ur0n_server::bootstrap_config::resolve_startup_peers(&[], &config_dir);
+    let bootstrap_peers = n3ur0n_server::bootstrap_config::resolve_startup_peers(&[], &config_dir);
     // Also honour process env when no file yet (desktop without CLI flags).
     let bootstrap_peers = if bootstrap_peers.is_empty() {
         n3ur0n_server::bootstrap_config::env_bootstrap_peers()
@@ -209,13 +208,12 @@ async fn start_server() -> Result<u16> {
     // Bootstrap default: first `openai_compat` backend on disk (Ollama
     // auto-detect seeds `local_ollama`). Operators can override via
     // Settings → Planner without restart.
-    let planner_env = pick_planner_backend(&config_dir.join("backends")).map(|cfg| {
-        PlannerEnvFallback {
+    let planner_env =
+        pick_planner_backend(&config_dir.join("backends")).map(|cfg| PlannerEnvFallback {
             base_url: cfg.base_url,
             default_model: cfg.default_model,
             api_key: cfg.api_key,
-        }
-    });
+        });
     let runtime_cell = Arc::new(ArcSwap::from_pointee(None));
     if let Some(env) = planner_env.as_ref() {
         let user = load_planner_user_config(&config_dir);
@@ -235,7 +233,9 @@ async fn start_server() -> Result<u16> {
             }
         }
     } else {
-        warn!("no openai_compat backend found in backends/; chat tab will return 503 until one is added");
+        warn!(
+            "no openai_compat backend found in backends/; chat tab will return 503 until one is added"
+        );
     }
 
     // Settings routes (manifest CRUD) live in the server crate so the
@@ -298,4 +298,3 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running n3ur0n desktop");
 }
-

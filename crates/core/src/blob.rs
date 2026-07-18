@@ -160,7 +160,11 @@ pub fn validate_hash(s: &str) -> CoreResult<()> {
         )));
     }
     let hex = &s[BLOB_HASH_PREFIX.len()..];
-    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()) {
+    if hex.len() != 64
+        || !hex
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase())
+    {
         return Err(CoreError::InvalidIdentifier(
             "blob hash must be 64 lowercase hex digits".into(),
         ));
@@ -171,7 +175,10 @@ pub fn validate_hash(s: &str) -> CoreResult<()> {
 /// Compute the canonical content hash for a byte sequence.
 pub fn hash_bytes(data: &[u8]) -> String {
     let digest = Sha256::digest(data);
-    format!("{BLOB_HASH_PREFIX}{}", data_encoding::HEXLOWER.encode(&digest))
+    format!(
+        "{BLOB_HASH_PREFIX}{}",
+        data_encoding::HEXLOWER.encode(&digest)
+    )
 }
 
 /// Classification when **we** upload to a remote peer before our invoke (class A).

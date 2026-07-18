@@ -34,9 +34,7 @@ impl Backend for UtilityBackend {
                 let min = args.get("min").and_then(|v| v.as_i64()).unwrap_or(0);
                 let max = args.get("max").and_then(|v| v.as_i64()).unwrap_or(100);
                 if max < min {
-                    return Err(AdapterError::Backend(
-                        "max must be >= min".into(),
-                    ));
+                    return Err(AdapterError::Backend("max must be >= min".into()));
                 }
                 let n: i64 = rand::rng().random_range(min..=max);
                 Ok(json!({ "value": n, "min": min, "max": max }))
@@ -64,7 +62,8 @@ impl Backend for UtilityBackend {
             CapabilityDecl {
                 name: "time".into(),
                 description: "Returns the current server time as RFC 3339 string and \
-unix epoch seconds. Takes no arguments.".into(),
+unix epoch seconds. Takes no arguments."
+                    .into(),
                 schema_in: json!({"type": "object"}),
                 schema_out: json!({
                     "type": "object",
@@ -80,8 +79,7 @@ unix epoch seconds. Takes no arguments.".into(),
                 lobe_ids: vec![],
                 examples: vec![
                     CapabilityExample {
-                        user_intent: "what time is it right now on the server?"
-                            .into(),
+                        user_intent: "what time is it right now on the server?".into(),
                         args: json!({}),
                         expected_output: json!({
                             "now": "2026-05-11T12:34:56.789Z",
@@ -89,8 +87,7 @@ unix epoch seconds. Takes no arguments.".into(),
                         }),
                     },
                     CapabilityExample {
-                        user_intent: "get a timestamp to use elsewhere in the plan"
-                            .into(),
+                        user_intent: "get a timestamp to use elsewhere in the plan".into(),
                         args: json!({}),
                         expected_output: json!({
                             "now": "2026-05-11T12:34:56.789Z",
@@ -122,7 +119,8 @@ epoch seconds."
             CapabilityDecl {
                 name: "random_int".into(),
                 description: "Returns a uniformly random integer in [min, max] \
-inclusive. Defaults: min=0, max=100.".into(),
+inclusive. Defaults: min=0, max=100."
+                    .into(),
                 schema_in: json!({
                     "type": "object",
                     "properties": {
@@ -167,8 +165,7 @@ use for list shuffling."
                         .into(),
                 }],
                 output_semantic: Some(
-                    "A single uniformly-distributed integer drawn from [min, max]."
-                        .into(),
+                    "A single uniformly-distributed integer drawn from [min, max].".into(),
                 ),
                 version: "0.1.0".into(),
                 languages: vec![],
@@ -177,7 +174,8 @@ use for list shuffling."
             CapabilityDecl {
                 name: "reverse".into(),
                 description: "Reverses a string character by character (Unicode \
-scalar-value order). Input field is `text`.".into(),
+scalar-value order). Input field is `text`."
+                    .into(),
                 schema_in: json!({
                     "type": "object",
                     "required": ["text"],
@@ -217,17 +215,13 @@ reverses characters."
                             .into(),
                     },
                     NegativeExample {
-                        user_intent: "reverse the order of words in this sentence"
-                            .into(),
+                        user_intent: "reverse the order of words in this sentence".into(),
                         why_not: "this reverses characters, producing a backwards \
 string; word-order reversal is a different operation not exposed here."
                             .into(),
                     },
                 ],
-                output_semantic: Some(
-                    "Input string with character order reversed."
-                        .into(),
-                ),
+                output_semantic: Some("Input string with character order reversed.".into()),
                 version: "0.1.0".into(),
                 languages: vec![],
                 countries: vec![],
@@ -235,7 +229,8 @@ string; word-order reversal is a different operation not exposed here."
             CapabilityDecl {
                 name: "string_length".into(),
                 description: "Counts characters (Unicode scalar values) and bytes \
-(UTF-8) in a string. Input field is `text`.".into(),
+(UTF-8) in a string. Input field is `text`."
+                    .into(),
                 schema_in: json!({
                     "type": "object",
                     "required": ["text"],
@@ -277,8 +272,7 @@ words. Use a chat cap or a dedicated word-count cap if available."
                         .into(),
                 }],
                 output_semantic: Some(
-                    "Character count and UTF-8 byte count of the input string."
-                        .into(),
+                    "Character count and UTF-8 byte count of the input string.".into(),
                 ),
                 version: "0.1.0".into(),
                 languages: vec![],
@@ -339,7 +333,10 @@ mod tests {
     #[tokio::test]
     async fn string_length_counts_chars_and_bytes() {
         let b = UtilityBackend;
-        let v = b.invoke("string_length", json!({"text": "héllo"})).await.unwrap();
+        let v = b
+            .invoke("string_length", json!({"text": "héllo"}))
+            .await
+            .unwrap();
         assert_eq!(v["chars"], 5);
         assert_eq!(v["bytes"], 6); // é = 2 bytes UTF-8
     }

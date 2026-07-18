@@ -12,7 +12,7 @@ use n3ur0n_adapters::{
 };
 use n3ur0n_core::Keypair;
 use n3ur0n_node::backends_registry::BackendsRegistry;
-use n3ur0n_node::bindings::{build_binding, Binding};
+use n3ur0n_node::bindings::{Binding, build_binding};
 use n3ur0n_node::client as peer_client;
 use n3ur0n_node::manifest::{load_backend_dir, load_cap_dir};
 use n3ur0n_node::planner::compiler::{
@@ -96,9 +96,7 @@ pub async fn load_node(
 /// Malformed manifests are logged + skipped so one broken file never
 /// takes the whole node down. Returns `(caps_registry, backends_registry)`
 /// so the caller can attach both to the Node for cap hot-reload.
-async fn load_manifest_registry(
-    dir: &Path,
-) -> Result<(CapabilityRegistry, BackendsRegistry)> {
+async fn load_manifest_registry(dir: &Path) -> Result<(CapabilityRegistry, BackendsRegistry)> {
     let backends_dir = dir.join("backends");
     let caps_dir = dir.join("caps");
 
@@ -186,8 +184,8 @@ fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {
         BackendKind::Echo => Ok(Arc::new(EchoBackend)),
         BackendKind::Utility => Ok(Arc::new(UtilityBackend)),
         BackendKind::OpenAI(cfg) => {
-            let backend = OpenAIBackend::new(cfg)
-                .map_err(|e| anyhow::anyhow!("openai backend init: {e}"))?;
+            let backend =
+                OpenAIBackend::new(cfg).map_err(|e| anyhow::anyhow!("openai backend init: {e}"))?;
             Ok(Arc::new(backend))
         }
         BackendKind::Manifest { .. } => {
@@ -219,7 +217,10 @@ pub fn build_runtime(
     kind: PlannerKind,
     runtime_config: RuntimeConfig,
 ) -> Result<NodeRuntime> {
-    let PlannerKind::PlanExec { backend, model_hint } = kind;
+    let PlannerKind::PlanExec {
+        backend,
+        model_hint,
+    } = kind;
     let chosen = model_hint
         .clone()
         .unwrap_or_else(|| backend.default_model.clone());
@@ -259,54 +260,54 @@ fn build_runtime_from_resolved(
     runtime_config: RuntimeConfig,
 ) -> Result<NodeRuntime> {
     let (auto, direct): (Arc<dyn Planner>, Arc<dyn Planner>) = {
-            let mut planner_cfg = resolved.openai.clone();
-            planner_cfg.allow_model_override = true;
-            let llm: Arc<dyn Backend> = Arc::new(
-                OpenAIBackend::new(planner_cfg)
-                    .map_err(|e| anyhow::anyhow!("planner llm init: {e}"))?,
-            );
-            let chosen_model = resolved.model_hint.clone();
+        let mut planner_cfg = resolved.openai.clone();
+        planner_cfg.allow_model_override = true;
+        let llm: Arc<dyn Backend> = Arc::new(
+            OpenAIBackend::new(planner_cfg)
+                .map_err(|e| anyhow::anyhow!("planner llm init: {e}"))?,
+        );
+        let chosen_model = resolved.model_hint.clone();
 
-            let local = Arc::new(LocalLLMCompiler {
-                llm_backend: llm.clone(),
-                model_hint: Some(chosen_model.clone()),
-                system_prompt: Arc::new(default_compile_system_prompt),
-            });
+        let local = Arc::new(LocalLLMCompiler {
+            llm_backend: llm.clone(),
+            model_hint: Some(chosen_model.clone()),
+            system_prompt: Arc::new(default_compile_system_prompt),
+        });
 
-            let compiler: Arc<dyn PlanCompiler> =
-                match std::env::var("N3UR0N_PLANNER_REMOTE_FALLBACK").ok() {
-                    Some(endpoint) if !endpoint.trim().is_empty() => {
-                        let threshold = std::env::var("N3UR0N_PLANNER_CONFIDENCE_THRESHOLD")
-                            .ok()
-                            .and_then(|v| v.parse::<f32>().ok())
-                            .unwrap_or(0.5);
-                        let remote = Arc::new(RemotePlanCompiler {
-                            http: peer_client::http_client(),
-                            keypair: node.keypair().clone(),
-                            endpoint: endpoint.trim().to_string(),
-                            sender_endpoint: node.config().endpoint.clone(),
-                        });
-                        tracing::info!(
-                            remote_endpoint = %remote.endpoint,
-                            threshold,
-                            "planner: cascading compiler enabled"
-                        );
-                        Arc::new(CascadingCompiler {
-                            primary: local,
-                            fallback: Some(remote),
-                            threshold,
-                        })
-                    }
-                    _ => local,
-                };
+        let compiler: Arc<dyn PlanCompiler> =
+            match std::env::var("N3UR0N_PLANNER_REMOTE_FALLBACK").ok() {
+                Some(endpoint) if !endpoint.trim().is_empty() => {
+                    let threshold = std::env::var("N3UR0N_PLANNER_CONFIDENCE_THRESHOLD")
+                        .ok()
+                        .and_then(|v| v.parse::<f32>().ok())
+                        .unwrap_or(0.5);
+                    let remote = Arc::new(RemotePlanCompiler {
+                        http: peer_client::http_client(),
+                        keypair: node.keypair().clone(),
+                        endpoint: endpoint.trim().to_string(),
+                        sender_endpoint: node.config().endpoint.clone(),
+                    });
+                    tracing::info!(
+                        remote_endpoint = %remote.endpoint,
+                        threshold,
+                        "planner: cascading compiler enabled"
+                    );
+                    Arc::new(CascadingCompiler {
+                        primary: local,
+                        fallback: Some(remote),
+                        threshold,
+                    })
+                }
+                _ => local,
+            };
 
-            let auto = Arc::new(PlanExecPlanner::with_compiler(
-                compiler,
-                llm.clone(),
-                Some(chosen_model.clone()),
-            ));
-            let direct = Arc::new(DirectChatPlanner::new(llm, Some(chosen_model)));
-            (auto, direct)
+        let auto = Arc::new(PlanExecPlanner::with_compiler(
+            compiler,
+            llm.clone(),
+            Some(chosen_model.clone()),
+        ));
+        let direct = Arc::new(DirectChatPlanner::new(llm, Some(chosen_model)));
+        (auto, direct)
     };
     Ok(NodeRuntime::new(node, auto, direct, runtime_config))
 }

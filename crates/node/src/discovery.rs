@@ -54,14 +54,14 @@ pub struct BootstrapOutcome {
 /// This is the depth-0 entry point — same shape as v0.2. For the
 /// transitive walk that also pulls each seed's known peers (recursively
 /// up to `max_depth`), call [`bootstrap_transitive`].
-pub async fn bootstrap_initial_peers(
-    node: &Node,
-    endpoints: &[String],
-) -> Vec<BootstrapOutcome> {
+pub async fn bootstrap_initial_peers(node: &Node, endpoints: &[String]) -> Vec<BootstrapOutcome> {
     if endpoints.is_empty() {
         return Vec::new();
     }
-    info!(count = endpoints.len(), "bootstrapping initial peers (depth=0)");
+    info!(
+        count = endpoints.len(),
+        "bootstrapping initial peers (depth=0)"
+    );
     let client = client::http_client();
     let mut out = Vec::with_capacity(endpoints.len());
     for ep in endpoints {
@@ -136,7 +136,11 @@ pub async fn bootstrap_transitive(
         if frontier.is_empty() || total_discovered >= BOOTSTRAP_MAX_PEERS {
             break;
         }
-        debug!(depth, frontier_size = frontier.len(), "bootstrap walk: next level");
+        debug!(
+            depth,
+            frontier_size = frontier.len(),
+            "bootstrap walk: next level"
+        );
         let mut next_frontier: Vec<String> = Vec::new();
         let req = GetKnownPeersRequest {
             limit: BOOTSTRAP_PAGE_SIZE,

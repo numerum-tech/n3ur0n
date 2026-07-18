@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::bindings::{build_backend_instance, BackendInstance};
+use crate::bindings::{BackendInstance, build_backend_instance};
 use crate::error::{NodeError, NodeResult};
 use crate::manifest::BackendManifest;
 

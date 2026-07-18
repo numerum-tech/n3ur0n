@@ -18,10 +18,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use n3ur0n_adapters::{AdapterError, AdapterResult, Backend, HealthStatus};
-use n3ur0n_core::capability::{
-    AccessMode, CapabilityDecl, CapabilityExample, NegativeExample,
-};
-use serde_json::{json, Value};
+use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
+use serde_json::{Value, json};
 
 use crate::planner::catalog::{Catalog, ToolDef};
 use crate::planner::compiler::PlanCompiler;
@@ -71,8 +69,7 @@ impl Backend for PlannerAsCapability {
 
         // Return {plan: [...]} so the cap output matches what the
         // RemotePlanCompiler expects to deserialise.
-        let body = serde_json::to_value(&plan)
-            .map_err(AdapterError::Serde)?;
+        let body = serde_json::to_value(&plan).map_err(AdapterError::Serde)?;
         Ok(body)
     }
 
@@ -196,8 +193,8 @@ fn parse_catalog(value: Option<&Value>) -> Result<Catalog, String> {
             .get("cap")
             .ok_or_else(|| "tool entry missing `cap`".to_string())?
             .clone();
-        let cap: CapabilityDecl = serde_json::from_value(cap_value)
-            .map_err(|e| format!("invalid `cap`: {e}"))?;
+        let cap: CapabilityDecl =
+            serde_json::from_value(cap_value).map_err(|e| format!("invalid `cap`: {e}"))?;
         tools.push(ToolDef {
             peer_id,
             peer_endpoint,

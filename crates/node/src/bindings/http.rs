@@ -11,15 +11,15 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use serde_json_path::JsonPath;
 use thiserror::Error;
 
 use crate::error::{NodeError, NodeResult};
 use crate::manifest::{BindingSpec, HttpBaseConfig, HttpMethod};
 
-use super::template;
 use super::Binding;
+use super::template;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -122,7 +122,9 @@ impl HttpBinding {
 
 #[async_trait]
 impl Binding for HttpBinding {
-    fn kind(&self) -> &'static str { "http" }
+    fn kind(&self) -> &'static str {
+        "http"
+    }
 
     async fn invoke(&self, args: Value) -> NodeResult<Value> {
         // 1. Resolve URL: substitute `{{args.x}}` in the template, then
@@ -174,22 +176,23 @@ impl Binding for HttpBinding {
         }
 
         // 4. Send.
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| NodeError::Adapter(n3ur0n_adapters::AdapterError::Transport(e.to_string())))?;
+        let resp = req.send().await.map_err(|e| {
+            NodeError::Adapter(n3ur0n_adapters::AdapterError::Transport(e.to_string()))
+        })?;
         let status = resp.status();
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| NodeError::Adapter(n3ur0n_adapters::AdapterError::Transport(e.to_string())))?;
+        let bytes = resp.bytes().await.map_err(|e| {
+            NodeError::Adapter(n3ur0n_adapters::AdapterError::Transport(e.to_string()))
+        })?;
         if !status.is_success() {
             return Err(NodeError::Adapter(n3ur0n_adapters::AdapterError::Backend(
                 format!(
                     "http {} returned {}: {}",
                     url,
                     status,
-                    String::from_utf8_lossy(&bytes).chars().take(300).collect::<String>()
+                    String::from_utf8_lossy(&bytes)
+                        .chars()
+                        .take(300)
+                        .collect::<String>()
                 ),
             )));
         }
@@ -200,7 +203,10 @@ impl Binding for HttpBinding {
             serde_json::from_slice(&bytes).map_err(|e| {
                 NodeError::Adapter(n3ur0n_adapters::AdapterError::Backend(format!(
                     "non-JSON response: {e}; raw: {}",
-                    String::from_utf8_lossy(&bytes).chars().take(200).collect::<String>()
+                    String::from_utf8_lossy(&bytes)
+                        .chars()
+                        .take(200)
+                        .collect::<String>()
                 )))
             })?
         };
@@ -218,9 +224,8 @@ fn extract_path(body: &Value, path: &str) -> NodeResult<Value> {
     if path == "$" {
         return Ok(body.clone());
     }
-    let parsed = JsonPath::parse(path).map_err(|e| {
-        NodeError::InvalidPayload(format!("invalid JSONPath `{path}`: {e}"))
-    })?;
+    let parsed = JsonPath::parse(path)
+        .map_err(|e| NodeError::InvalidPayload(format!("invalid JSONPath `{path}`: {e}")))?;
     let nodes: Vec<&Value> = parsed.query(body).all();
     match nodes.len() {
         0 => Err(NodeError::InvalidPayload(format!(
@@ -280,10 +285,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/translate"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({"translation": "hello"})),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"translation": "hello"})))
             .mount(&server)
             .await;
         let backend = make_backend(server.uri());
@@ -321,6 +323,9 @@ mod tests {
         };
         let binding = HttpBinding::new(spec, backend).unwrap();
         let err = binding.invoke(json!({})).await.unwrap_err().to_string();
-        assert!(err.contains("500"), "expected upstream 500 in error, got: {err}");
+        assert!(
+            err.contains("500"),
+            "expected upstream 500 in error, got: {err}"
+        );
     }
 }

@@ -16,7 +16,7 @@
 //! Both forbid extra top-level properties to keep small models from
 //! padding the output with `description`, `reasoning`, etc.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// llama.cpp-flavoured GBNF grammar for the `Plan` schema. Strict: no
 /// extra fields, no trailing whitespace beyond what the grammar admits.

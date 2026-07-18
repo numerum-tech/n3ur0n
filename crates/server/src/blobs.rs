@@ -2,19 +2,19 @@
 
 use std::path::{Path, PathBuf};
 
+use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::put;
-use axum::Router;
 use n3ur0n_core::blob::{
-    classify_cap_staging, decode_ticket_wire, default_ttl_secs, hash_bytes, validate_hash,
-    BlobOperation, BlobPurpose, BlobTicketPayload, BLOB_TICKET_HEADER,
+    BLOB_TICKET_HEADER, BlobOperation, BlobPurpose, BlobTicketPayload, classify_cap_staging,
+    decode_ticket_wire, default_ttl_secs, hash_bytes, validate_hash,
 };
 use n3ur0n_core::capability::AccessMode;
 use n3ur0n_core::message::{Envelope, ProtocolVerb, SignedMessage};
-use n3ur0n_core::{verify_envelope, Keypair};
+use n3ur0n_core::{Keypair, verify_envelope};
 use n3ur0n_storage::blobs::{self, BlobInsert};
 use n3ur0n_storage::nonces;
 use serde_json::json;
@@ -29,7 +29,10 @@ const DEFAULT_PER_PEER_BLOBS: i64 = 50;
 pub(crate) fn routes() -> Router<AppState> {
     Router::new().route(
         "/blobs/{*hash}",
-        put(put_blob).get(get_blob).head(head_blob).delete(delete_blob),
+        put(put_blob)
+            .get(get_blob)
+            .head(head_blob)
+            .delete(delete_blob),
     )
 }
 
@@ -56,8 +59,8 @@ async fn verify_ticket(
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| blob_error(StatusCode::UNAUTHORIZED, "missing X-N3UR0N-Ticket"))?;
 
-    let signed = decode_ticket_wire(raw)
-        .map_err(|e| blob_error(StatusCode::BAD_REQUEST, &e.to_string()))?;
+    let signed =
+        decode_ticket_wire(raw).map_err(|e| blob_error(StatusCode::BAD_REQUEST, &e.to_string()))?;
 
     let verified = verify_envelope(
         signed,
@@ -69,7 +72,10 @@ async fn verify_ticket(
 
     let inbound = verified.message;
     if inbound.envelope.verb != ProtocolVerb::BlobTicket {
-        return Err(blob_error(StatusCode::BAD_REQUEST, "ticket verb must be blob_ticket"));
+        return Err(blob_error(
+            StatusCode::BAD_REQUEST,
+            "ticket verb must be blob_ticket",
+        ));
     }
 
     let now_secs = state.node.clock().now().unix_timestamp();
@@ -98,10 +104,10 @@ async fn verify_ticket(
         return Err(blob_error(StatusCode::UNAUTHORIZED, "ticket expired"));
     }
 
-    if let Some(ref h) = ticket.hash {
-        if h != path_hash {
-            return Err(blob_error(StatusCode::BAD_REQUEST, "ticket hash mismatch"));
-        }
+    if let Some(ref h) = ticket.hash
+        && h != path_hash
+    {
+        return Err(blob_error(StatusCode::BAD_REQUEST, "ticket hash mismatch"));
     }
 
     Ok((inbound, ticket))
@@ -149,6 +155,7 @@ fn effective_expires(ticket: &BlobTicketPayload, now: i64) -> i64 {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // blob-record columns; a struct would just move the args
 fn insert_blob_record(
     state: &AppState,
     hash: &str,
@@ -200,7 +207,10 @@ async fn put_blob(
     body: Bytes,
 ) -> Response {
     let Some(config_dir) = state.config_dir.as_deref() else {
-        return blob_error(StatusCode::SERVICE_UNAVAILABLE, "blob storage not configured");
+        return blob_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "blob storage not configured",
+        );
     };
     if let Err(e) = validate_hash(&hash) {
         return blob_error(StatusCode::BAD_REQUEST, &e.to_string());
@@ -292,21 +302,20 @@ async fn put_blob(
         .into_response()
 }
 
-fn get_authorization(
-    record: &blobs::BlobRecord,
-    sender: &str,
-) -> Result<(), Response> {
+fn get_authorization(record: &blobs::BlobRecord, sender: &str) -> Result<(), Response> {
     if record.uploader_id.as_deref() == Some(sender) {
         return Ok(());
     }
-    if let Some(ref wl) = record.recipients_whitelist {
-        if let Ok(ids) = serde_json::from_str::<Vec<String>>(wl) {
-            if ids.iter().any(|id| id == sender) {
-                return Ok(());
-            }
-        }
+    if let Some(ref wl) = record.recipients_whitelist
+        && let Ok(ids) = serde_json::from_str::<Vec<String>>(wl)
+        && ids.iter().any(|id| id == sender)
+    {
+        return Ok(());
     }
-    Err(blob_error(StatusCode::FORBIDDEN, "not authorized to download"))
+    Err(blob_error(
+        StatusCode::FORBIDDEN,
+        "not authorized to download",
+    ))
 }
 
 async fn get_blob(
@@ -436,7 +445,8 @@ pub fn forge_local_get_ticket(
         timestamp: now,
         nonce: uuid::Uuid::new_v4().to_string(),
         verb: ProtocolVerb::BlobTicket,
-        payload: serde_json::to_value(payload).map_err(|e| n3ur0n_core::CoreError::Canonical(e.to_string()))?,
+        payload: serde_json::to_value(payload)
+            .map_err(|e| n3ur0n_core::CoreError::Canonical(e.to_string()))?,
         sender_endpoint: None,
     };
     env.sign(keypair)

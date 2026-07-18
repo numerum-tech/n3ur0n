@@ -152,8 +152,10 @@ impl Node {
         };
         let backends = backends_cell.load_full();
         let caps_dir = dir.join("caps");
-        let mut entries: Vec<(n3ur0n_core::CapabilityDecl, Arc<dyn crate::bindings::Binding>)> =
-            Vec::new();
+        let mut entries: Vec<(
+            n3ur0n_core::CapabilityDecl,
+            Arc<dyn crate::bindings::Binding>,
+        )> = Vec::new();
         for result in load_cap_dir(&caps_dir) {
             let cap = match result {
                 Ok(c) => c,

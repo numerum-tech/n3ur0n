@@ -347,7 +347,10 @@ fn cap_rejects_non_semver_version() {
 #[test]
 fn cap_rejects_implausible_country_code() {
     let dir = TempDir::new().unwrap();
-    let bad = translator_cap().replace(r#"countries = ["FR", "BE", "CH"]"#, r#"countries = ["France"]"#);
+    let bad = translator_cap().replace(
+        r#"countries = ["FR", "BE", "CH"]"#,
+        r#"countries = ["France"]"#,
+    );
     let path = write(&dir, "bad.toml", &bad);
     let err = parse_cap_file(&path).unwrap_err().to_string();
     assert!(err.contains("ISO 3166"), "{err}");

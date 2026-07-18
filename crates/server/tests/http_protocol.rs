@@ -36,7 +36,10 @@ async fn build_node() -> Node {
     )
 }
 
-async fn post_message(router: &axum::Router, msg: &SignedMessage) -> (StatusCode, serde_json::Value) {
+async fn post_message(
+    router: &axum::Router,
+    msg: &SignedMessage,
+) -> (StatusCode, serde_json::Value) {
     let req = Request::builder()
         .method(Method::POST)
         .uri("/n3ur0n/v0/messages")
@@ -155,8 +158,16 @@ async fn api_locales_lists_embedded_catalogs() {
         .filter_map(|e| e.get("code").and_then(|v| v.as_str()).map(String::from))
         .collect();
     // At minimum the en + fr catalogs ship with the binary today.
-    assert!(codes.contains(&"en".to_string()), "missing en in {:?}", codes);
-    assert!(codes.contains(&"fr".to_string()), "missing fr in {:?}", codes);
+    assert!(
+        codes.contains(&"en".to_string()),
+        "missing en in {:?}",
+        codes
+    );
+    assert!(
+        codes.contains(&"fr".to_string()),
+        "missing fr in {:?}",
+        codes
+    );
     // Default is documented as "en" — guard against accidental flip.
     assert_eq!(body["default"], "en");
 }

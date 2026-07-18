@@ -70,8 +70,10 @@ pub fn parse_backend_file(path: &Path) -> Result<BackendManifest, ManifestError>
         other => {
             return Err(ManifestError::validation(
                 path,
-                format!("unknown backend.kind `{other}` (expected one of: \
-openai_compat, mcp_server, http_base)"),
+                format!(
+                    "unknown backend.kind `{other}` (expected one of: \
+openai_compat, mcp_server, http_base)"
+                ),
             ));
         }
     };
@@ -146,7 +148,10 @@ fn validate_format_version(path: &Path, version: &str) -> Result<(), ManifestErr
     Ok(())
 }
 
-fn validate_descriptor(path: &Path, decl: &n3ur0n_core::CapabilityDecl) -> Result<(), ManifestError> {
+fn validate_descriptor(
+    path: &Path,
+    decl: &n3ur0n_core::CapabilityDecl,
+) -> Result<(), ManifestError> {
     if decl.name.trim().is_empty() {
         return Err(ManifestError::validation(path, "descriptor.name is empty"));
     }
@@ -160,7 +165,10 @@ fn validate_descriptor(path: &Path, decl: &n3ur0n_core::CapabilityDecl) -> Resul
     semver::Version::parse(&decl.version).map_err(|e| {
         ManifestError::validation(
             path,
-            format!("descriptor.version `{}` is not valid semver: {e}", decl.version),
+            format!(
+                "descriptor.version `{}` is not valid semver: {e}",
+                decl.version
+            ),
         )
     })?;
     // schema_in / schema_out must compile as JSON Schema (or be empty
@@ -207,9 +215,7 @@ fn validate_descriptor(path: &Path, decl: &n3ur0n_core::CapabilityDecl) -> Resul
         if !is_plausible_iso_country(cc) {
             return Err(ManifestError::validation(
                 path,
-                format!(
-                    "descriptor.countries contains implausible ISO 3166-1 alpha-2 code `{cc}`"
-                ),
+                format!("descriptor.countries contains implausible ISO 3166-1 alpha-2 code `{cc}`"),
             ));
         }
     }
@@ -436,8 +442,7 @@ fn is_plausible_bcp47(tag: &str) -> bool {
 }
 
 fn is_plausible_iso_country(code: &str) -> bool {
-    code.chars().count() == 2
-        && code.chars().all(|c| c.is_ascii_uppercase())
+    code.chars().count() == 2 && code.chars().all(|c| c.is_ascii_uppercase())
 }
 
 // ---------------------------------------------------------------------------

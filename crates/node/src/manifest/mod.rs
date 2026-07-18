@@ -14,11 +14,9 @@ pub mod types;
 mod tests;
 
 pub use parser::{
-    parse_backend_file, parse_cap_file, load_backend_dir, load_cap_dir,
-    ManifestError,
+    ManifestError, load_backend_dir, load_cap_dir, parse_backend_file, parse_cap_file,
 };
 pub use types::{
-    BackendManifest, BackendKind, CapabilityManifest, BindingSpec,
-    OpenAICompatConfig, McpServerConfig, HttpBaseConfig,
-    McpTransport, HttpMethod, OutputParser,
+    BackendKind, BackendManifest, BindingSpec, CapabilityManifest, HttpBaseConfig, HttpMethod,
+    McpServerConfig, McpTransport, OpenAICompatConfig, OutputParser,
 };

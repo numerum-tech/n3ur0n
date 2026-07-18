@@ -23,7 +23,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -129,10 +129,7 @@ impl McpSession {
     /// `result` field of the JSON-RPC envelope.
     pub async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, McpError> {
         let result = self
-            .request(
-                "tools/call",
-                json!({"name": name, "arguments": arguments}),
-            )
+            .request("tools/call", json!({"name": name, "arguments": arguments}))
             .await?;
         Ok(result)
     }

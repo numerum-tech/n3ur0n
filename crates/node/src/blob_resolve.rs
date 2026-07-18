@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use n3ur0n_core::blob::{
-    classify_inbound_output, classify_local_cache, classify_outbound_upload, hash_bytes,
-    validate_hash, BlobRef,
+    BlobRef, classify_inbound_output, classify_local_cache, classify_outbound_upload, hash_bytes,
+    validate_hash,
 };
 use n3ur0n_storage::blobs::{self, BlobInsert};
 use reqwest::Client;
@@ -65,12 +65,11 @@ fn blobs_dir(node: &Node) -> Option<PathBuf> {
 
 /// Read blob bytes from the local index path or `<blobs_dir>/<hash>`.
 pub fn read_local_bytes(node: &Node, hash: &str) -> Option<Vec<u8>> {
-    if let Ok(Some(rec)) = blobs::get(node.db(), hash) {
-        if let Ok(b) = std::fs::read(&rec.storage_path) {
-            if hash_bytes(&b) == hash {
-                return Some(b);
-            }
-        }
+    if let Ok(Some(rec)) = blobs::get(node.db(), hash)
+        && let Ok(b) = std::fs::read(&rec.storage_path)
+        && hash_bytes(&b) == hash
+    {
+        return Some(b);
     }
     let root = blobs_dir(node)?;
     let path = root.join(hash);
@@ -191,15 +190,8 @@ pub async fn prepare_invoke_args(
         .map_err(|e| e.to_string())?;
 
         if let Some(path) = storage_path_for(node, &br.hash) {
-            let _ = record_outbound_upload(
-                node,
-                &br.hash,
-                br.size as i64,
-                &br.mime,
-                &path,
-                None,
-                None,
-            );
+            let _ =
+                record_outbound_upload(node, &br.hash, br.size as i64, &br.mime, &path, None, None);
         }
     }
     Ok(args)

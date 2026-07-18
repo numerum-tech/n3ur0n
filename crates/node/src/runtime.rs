@@ -105,11 +105,7 @@ impl NodeRuntime {
             .clone()
     }
 
-    async fn load_state(
-        &self,
-        conv_id: &str,
-        client_id: &str,
-    ) -> NodeResult<ConversationState> {
+    async fn load_state(&self, conv_id: &str, client_id: &str) -> NodeResult<ConversationState> {
         // Check cache.
         {
             let mut cache = self.cache.lock().await;
@@ -123,8 +119,7 @@ impl NodeRuntime {
             }
         }
         // Load from DB.
-        let state = conversation::load(self.node.db(), conv_id, client_id)
-            .map_err(map_conv_err)?;
+        let state = conversation::load(self.node.db(), conv_id, client_id).map_err(map_conv_err)?;
         // Insert in cache.
         let mut cache = self.cache.lock().await;
         cache.put(conv_id.to_string(), state.clone());
@@ -273,14 +268,12 @@ fn map_conv_err(e: ConversationError) -> NodeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NodeConfig;
+    use crate::planner::{DirectChatPlanner, Planner};
     use async_trait::async_trait;
-    use n3ur0n_adapters::{
-        AdapterError, AdapterResult, Backend, HealthStatus, echo::EchoBackend,
-    };
+    use n3ur0n_adapters::{AdapterError, AdapterResult, Backend, HealthStatus, echo::EchoBackend};
     use n3ur0n_core::Keypair;
     use n3ur0n_core::capability::CapabilityDecl;
-    use crate::planner::{DirectChatPlanner, Planner};
-    use crate::NodeConfig;
     use n3ur0n_storage::open_in_memory;
     use serde_json::Value;
 

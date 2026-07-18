@@ -64,9 +64,8 @@ pub fn build_backend_instance(m: &BackendManifest) -> NodeResult<BackendInstance
             Ok(BackendInstance::Mcp(Arc::new(backend)))
         }
     }
-    .map(|inst| {
-        tracing::debug!(name = %m.name, kind = ?backend_kind_tag(&inst), "backend instance built");
-        inst
+    .inspect(|inst| {
+        tracing::debug!(name = %m.name, kind = ?backend_kind_tag(inst), "backend instance built");
     })
 }
 

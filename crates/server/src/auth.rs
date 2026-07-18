@@ -12,15 +12,15 @@
 //! resolves the caller's `Role` against the table.
 
 use axum::extract::{Path as AxumPath, Request, State as AxumState};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use n3ur0n_storage::auth::{self as auth_store, Role, UserRecord};
 use n3ur0n_storage::Db;
+use n3ur0n_storage::auth::{self as auth_store, Role, UserRecord};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 const SESSION_COOKIE: &str = "n3ur0n_session";
@@ -85,30 +85,49 @@ pub fn permissions_for(role: Role) -> &'static [&'static str] {
     use perm::*;
     match role {
         Role::User => &[
-            CHAT_USE, INVOKE_USE,
-            CAPS_READ, PEERS_READ, BACKENDS_READ, IDENTITY_READ,
-            FILES_READ, FILES_DELETE,
+            CHAT_USE,
+            INVOKE_USE,
+            CAPS_READ,
+            PEERS_READ,
+            BACKENDS_READ,
+            IDENTITY_READ,
+            FILES_READ,
+            FILES_DELETE,
         ],
         Role::Operator => &[
-            CHAT_USE, INVOKE_USE,
-            CAPS_READ, CAPS_WRITE,
-            PEERS_READ, BACKENDS_READ, IDENTITY_READ,
-            FILES_READ, FILES_DELETE, CAPS_BLOBS_READ,
+            CHAT_USE,
+            INVOKE_USE,
+            CAPS_READ,
+            CAPS_WRITE,
+            PEERS_READ,
+            BACKENDS_READ,
+            IDENTITY_READ,
+            FILES_READ,
+            FILES_DELETE,
+            CAPS_BLOBS_READ,
         ],
         Role::Admin => &[
-            CHAT_USE, INVOKE_USE,
-            CAPS_READ, CAPS_WRITE,
-            PEERS_READ, PEERS_WRITE,
-            BACKENDS_READ, BACKENDS_WRITE,
-            USERS_READ, USERS_WRITE,
-            IDENTITY_READ, IDENTITY_ROTATE,
-            FILES_READ, FILES_DELETE, CAPS_BLOBS_READ,
+            CHAT_USE,
+            INVOKE_USE,
+            CAPS_READ,
+            CAPS_WRITE,
+            PEERS_READ,
+            PEERS_WRITE,
+            BACKENDS_READ,
+            BACKENDS_WRITE,
+            USERS_READ,
+            USERS_WRITE,
+            IDENTITY_READ,
+            IDENTITY_ROTATE,
+            FILES_READ,
+            FILES_DELETE,
+            CAPS_BLOBS_READ,
         ],
     }
 }
 
 pub fn has_permission(role: Role, want: &str) -> bool {
-    permissions_for(role).iter().any(|p| *p == want)
+    permissions_for(role).contains(&want)
 }
 
 // ---------------------------------------------------------------------------
@@ -155,11 +174,10 @@ pub async fn session_middleware(
     }
 
     let mut resp = next.run(req).await;
-    if let Some(token) = refreshed {
-        if let Ok(hv) = HeaderValue::from_str(&session_cookie_string(&token, SESSION_TTL_SECS))
-        {
-            resp.headers_mut().append(header::SET_COOKIE, hv);
-        }
+    if let Some(token) = refreshed
+        && let Ok(hv) = HeaderValue::from_str(&session_cookie_string(&token, SESSION_TTL_SECS))
+    {
+        resp.headers_mut().append(header::SET_COOKIE, hv);
     }
     let _ = SESSION_REFRESH_INTERVAL;
     resp
@@ -169,10 +187,10 @@ fn extract_cookie(header: Option<&HeaderValue>) -> Option<String> {
     let raw = header.and_then(|v| v.to_str().ok())?;
     for part in raw.split(';') {
         let trimmed = part.trim();
-        if let Some(rest) = trimmed.strip_prefix(&format!("{SESSION_COOKIE}=")) {
-            if !rest.is_empty() {
-                return Some(rest.to_string());
-            }
+        if let Some(rest) = trimmed.strip_prefix(&format!("{SESSION_COOKIE}="))
+            && !rest.is_empty()
+        {
+            return Some(rest.to_string());
         }
     }
     None
@@ -207,11 +225,7 @@ pub async fn require_authed(req: Request, next: Next) -> Response {
 /// Middleware: 401s unless the caller has the named permission. Use via
 /// `.route_layer(axum::middleware::from_fn(|req, next| require(req, next,
 /// perm::CAPS_WRITE)))` — but the convenience helper below sugars it.
-pub async fn require_permission(
-    req: Request,
-    next: Next,
-    permission: &'static str,
-) -> Response {
+pub async fn require_permission(req: Request, next: Next, permission: &'static str) -> Response {
     let user = req.extensions().get::<AuthedUser>().cloned();
     match user {
         None => unauthorised(),
@@ -224,14 +238,20 @@ pub async fn require_permission(
 #[macro_export]
 macro_rules! require_perm {
     ($perm:expr) => {
-        axum::middleware::from_fn(|req: axum::extract::Request, next: axum::middleware::Next| async move {
-            $crate::auth::require_permission(req, next, $perm).await
-        })
+        axum::middleware::from_fn(
+            |req: axum::extract::Request, next: axum::middleware::Next| async move {
+                $crate::auth::require_permission(req, next, $perm).await
+            },
+        )
     };
 }
 
 fn unauthorised() -> Response {
-    (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthenticated"}))).into_response()
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({"error": "unauthenticated"})),
+    )
+        .into_response()
 }
 fn forbidden(perm: &str) -> Response {
     (
@@ -249,7 +269,10 @@ pub fn router(state: AuthState) -> Router {
     use crate::require_perm;
     let users_routes = Router::new()
         .route("/users", get(list_users).post(create_user_route))
-        .route("/users/{id}", axum::routing::patch(update_user_route).delete(delete_user_route))
+        .route(
+            "/users/{id}",
+            axum::routing::patch(update_user_route).delete(delete_user_route),
+        )
         .route_layer(require_perm!(perm::USERS_WRITE))
         .with_state(state.clone());
     Router::new()
@@ -280,23 +303,24 @@ async fn bootstrap(
         return error(StatusCode::CONFLICT, "bootstrap already completed");
     }
     if !is_valid_username(&req.username) {
-        return error(StatusCode::BAD_REQUEST, "invalid username (3-32 chars, [A-Za-z0-9._-])");
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid username (3-32 chars, [A-Za-z0-9._-])",
+        );
     }
     if req.password.chars().count() < 6 {
         return error(StatusCode::BAD_REQUEST, "password must be at least 6 chars");
     }
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let user = match auth_store::create_user(&state.db, &req.username, &req.password, Role::Admin, now) {
-        Ok(u) => u,
-        Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-    };
+    let user =
+        match auth_store::create_user(&state.db, &req.username, &req.password, Role::Admin, now) {
+            Ok(u) => u,
+            Err(e) => return error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        };
     issue_session(&state.db, user, now)
 }
 
-async fn login(
-    AxumState(state): AxumState<AuthState>,
-    Json(req): Json<CredsRequest>,
-) -> Response {
+async fn login(AxumState(state): AxumState<AuthState>, Json(req): Json<CredsRequest>) -> Response {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let stored = match auth_store::fetch_password_hash(&state.db, &req.username) {
         Ok(Some(v)) => v,
@@ -339,10 +363,10 @@ async fn logout(
     AxumState(state): AxumState<AuthState>,
     user: Option<Extension<AuthedUser>>,
 ) -> Response {
-    if let Some(Extension(u)) = user {
-        if let Some(hash) = u.session_token_hash {
-            let _ = auth_store::delete_session(&state.db, &hash);
-        }
+    if let Some(Extension(u)) = user
+        && let Some(hash) = u.session_token_hash
+    {
+        let _ = auth_store::delete_session(&state.db, &hash);
     }
     let mut resp = (StatusCode::OK, Json(json!({"ok": true}))).into_response();
     if let Ok(hv) = HeaderValue::from_str(&cleared_session_cookie_string()) {
@@ -386,9 +410,14 @@ async fn change_password(
     user: Option<Extension<AuthedUser>>,
     Json(req): Json<PasswordChangeRequest>,
 ) -> Response {
-    let Some(Extension(u)) = user else { return unauthorised() };
+    let Some(Extension(u)) = user else {
+        return unauthorised();
+    };
     if req.new_password.chars().count() < 6 {
-        return error(StatusCode::BAD_REQUEST, "new password must be at least 6 chars");
+        return error(
+            StatusCode::BAD_REQUEST,
+            "new password must be at least 6 chars",
+        );
     }
     let (_, hash) = match auth_store::fetch_password_hash(&state.db, &u.username) {
         Ok(Some(v)) => v,
@@ -436,7 +465,11 @@ async fn create_user_route(
     };
     let now = OffsetDateTime::now_utc().unix_timestamp();
     match auth_store::create_user(&state.db, &req.username, &req.password, role, now) {
-        Ok(u) => (StatusCode::CREATED, Json(serde_json::to_value(u).unwrap_or(Value::Null))).into_response(),
+        Ok(u) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(u).unwrap_or(Value::Null)),
+        )
+            .into_response(),
         Err(e) => error(StatusCode::CONFLICT, &e.to_string()),
     }
 }
@@ -483,10 +516,10 @@ async fn delete_user_route(
     user: Option<Extension<AuthedUser>>,
 ) -> Response {
     // Refuse self-delete to avoid locking the publisher out.
-    if let Some(Extension(u)) = user.as_ref() {
-        if u.id == id {
-            return error(StatusCode::BAD_REQUEST, "cannot delete yourself");
-        }
+    if let Some(Extension(u)) = user.as_ref()
+        && u.id == id
+    {
+        return error(StatusCode::BAD_REQUEST, "cannot delete yourself");
     }
     // Refuse deleting the last admin.
     if let Ok(list) = auth_store::list_users(&state.db) {
@@ -510,7 +543,8 @@ fn is_valid_username(s: &str) -> bool {
     if !(3..=32).contains(&n) {
         return false;
     }
-    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
 /// Helper: read the bypass flag from env so the boot code doesn't repeat
@@ -520,4 +554,3 @@ pub fn read_bypass_env() -> bool {
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
-

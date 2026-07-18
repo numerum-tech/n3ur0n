@@ -62,14 +62,14 @@ pub fn build_binding(
         }
         // Mismatch — give a clear error so the operator knows which cap is
         // wired to the wrong backend kind.
-        (BS::Prompt { backend, .. }, _) => Err(crate::error::NodeError::InvalidPayload(
-            format!("prompt binding requires an `openai_compat` backend; `{backend}` is a different kind"),
-        )),
-        (BS::Http { backend, .. }, _) => Err(crate::error::NodeError::InvalidPayload(
-            format!("http binding requires an `http_base` backend; `{backend}` is a different kind"),
-        )),
-        (BS::Mcp { backend, .. }, _) => Err(crate::error::NodeError::InvalidPayload(
-            format!("mcp binding requires an `mcp_server` backend; `{backend}` is a different kind"),
-        )),
+        (BS::Prompt { backend, .. }, _) => Err(crate::error::NodeError::InvalidPayload(format!(
+            "prompt binding requires an `openai_compat` backend; `{backend}` is a different kind"
+        ))),
+        (BS::Http { backend, .. }, _) => Err(crate::error::NodeError::InvalidPayload(format!(
+            "http binding requires an `http_base` backend; `{backend}` is a different kind"
+        ))),
+        (BS::Mcp { backend, .. }, _) => Err(crate::error::NodeError::InvalidPayload(format!(
+            "mcp binding requires an `mcp_server` backend; `{backend}` is a different kind"
+        ))),
     }
 }

@@ -172,7 +172,10 @@ async fn messages_as_json_string_is_coerced_to_array() {
     });
     let _ = backend.invoke("chat", payload).await.unwrap();
     let req = state.last_request.lock().await.clone().unwrap();
-    assert!(req["messages"].is_array(), "messages must be coerced to array");
+    assert!(
+        req["messages"].is_array(),
+        "messages must be coerced to array"
+    );
     assert_eq!(req["messages"][0]["content"], "hi");
 }
 

@@ -1,16 +1,16 @@
 //! Local user files API (`/api/v0/files`).
 
+use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Extension, Path as AxumPath, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use n3ur0n_storage::blobs;
 use serde_json::json;
 
-use crate::auth::{has_permission, AuthedUser};
 use crate::auth::perm::{CAPS_BLOBS_READ, FILES_DELETE, FILES_READ};
+use crate::auth::{AuthedUser, has_permission};
 use crate::http::AppState;
 
 const CLIENT_ID_COOKIE: &str = "n3ur0n_client_id";
@@ -282,10 +282,10 @@ fn owns_record(record: &blobs::BlobRecord, user_id: i64, client_id: Option<&str>
     if record.local_user_id == Some(user_id) {
         return true;
     }
-    if let Some(cid) = client_id {
-        if record.client_id.as_deref() == Some(cid) {
-            return true;
-        }
+    if let Some(cid) = client_id
+        && record.client_id.as_deref() == Some(cid)
+    {
+        return true;
     }
     false
 }

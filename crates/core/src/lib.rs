@@ -25,10 +25,10 @@ pub mod protocol;
 pub mod verify;
 
 pub use blob::{
+    AnchorKind, BLOB_HASH_PREFIX, BLOB_TICKET_HEADER, BlobClassification, BlobOperation,
+    BlobProvenance, BlobPurpose, BlobRef, BlobRole, BlobTicketPayload, ProcessingStatus,
     classify_cap_staging, classify_inbound_output, classify_local_cache, classify_outbound_upload,
     decode_ticket_wire, default_ttl_secs, encode_ticket_wire, hash_bytes, validate_hash,
-    AnchorKind, BlobClassification, BlobOperation, BlobProvenance, BlobPurpose, BlobRef, BlobRole,
-    BlobTicketPayload, ProcessingStatus, BLOB_HASH_PREFIX, BLOB_TICKET_HEADER,
 };
 pub use capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 pub use error::{CoreError, CoreResult};

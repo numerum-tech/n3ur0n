@@ -102,7 +102,10 @@ impl OpenAIBackend {
     }
 
     fn chat_url(&self) -> String {
-        format!("{}/v1/chat/completions", self.config.base_url.trim_end_matches('/'))
+        format!(
+            "{}/v1/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        )
     }
 
     fn models_url(&self) -> String {
@@ -175,9 +178,11 @@ impl Backend for OpenAIBackend {
         }
 
         let parsed: ChatCompletion = serde_json::from_slice(&bytes)?;
-        let first = parsed.choices.into_iter().next().ok_or_else(|| {
-            AdapterError::Backend("upstream returned no choices".into())
-        })?;
+        let first = parsed
+            .choices
+            .into_iter()
+            .next()
+            .ok_or_else(|| AdapterError::Backend("upstream returned no choices".into()))?;
         let mut message = json!({
             "role": first.message.role,
             "content": first.message.content,
@@ -193,16 +198,12 @@ impl Backend for OpenAIBackend {
     }
 
     async fn describe(&self) -> AdapterResult<Vec<CapabilityDecl>> {
-        let description = self
-            .config
-            .description
-            .clone()
-            .unwrap_or_else(|| {
-                format!(
-                    "OpenAI-compatible chat completion via {} (default model: {}).",
-                    self.config.base_url, self.config.default_model
-                )
-            });
+        let description = self.config.description.clone().unwrap_or_else(|| {
+            format!(
+                "OpenAI-compatible chat completion via {} (default model: {}).",
+                self.config.base_url, self.config.default_model
+            )
+        });
         Ok(vec![CapabilityDecl {
             name: CHAT_CAPABILITY.into(),
             description,
@@ -219,8 +220,7 @@ impl Backend for OpenAIBackend {
             lobe_ids: vec![],
             examples: vec![
                 CapabilityExample {
-                    user_intent: "answer a free-form question or generate prose"
-                        .into(),
+                    user_intent: "answer a free-form question or generate prose".into(),
                     args: json!({"prompt": "Write one haiku about autumn."}),
                     expected_output: json!({
                         "model": "llama3.1:8b",
@@ -279,8 +279,7 @@ and exact; do not delegate trivial string ops to a chat model."
                 },
                 NegativeExample {
                     user_intent: "pick a random number".into(),
-                    why_not: "LLMs are not uniform RNGs; use `random_int` instead."
-                        .into(),
+                    why_not: "LLMs are not uniform RNGs; use `random_int` instead.".into(),
                 },
             ],
             output_semantic: Some(
@@ -383,16 +382,10 @@ fn apply_model_lock(map: &mut serde_json::Map<String, Value>, config: &OpenAICon
     if config.allow_model_override {
         let caller = map.get("model").and_then(|v| v.as_str());
         if caller.map(str::is_empty).unwrap_or(true) {
-            map.insert(
-                "model".into(),
-                Value::String(config.default_model.clone()),
-            );
+            map.insert("model".into(), Value::String(config.default_model.clone()));
         }
     } else {
-        map.insert(
-            "model".into(),
-            Value::String(config.default_model.clone()),
-        );
+        map.insert("model".into(), Value::String(config.default_model.clone()));
     }
 }
 
@@ -410,21 +403,19 @@ fn sanitise_chat_args(args: &Value) -> Value {
             // "messages": "[{...}]"). If the string isn't valid JSON or
             // doesn't decode to an array, drop it — the caller can fall
             // back to `prompt`.
-            if let Some(v) = out.get("messages").cloned() {
-                if let Value::String(raw) = &v {
-                    let coerced = serde_json::from_str::<Value>(raw)
-                        .ok()
-                        .filter(|d| d.is_array());
-                    match coerced {
-                        Some(arr) => {
-                            out.insert("messages".into(), arr);
-                        }
-                        None => {
-                            // Not a valid JSON array — fall back to a
-                            // single-user-message prompt and drop messages.
-                            out.insert("prompt".into(), Value::String(raw.clone()));
-                            out.remove("messages");
-                        }
+            if let Some(Value::String(raw)) = out.get("messages").cloned() {
+                let coerced = serde_json::from_str::<Value>(&raw)
+                    .ok()
+                    .filter(|d| d.is_array());
+                match coerced {
+                    Some(arr) => {
+                        out.insert("messages".into(), arr);
+                    }
+                    None => {
+                        // Not a valid JSON array — fall back to a
+                        // single-user-message prompt and drop messages.
+                        out.insert("prompt".into(), Value::String(raw));
+                        out.remove("messages");
                     }
                 }
             }

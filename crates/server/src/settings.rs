@@ -27,9 +27,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use n3ur0n_node::manifest::{load_backend_dir, BackendKind as MfBackendKind};
+use n3ur0n_node::manifest::{BackendKind as MfBackendKind, load_backend_dir};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::warn;
 
 #[derive(Clone, Debug)]
@@ -57,10 +57,7 @@ pub fn router(
     // Mutating backend routes — admin-only.
     let backends_write = Router::new()
         .route("/backends", axum::routing::post(create_backend))
-        .route(
-            "/backends/{name}",
-            axum::routing::delete(delete_backend),
-        )
+        .route("/backends/{name}", axum::routing::delete(delete_backend))
         .route_layer(require_perm!(perm::BACKENDS_WRITE))
         .with_state(state.clone());
     // Read-only backend routes — any authenticated user (BACKENDS_READ).
@@ -187,7 +184,11 @@ async fn create_backend(
     Json(req): Json<CreateBackendRequest>,
 ) -> impl IntoResponse {
     let name = req.name.trim();
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return settings_error(
             StatusCode::BAD_REQUEST,
             "name must be non-empty and match [a-zA-Z0-9_-]",
@@ -196,17 +197,26 @@ async fn create_backend(
     let body = match req.kind.as_str() {
         "openai_compat" => {
             let Some(base_url_raw) = req.base_url.as_deref() else {
-                return settings_error(StatusCode::BAD_REQUEST, "base_url required for openai_compat");
+                return settings_error(
+                    StatusCode::BAD_REQUEST,
+                    "base_url required for openai_compat",
+                );
             };
             let base_url = n3ur0n_adapters::openai::normalize_openai_base_url(base_url_raw);
             let Some(default_model) = req.default_model.as_deref() else {
-                return settings_error(StatusCode::BAD_REQUEST, "default_model required for openai_compat");
+                return settings_error(
+                    StatusCode::BAD_REQUEST,
+                    "default_model required for openai_compat",
+                );
             };
             // Edit-mode preservation: when `api_key_keep` is set + no
             // explicit key supplied, re-read the existing file rather than
             // blanking the field on disk.
             let api_key = if req.api_key.is_none() && req.api_key_keep {
-                let existing = state.config_dir.join("backends").join(format!("{name}.toml"));
+                let existing = state
+                    .config_dir
+                    .join("backends")
+                    .join(format!("{name}.toml"));
                 match n3ur0n_node::manifest::parse_backend_file(&existing) {
                     Ok(m) => match m.kind {
                         MfBackendKind::OpenAICompat(cfg) => cfg.api_key,
@@ -253,7 +263,8 @@ api_key       = "{api_key}"
             } else {
                 format!(
                     "args = [{}]\n",
-                    req.args.iter()
+                    req.args
+                        .iter()
                         .map(|a| format!("\"{}\"", toml_escape(a)))
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -294,7 +305,11 @@ command   = "{command}"
             } else {
                 let mut s = String::from("\n[http_base.headers]\n");
                 for (k, v) in &req.headers {
-                    s.push_str(&format!("\"{}\" = \"{}\"\n", k.replace('"', "\\\""), toml_escape(v)));
+                    s.push_str(&format!(
+                        "\"{}\" = \"{}\"\n",
+                        k.replace('"', "\\\""),
+                        toml_escape(v)
+                    ));
                 }
                 s
             };
@@ -338,31 +353,30 @@ base_url = "{base_url}"
                 (0, 0, Some(e.to_string()))
             }
         };
-    let (planner_reloaded, planner_reload_warning, planner_active) =
-        match state.planner.as_ref() {
-            Some(handle) => match crate::planner_config::hot_reload_planner_after_backend_change(
-                &state.node,
-                &state.config_dir,
-                handle,
-                &name,
-            ) {
-                Ok(Some(resolved)) => (
-                    true,
-                    None,
-                    Some(json!({
-                        "base_url": resolved.openai.base_url,
-                        "model": resolved.model_hint,
-                        "backend": resolved.backend_name,
-                    })),
-                ),
-                Ok(None) => (false, None, None),
-                Err(e) => {
-                    tracing::warn!(error = %e, backend = %name, "planner reload after upsert failed");
-                    (false, Some(e.to_string()), None)
-                }
-            },
-            None => (false, None, None),
-        };
+    let (planner_reloaded, planner_reload_warning, planner_active) = match state.planner.as_ref() {
+        Some(handle) => match crate::planner_config::hot_reload_planner_after_backend_change(
+            &state.node,
+            &state.config_dir,
+            handle,
+            name,
+        ) {
+            Ok(Some(resolved)) => (
+                true,
+                None,
+                Some(json!({
+                    "base_url": resolved.openai.base_url,
+                    "model": resolved.model_hint,
+                    "backend": resolved.backend_name,
+                })),
+            ),
+            Ok(None) => (false, None, None),
+            Err(e) => {
+                tracing::warn!(error = %e, backend = %name, "planner reload after upsert failed");
+                (false, Some(e.to_string()), None)
+            }
+        },
+        None => (false, None, None),
+    };
     Json(json!({
         "ok": true,
         "name": name,
@@ -382,10 +396,17 @@ async fn get_backend(
     AxumState(state): AxumState<SettingsState>,
     AxumPath(name): AxumPath<String>,
 ) -> impl IntoResponse {
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return settings_error(StatusCode::BAD_REQUEST, "invalid name");
     }
-    let target = state.config_dir.join("backends").join(format!("{name}.toml"));
+    let target = state
+        .config_dir
+        .join("backends")
+        .join(format!("{name}.toml"));
     if !target.exists() {
         return settings_error(StatusCode::NOT_FOUND, "backend manifest not found");
     }
@@ -428,10 +449,17 @@ async fn delete_backend(
     AxumState(state): AxumState<SettingsState>,
     AxumPath(name): AxumPath<String>,
 ) -> impl IntoResponse {
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return settings_error(StatusCode::BAD_REQUEST, "invalid name");
     }
-    let target = state.config_dir.join("backends").join(format!("{name}.toml"));
+    let target = state
+        .config_dir
+        .join("backends")
+        .join(format!("{name}.toml"));
     if !target.exists() {
         return settings_error(StatusCode::NOT_FOUND, "backend manifest not found");
     }
@@ -452,29 +480,28 @@ async fn delete_backend(
                 (0, 0, Some(e.to_string()))
             }
         };
-    let (planner_reloaded, planner_reload_warning) =
-        if was_planner_backend {
-            match state.planner.as_ref() {
-                Some(handle) => {
-                    let user = crate::planner_config::load_planner_user_config(&state.config_dir);
-                    match crate::planner_config::hot_reload_planner_runtime(
-                        &state.node,
-                        &state.config_dir,
-                        handle,
-                        &user,
-                    ) {
-                        Ok(_) => (true, None),
-                        Err(e) => {
-                            tracing::warn!(error = %e, backend = %name, "planner reload after delete failed");
-                            (false, Some(e.to_string()))
-                        }
+    let (planner_reloaded, planner_reload_warning) = if was_planner_backend {
+        match state.planner.as_ref() {
+            Some(handle) => {
+                let user = crate::planner_config::load_planner_user_config(&state.config_dir);
+                match crate::planner_config::hot_reload_planner_runtime(
+                    &state.node,
+                    &state.config_dir,
+                    handle,
+                    &user,
+                ) {
+                    Ok(_) => (true, None),
+                    Err(e) => {
+                        tracing::warn!(error = %e, backend = %name, "planner reload after delete failed");
+                        (false, Some(e.to_string()))
                     }
                 }
-                None => (false, None),
             }
-        } else {
-            (false, None)
-        };
+            None => (false, None),
+        }
+    } else {
+        (false, None)
+    };
     Json(json!({
         "ok": true,
         "name": name,
@@ -527,7 +554,9 @@ struct UpsertCapRequest {
     binding: CapBindingReq,
 }
 
-fn default_mode() -> String { "free".into() }
+fn default_mode() -> String {
+    "free".into()
+}
 
 #[derive(Debug, Deserialize)]
 struct CapExampleReq {
@@ -574,7 +603,9 @@ enum CapBindingReq {
     },
 }
 
-fn default_parser() -> String { "text".into() }
+fn default_parser() -> String {
+    "text".into()
+}
 
 async fn list_cap_manifests(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
     use n3ur0n_node::manifest::load_cap_dir;
@@ -622,7 +653,11 @@ async fn delete_cap_manifest(
     AxumState(state): AxumState<SettingsState>,
     AxumPath(name): AxumPath<String>,
 ) -> impl IntoResponse {
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return settings_error(StatusCode::BAD_REQUEST, "invalid name");
     }
     let target = state.config_dir.join("caps").join(format!("{name}.toml"));
@@ -650,14 +685,21 @@ async fn upsert_cap_manifest(
     Json(req): Json<UpsertCapRequest>,
 ) -> impl IntoResponse {
     let name = req.name.trim();
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return settings_error(
             StatusCode::BAD_REQUEST,
             "name must be non-empty and match [a-zA-Z0-9_-]",
         );
     }
     if semver::Version::parse(&req.version).is_err() {
-        return settings_error(StatusCode::BAD_REQUEST, "version must be valid semver (e.g. 0.1.0)");
+        return settings_error(
+            StatusCode::BAD_REQUEST,
+            "version must be valid semver (e.g. 0.1.0)",
+        );
     }
     if req.description.trim().is_empty() {
         return settings_error(StatusCode::BAD_REQUEST, "description is required");
@@ -719,7 +761,10 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
             ),
             Value::Array(arr) => format!(
                 "[{}]",
-                arr.iter().map(json_to_toml_value).collect::<Vec<_>>().join(", ")
+                arr.iter()
+                    .map(json_to_toml_value)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             Value::Object(obj) => format!(
                 "{{ {} }}",
@@ -767,39 +812,55 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
         let _ = writeln!(
             out,
             "tags = [{}]",
-            req.tags.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+            req.tags
+                .iter()
+                .map(|t| toml_str(t))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
     if !req.lobe_ids.is_empty() {
         let _ = writeln!(
             out,
             "lobe_ids = [{}]",
-            req.lobe_ids.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+            req.lobe_ids
+                .iter()
+                .map(|t| toml_str(t))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
     if !req.languages.is_empty() {
         let _ = writeln!(
             out,
             "languages = [{}]",
-            req.languages.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+            req.languages
+                .iter()
+                .map(|t| toml_str(t))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
     if !req.countries.is_empty() {
         let _ = writeln!(
             out,
             "countries = [{}]",
-            req.countries.iter().map(|t| toml_str(t)).collect::<Vec<_>>().join(", ")
+            req.countries
+                .iter()
+                .map(|t| toml_str(t))
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
-    if let Some(d) = &req.disambiguation {
-        if !d.trim().is_empty() {
-            let _ = writeln!(out, "disambiguation = {}", toml_multiline(d));
-        }
+    if let Some(d) = &req.disambiguation
+        && !d.trim().is_empty()
+    {
+        let _ = writeln!(out, "disambiguation = {}", toml_multiline(d));
     }
-    if let Some(o) = &req.output_semantic {
-        if !o.trim().is_empty() {
-            let _ = writeln!(out, "output_semantic = {}", toml_multiline(o));
-        }
+    if let Some(o) = &req.output_semantic
+        && !o.trim().is_empty()
+    {
+        let _ = writeln!(out, "output_semantic = {}", toml_multiline(o));
     }
     let _ = writeln!(out);
     let _ = writeln!(out, "[descriptor.schema_in]");
@@ -824,7 +885,11 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
         let _ = writeln!(out, "\n[[descriptor.examples]]");
         let _ = writeln!(out, "user_intent = {}", toml_str(&ex.user_intent));
         let _ = writeln!(out, "args = {}", json_to_toml_value(&ex.args));
-        let _ = writeln!(out, "expected_output = {}", json_to_toml_value(&ex.expected_output));
+        let _ = writeln!(
+            out,
+            "expected_output = {}",
+            json_to_toml_value(&ex.expected_output)
+        );
     }
 
     match &req.binding {
@@ -841,10 +906,10 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
             let _ = writeln!(out, "backend = {}", toml_str(backend));
             let _ = writeln!(out, "\n[binding.prompt]");
             let _ = writeln!(out, "system_prompt = {}", toml_multiline(system_prompt));
-            if let Some(t) = user_template {
-                if !t.trim().is_empty() {
-                    let _ = writeln!(out, "user_template = {}", toml_multiline(t));
-                }
+            if let Some(t) = user_template
+                && !t.trim().is_empty()
+            {
+                let _ = writeln!(out, "user_template = {}", toml_multiline(t));
             }
             if !parameters.is_empty() {
                 let pairs: Vec<String> = parameters
@@ -854,10 +919,10 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
                 let _ = writeln!(out, "parameters = {{ {} }}", pairs.join(", "));
             }
             let _ = writeln!(out, "output_parser = {}", toml_str(output_parser));
-            if let Some(m) = model {
-                if !m.trim().is_empty() {
-                    let _ = writeln!(out, "model = {}", toml_str(m));
-                }
+            if let Some(m) = model
+                && !m.trim().is_empty()
+            {
+                let _ = writeln!(out, "model = {}", toml_str(m));
             }
         }
         CapBindingReq::Mcp {
@@ -903,7 +968,9 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
             }
             let m = method.to_ascii_uppercase();
             if !matches!(m.as_str(), "GET" | "POST" | "PUT" | "DELETE") {
-                return Err(format!("binding.http.method `{method}` invalid (GET|POST|PUT|DELETE)"));
+                return Err(format!(
+                    "binding.http.method `{method}` invalid (GET|POST|PUT|DELETE)"
+                ));
             }
             let _ = writeln!(out, "\n[binding]");
             let _ = writeln!(out, "type = \"http\"");
@@ -914,10 +981,10 @@ fn build_cap_toml(name: &str, req: &UpsertCapRequest) -> Result<String, String> 
             if let Some(t) = timeout_ms {
                 let _ = writeln!(out, "timeout_ms = {t}");
             }
-            if let Some(p) = response_path {
-                if !p.trim().is_empty() {
-                    let _ = writeln!(out, "response_path = {}", toml_str(p));
-                }
+            if let Some(p) = response_path
+                && !p.trim().is_empty()
+            {
+                let _ = writeln!(out, "response_path = {}", toml_str(p));
             }
             if let Some(b) = body_template {
                 let _ = writeln!(out, "body_template = {}", json_to_toml_value(b));

@@ -19,21 +19,19 @@ impl Backend for EchoBackend {
         Ok(vec![CapabilityDecl {
             name: "echo".into(),
             description: "Returns its input arguments untouched. Useful as a probe \
-or smoke test; provides no transformation.".into(),
+or smoke test; provides no transformation."
+                .into(),
             schema_in: json!({"type": "object"}),
             schema_out: json!({"type": "object"}),
             mode: AccessMode::Free,
             pricing: None,
             tags: vec!["debug".into(), "smoke".into()],
             lobe_ids: vec![],
-            examples: vec![
-                CapabilityExample {
-                    user_intent: "round-trip a payload to verify reachability"
-                        .into(),
-                    args: json!({"hello": "world"}),
-                    expected_output: json!({"hello": "world"}),
-                },
-            ],
+            examples: vec![CapabilityExample {
+                user_intent: "round-trip a payload to verify reachability".into(),
+                args: json!({"hello": "world"}),
+                expected_output: json!({"hello": "world"}),
+            }],
             disambiguation: Some(
                 "Diagnostic cap only. Never add as an intermediate step in a multi-step \
 plan — it produces no useful data for downstream consumers."
@@ -47,8 +45,7 @@ plan — it produces no useful data for downstream consumers."
                         .into(),
                 },
                 NegativeExample {
-                    user_intent: "relay an earlier step's result so it appears in the trace"
-                        .into(),
+                    user_intent: "relay an earlier step's result so it appears in the trace".into(),
                     why_not: "the executor's blackboard already carries every step's \
 result; an echo step is redundant filler."
                         .into(),

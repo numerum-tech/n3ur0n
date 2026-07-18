@@ -6,13 +6,13 @@ use anyhow::{Context, Result};
 use clap::Args;
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use n3ur0n_adapters::openai::OpenAIConfig;
 use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_node::IdentityFile;
 use n3ur0n_node::client as peer_client;
 use n3ur0n_node::discovery;
 use n3ur0n_node::runtime::RuntimeConfig;
-use arc_swap::ArcSwap;
 use n3ur0n_server::bootstrap::{self, BackendKind, PlannerKind};
 use n3ur0n_server::http;
 use n3ur0n_server::planner_config::{PlannerEnvFallback, load_planner_user_config};
@@ -49,7 +49,11 @@ pub(crate) struct ServeArgs {
     /// (legacy v0.2 behaviour). 1 = seeds + their immediate known peers.
     /// 2 = up to grand-peers (default). Higher values walk further but
     /// fan-out grows; capped at 100 peers total.
-    #[arg(long = "bootstrap-depth", env = "N3UR0N_BOOTSTRAP_DEPTH", default_value_t = 2)]
+    #[arg(
+        long = "bootstrap-depth",
+        env = "N3UR0N_BOOTSTRAP_DEPTH",
+        default_value_t = 2
+    )]
     pub(crate) bootstrap_depth: u32,
 
     /// Backend adapter: `echo` (default) or `openai` (also covers Ollama,
@@ -166,7 +170,9 @@ pub(crate) struct SendArgs {
 }
 
 pub(crate) async fn init(args: InitArgs) -> Result<()> {
-    let dir = args.config_dir.unwrap_or_else(bootstrap::default_config_dir);
+    let dir = args
+        .config_dir
+        .unwrap_or_else(bootstrap::default_config_dir);
     let kp = bootstrap::create_identity(&dir)?;
     println!("instance id: {}", kp.instance_id());
     println!("config dir : {}", dir.display());
@@ -176,15 +182,16 @@ pub(crate) async fn init(args: InitArgs) -> Result<()> {
 }
 
 pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
-    let dir = args.config_dir.unwrap_or_else(bootstrap::default_config_dir);
+    let dir = args
+        .config_dir
+        .unwrap_or_else(bootstrap::default_config_dir);
     let cli_peers: Vec<String> = args
         .bootstrap
         .into_iter()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    let bootstrap_peers =
-        n3ur0n_server::bootstrap_config::resolve_startup_peers(&cli_peers, &dir);
+    let bootstrap_peers = n3ur0n_server::bootstrap_config::resolve_startup_peers(&cli_peers, &dir);
 
     // v0.3 manifest mode trumps the compile-time --backend selector.
     let backend_kind = if let Some(manifest_dir) = args.manifest_dir.clone() {
@@ -201,7 +208,8 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
             args.openai_api_key.clone(),
         )?
     };
-    let node = bootstrap::load_node(&dir, args.endpoint, bootstrap_peers.clone(), backend_kind).await?;
+    let node =
+        bootstrap::load_node(&dir, args.endpoint, bootstrap_peers.clone(), backend_kind).await?;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], args.port));
     tracing::info!(instance_id = %node.instance_id(), port = args.port, "starting n3ur0n server");
 
@@ -214,8 +222,12 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
                 n3ur0n_node::discovery::bootstrap_transitive(&bg, &bootstrap_peers, depth).await;
             for o in &outcomes {
                 match (&o.instance_id, &o.error) {
-                    (Some(id), _) => tracing::info!(endpoint = %o.endpoint, peer = %id, "bootstrap ok"),
-                    (None, Some(err)) => tracing::warn!(endpoint = %o.endpoint, error = %err, "bootstrap failed"),
+                    (Some(id), _) => {
+                        tracing::info!(endpoint = %o.endpoint, peer = %id, "bootstrap ok")
+                    }
+                    (None, Some(err)) => {
+                        tracing::warn!(endpoint = %o.endpoint, error = %err, "bootstrap failed")
+                    }
                     _ => {}
                 }
             }
@@ -234,7 +246,10 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
         max_active_conversations: args.max_active_conversations,
     };
     let planner_env = planner_kind.as_ref().map(|kind| {
-        let PlannerKind::PlanExec { backend, model_hint } = kind;
+        let PlannerKind::PlanExec {
+            backend,
+            model_hint,
+        } = kind;
         PlannerEnvFallback {
             base_url: backend.base_url.clone(),
             default_model: model_hint
@@ -278,17 +293,29 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
 }
 
 pub(crate) async fn keys(args: KeysArgs) -> Result<()> {
-    let dir = args.config_dir.unwrap_or_else(bootstrap::default_config_dir);
-    let kp = IdentityFile::load(&bootstrap::keys_path(&dir))
-        .with_context(|| format!("reading identity from {}", bootstrap::keys_path(&dir).display()))?;
+    let dir = args
+        .config_dir
+        .unwrap_or_else(bootstrap::default_config_dir);
+    let kp = IdentityFile::load(&bootstrap::keys_path(&dir)).with_context(|| {
+        format!(
+            "reading identity from {}",
+            bootstrap::keys_path(&dir).display()
+        )
+    })?;
     println!("{}", kp.instance_id());
     Ok(())
 }
 
 pub(crate) async fn send(args: SendArgs) -> Result<()> {
-    let dir = args.config_dir.unwrap_or_else(bootstrap::default_config_dir);
-    let kp = IdentityFile::load(&bootstrap::keys_path(&dir))
-        .with_context(|| format!("loading identity from {}", bootstrap::keys_path(&dir).display()))?;
+    let dir = args
+        .config_dir
+        .unwrap_or_else(bootstrap::default_config_dir);
+    let kp = IdentityFile::load(&bootstrap::keys_path(&dir)).with_context(|| {
+        format!(
+            "loading identity from {}",
+            bootstrap::keys_path(&dir).display()
+        )
+    })?;
     let verb = parse_verb(&args.verb)?;
     let payload: Value = serde_json::from_str(&args.payload)
         .with_context(|| format!("parsing --payload as JSON: {}", args.payload))?;
@@ -303,7 +330,10 @@ pub(crate) async fn send(args: SendArgs) -> Result<()> {
 pub(crate) async fn peers(args: PeersArgs) -> Result<()> {
     match args.action {
         PeersAction::List { config_dir, limit } => peers_list(config_dir, limit).await,
-        PeersAction::Refresh { config_dir, endpoint } => peers_refresh(config_dir, endpoint).await,
+        PeersAction::Refresh {
+            config_dir,
+            endpoint,
+        } => peers_refresh(config_dir, endpoint).await,
         PeersAction::Discover {
             config_dir,
             capability,
@@ -339,7 +369,10 @@ async fn peers_refresh(config_dir: Option<PathBuf>, endpoint: String) -> Result<
         "{}\t{}\tcaps: {:?}",
         desc.instance_id,
         desc.endpoint.unwrap_or_else(|| "-".into()),
-        desc.capabilities.iter().map(|c| &c.name).collect::<Vec<_>>()
+        desc.capabilities
+            .iter()
+            .map(|c| &c.name)
+            .collect::<Vec<_>>()
     );
     Ok(())
 }

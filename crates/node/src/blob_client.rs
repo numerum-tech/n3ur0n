@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use n3ur0n_core::blob::{
-    decode_ticket_wire, encode_ticket_wire, hash_bytes, BlobOperation, BlobPurpose, BlobRef,
-    BlobTicketPayload, BLOB_TICKET_HEADER,
+    BLOB_TICKET_HEADER, BlobOperation, BlobPurpose, BlobRef, BlobTicketPayload, decode_ticket_wire,
+    encode_ticket_wire, hash_bytes,
 };
 use n3ur0n_core::message::{Envelope, ProtocolVerb};
 use n3ur0n_core::{InstanceId, Keypair};
@@ -13,7 +13,7 @@ use serde::Deserialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::client::{http_client, ClientError, ClientResult};
+use crate::client::{ClientError, ClientResult, http_client};
 
 const TICKET_TTL_SECS: i64 = 300;
 
@@ -82,7 +82,9 @@ pub fn forge_get_ticket(
     Ok(env.sign(keypair)?)
 }
 
+// Parsed only to validate the PUT response is well-formed; fields are not read.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct PutBlobResponse {
     hash: String,
     size: u64,
@@ -115,7 +117,14 @@ pub async fn upload_blob(
         });
     }
 
-    let ticket = forge_put_ticket(keypair, recipient, &hash, bytes.len() as u64, mime, capability)?;
+    let ticket = forge_put_ticket(
+        keypair,
+        recipient,
+        &hash,
+        bytes.len() as u64,
+        mime,
+        capability,
+    )?;
     let header = encode_ticket_wire(&ticket)?;
     let url = blob_url(base, &hash);
     let resp = client

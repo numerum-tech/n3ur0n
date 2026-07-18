@@ -1,7 +1,12 @@
 use crate::{Db, StorageResult};
 
 /// Insert a nonce. Returns `Ok(true)` if newly inserted, `Ok(false)` if already seen (replay).
-pub fn insert_if_absent(db: &Db, sender_id: &str, nonce: &str, seen_at: i64) -> StorageResult<bool> {
+pub fn insert_if_absent(
+    db: &Db,
+    sender_id: &str,
+    nonce: &str,
+    seen_at: i64,
+) -> StorageResult<bool> {
     let conn = db.get()?;
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO nonces(sender_id, nonce, seen_at) VALUES (?1, ?2, ?3)",

@@ -53,7 +53,8 @@ async fn bootstrap_populates_directory() {
     assert!(peers_repo::list(node_b.db(), 100).unwrap().is_empty());
 
     let outcomes =
-        n3ur0n_node::discovery::bootstrap_initial_peers(&node_b, &[endpoint_a.clone()]).await;
+        n3ur0n_node::discovery::bootstrap_initial_peers(&node_b, std::slice::from_ref(&endpoint_a))
+            .await;
     assert_eq!(outcomes.len(), 1);
     let outcome = &outcomes[0];
     assert_eq!(outcome.error, None, "bootstrap reported error: {outcome:?}");
@@ -91,9 +92,11 @@ async fn cascade_finds_third_party() {
 
     let _ = endpoint_a;
     // Seed: a knows b
-    n3ur0n_node::discovery::bootstrap_initial_peers(&node_a, &[endpoint_b.clone()]).await;
+    n3ur0n_node::discovery::bootstrap_initial_peers(&node_a, std::slice::from_ref(&endpoint_b))
+        .await;
     // Seed: b knows c (so b can advertise c on get_known_peers)
-    n3ur0n_node::discovery::bootstrap_initial_peers(&node_b, &[endpoint_c.clone()]).await;
+    n3ur0n_node::discovery::bootstrap_initial_peers(&node_b, std::slice::from_ref(&endpoint_c))
+        .await;
 
     // a now cascades: should reach b and discover c.
     let added = n3ur0n_node::discovery::discover_capability(&node_a, "echo")

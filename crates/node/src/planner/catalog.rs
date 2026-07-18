@@ -1,7 +1,7 @@
 //! Aggregated capability catalog (self + peers) for the planner.
 
 use n3ur0n_core::capability::CapabilityDecl;
-use n3ur0n_storage::{peers, Db};
+use n3ur0n_storage::{Db, peers};
 use serde_json::Value;
 
 use crate::error::NodeResult;
@@ -51,7 +51,7 @@ impl Catalog {
                 tracing::warn!(
                     cap = %cap.name,
                     "local capability has no examples; skipping from planner catalog \
-(v0.2 requires at least one CapabilityExample)"
+                (v0.2 requires at least one CapabilityExample)"
                 );
                 continue;
             }
@@ -88,7 +88,7 @@ impl Catalog {
                         peer = %record.id,
                         cap = %decl.name,
                         "remote capability has no examples; skipping from planner \
-catalog (v0.2 requires at least one CapabilityExample)"
+                    catalog (v0.2 requires at least one CapabilityExample)"
                     );
                     continue;
                 }
@@ -179,12 +179,11 @@ catalog (v0.2 requires at least one CapabilityExample)"
     /// Resolve a tool name (`<short_peer>::<cap>`) back to its full
     /// `ToolDef`.
     pub fn find(&self, tool_name: &str) -> Option<&ToolDef> {
-        let mut split = tool_name.splitn(2, "::");
-        let peer = split.next()?;
-        let cap_name = split.next()?;
-        self.tools.iter().find(|t| {
-            short_peer(&t.peer_id) == peer && t.cap.name == cap_name
-        })
+        let (peer, cap_name) = tool_name.split_once("::")?;
+
+        self.tools
+            .iter()
+            .find(|t| short_peer(&t.peer_id) == peer && t.cap.name == cap_name)
     }
 
     /// Convert to OpenAI `tools` array.
@@ -216,9 +215,7 @@ fn short_peer(peer_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use n3ur0n_core::capability::{
-        AccessMode, CapabilityDecl, CapabilityExample,
-    };
+    use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample};
     use n3ur0n_storage::{open_in_memory, peers::PeerRecord};
     use serde_json::json;
 

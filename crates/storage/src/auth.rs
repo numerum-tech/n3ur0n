@@ -4,8 +4,8 @@
 //! the node/server layer. This module knows only how to store + verify
 //! credentials and how to mint / lookup / revoke opaque session tokens.
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use data_encoding::BASE32_NOPAD;
 use rusqlite::params;
 use sha2::{Digest, Sha256};
@@ -140,9 +140,8 @@ pub fn get_user_by_username(db: &Db, username: &str) -> StorageResult<Option<Use
 
 pub fn get_user_by_id(db: &Db, id: i64) -> StorageResult<Option<UserRecord>> {
     let conn = db.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, username, role, created_at, last_login FROM users WHERE id = ?1",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, username, role, created_at, last_login FROM users WHERE id = ?1")?;
     let mut rows = stmt.query(params![id])?;
     if let Some(r) = rows.next()? {
         Ok(Some(row_to_user(r)?))
@@ -286,11 +285,7 @@ pub fn lookup_session(
     }
 }
 
-pub fn refresh_session_expiry(
-    db: &Db,
-    token_hash: &str,
-    new_expires_at: i64,
-) -> StorageResult<()> {
+pub fn refresh_session_expiry(db: &Db, token_hash: &str, new_expires_at: i64) -> StorageResult<()> {
     let conn = db.get()?;
     conn.execute(
         "UPDATE sessions SET expires_at = ?1 WHERE token_hash = ?2",
@@ -310,10 +305,7 @@ pub fn delete_session(db: &Db, token_hash: &str) -> StorageResult<()> {
 
 pub fn delete_sessions_for_user(db: &Db, user_id: i64) -> StorageResult<()> {
     let conn = db.get()?;
-    conn.execute(
-        "DELETE FROM sessions WHERE user_id = ?1",
-        params![user_id],
-    )?;
+    conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])?;
     Ok(())
 }
 
@@ -352,7 +344,10 @@ mod tests {
         assert_eq!(id, u.id);
         assert!(verify_password("pw", &hash).unwrap());
         update_user_role(&db, u.id, Role::Operator).unwrap();
-        assert_eq!(get_user_by_id(&db, u.id).unwrap().unwrap().role, Role::Operator);
+        assert_eq!(
+            get_user_by_id(&db, u.id).unwrap().unwrap().role,
+            Role::Operator
+        );
     }
 
     #[test]
@@ -362,9 +357,15 @@ mod tests {
         let (token, hash) = mint_session_token();
         create_session(&db, u.id, &hash, 100, 200).unwrap();
         // Live lookup
-        let me = lookup_session(&db, &hash_session_token(&token), 150).unwrap().unwrap();
+        let me = lookup_session(&db, &hash_session_token(&token), 150)
+            .unwrap()
+            .unwrap();
         assert_eq!(me.id, u.id);
         // Expired lookup auto-purges
-        assert!(lookup_session(&db, &hash_session_token(&token), 300).unwrap().is_none());
+        assert!(
+            lookup_session(&db, &hash_session_token(&token), 300)
+                .unwrap()
+                .is_none()
+        );
     }
 }

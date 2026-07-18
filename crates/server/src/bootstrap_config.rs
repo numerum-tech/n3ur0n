@@ -219,10 +219,7 @@ mod tests {
         save_bootstrap_user_config(
             dir.path(),
             &BootstrapUserConfig {
-                peers: vec![
-                    "https://a.example/".into(),
-                    "https://b.example".into(),
-                ],
+                peers: vec!["https://a.example/".into(), "https://b.example".into()],
             },
         )
         .unwrap();

@@ -17,16 +17,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use n3ur0n_adapters::Backend;
-use n3ur0n_core::message::ProtocolVerb;
 use n3ur0n_core::Keypair;
+use n3ur0n_core::message::ProtocolVerb;
 use reqwest::Client as HttpClient;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::warn;
 
 use crate::client as peer_client;
 use crate::error::{NodeError, NodeResult};
 use crate::planner::catalog::Catalog;
-use crate::planner::plan::{validate_plan, Plan, MAX_PLAN_STEPS};
+use crate::planner::plan::{MAX_PLAN_STEPS, Plan, validate_plan};
 
 /// Anything that can turn a user message + catalog into a typed `Plan`.
 ///

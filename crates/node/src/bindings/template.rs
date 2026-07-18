@@ -30,11 +30,11 @@ pub fn render(template: &str, args: &Value) -> Result<Value, TemplateError> {
     if let Some(inner) = whole_template(trimmed) {
         let (root, path) = split_root(inner)?;
         check_root(root)?;
-        return resolve_path(args, path).cloned().ok_or_else(|| {
-            TemplateError::PathNotFound {
+        return resolve_path(args, path)
+            .cloned()
+            .ok_or_else(|| TemplateError::PathNotFound {
                 path: format!("{root}.{path}"),
-            }
-        });
+            });
     }
     Ok(Value::String(substitute_inline(template, args)?))
 }
@@ -118,10 +118,8 @@ fn substitute_inline(s: &str, args: &Value) -> Result<String, TemplateError> {
             let inner = s[i + 2..i + 2 + rel_end].trim();
             let (root, path) = split_root(inner)?;
             check_root(root)?;
-            let resolved = resolve_path(args, path).ok_or_else(|| {
-                TemplateError::PathNotFound {
-                    path: format!("{root}.{path}"),
-                }
+            let resolved = resolve_path(args, path).ok_or_else(|| TemplateError::PathNotFound {
+                path: format!("{root}.{path}"),
             })?;
             out.push_str(&value_to_text(resolved));
             i = i + 2 + rel_end + 2;

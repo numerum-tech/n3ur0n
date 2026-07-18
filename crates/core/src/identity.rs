@@ -142,9 +142,9 @@ mod verifying_key_bytes {
         let bytes = BASE32_NOPAD
             .decode(encoded.to_uppercase().as_bytes())
             .map_err(serde::de::Error::custom)?;
-        let arr: [u8; 32] = bytes.try_into().map_err(|_| {
-            serde::de::Error::custom("public key must be 32 bytes after decoding")
-        })?;
+        let arr: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| serde::de::Error::custom("public key must be 32 bytes after decoding"))?;
         VerifyingKey::from_bytes(&arr).map_err(serde::de::Error::custom)
     }
 }
@@ -171,7 +171,11 @@ mod tests {
         let expected_chars = (ID_HASH_BYTES * 8).div_ceil(5); // Base32 = 5 bits/char
         assert_eq!(payload.len(), expected_chars);
         assert_eq!(payload.len(), 32);
-        assert!(payload.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(
+            payload
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]

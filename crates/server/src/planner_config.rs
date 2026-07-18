@@ -10,9 +10,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use n3ur0n_adapters::openai::{OpenAIConfig, normalize_openai_base_url};
-use n3ur0n_node::manifest::{load_backend_dir, BackendKind, OpenAICompatConfig};
-use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_node::Node;
+use n3ur0n_node::manifest::{BackendKind, OpenAICompatConfig, load_backend_dir};
+use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use serde::{Deserialize, Serialize};
 
 /// Fallback LLM endpoint from CLI / env at startup.
@@ -270,7 +270,8 @@ mod tests {
             api_key: None,
         };
         let node = test_node();
-        let r = resolve_planner_llm(&node, dir.path(), &env, &PlannerUserConfig::default()).unwrap();
+        let r =
+            resolve_planner_llm(&node, dir.path(), &env, &PlannerUserConfig::default()).unwrap();
         assert_eq!(r.source, "env");
         assert_eq!(r.model_hint, "llama3.1:8b");
         assert_eq!(r.openai.base_url, "http://localhost:11434");
