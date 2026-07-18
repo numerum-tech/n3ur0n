@@ -484,7 +484,10 @@ select.form-control,
     gap: 16px;
     margin-top: 4px;
 }
-.settings-form .field .row-sub {
+/* Secondary/help caption. Base rule so every .row-sub is consistent even
+   outside .settings-form (a bare .card > .row-sub was inheriting the card's
+   bright --text and reading larger). Ancestor rules below only tweak spacing. */
+.row-sub {
     margin: 0;
     color: var(--muted);
     font-size: var(--fs-xs);
