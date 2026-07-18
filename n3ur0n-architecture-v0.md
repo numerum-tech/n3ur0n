@@ -107,6 +107,8 @@ UI/UX par laquelle l'utilisateur interagit avec son instance et, par effet de r�
 
 L'identifiant canonique d'une instance est le **hash SHA-256 de sa clé publique Ed25519**, encodé en base32 sans padding. Format proposé : `n3:` suivi de l'encodage. Exemple : `n3:abcd1234efgh5678...`.
 
+> **Amendement 2026-07-18** — le hash est désormais **tronqué à ses 20 premiers octets** avant encodage (160 bits → 32 caractères Base32, contre 52 pour le hash complet), afin de raccourcir l'identifiant. La troncature s'applique aux **octets du hash**, jamais à la chaîne Base32 (statement de sécurité propre et aligné sur les octets). Résistance : collision ~2^80, seconde-préimage ~2^160 — l'usurpation d'un nœud existant reste infaisable ; seule une attaque par collision « jumeaux » (deux clés à soi partageant un id) coûte ~2^80. Constante `ID_HASH_BYTES` dans `crates/core/src/identity.rs`. Pas de bump `protocol_version` : aucun réseau n'était déployé au moment du changement.
+
 Ce choix est dérivé : l'identifiant est calculable à partir de la clé publique, ce qui le rend auto-vérifiable et impossible à falsifier sans casser Ed25519. Aucun registre n'est nécessaire pour résoudre l'identifiant en clé publique.
 
 Une instance peut déclarer un **alias humain** optionnel (par exemple `@alice` ou `@dreamers.collective`). Les alias n'ont pas de garantie d'unicité globale ni de durabilité ; ils sont attribués librement et peuvent entrer en conflit. La résolution alias → identifiant canonique passe par les répertoires (cf. section 8). Un appelant prudent vérifie systématiquement que l'identifiant canonique correspond à ce qu'il attendait, indépendamment de l'alias.

@@ -49,7 +49,7 @@ Système distribué pair-à-pair pour publier et invoquer des **capacités d'IA*
 
 ## Invariants protocolaires non négociables
 
-- Identifiant canonique = `n3:` + Base32(SHA-256(clé publique Ed25519)). Auto-vérifiable, pas de registre requis.
+- Identifiant canonique = `n3:` + Base32(**20 premiers octets** de SHA-256(clé publique Ed25519)). Auto-vérifiable, pas de registre requis. **Amendement 2026-07-18** : le hash est tronqué à 20 octets (160 bits → 32 chars Base32 ; avant : 32 octets → 52 chars) pour raccourcir l'id. Troncature sur les **octets du hash**, pas sur la chaîne Base32 (`ID_HASH_BYTES` dans `core/identity.rs`). Collision ~2^80, seconde-préimage ~2^160. Pas de bump `protocol_version` (aucun réseau déployé au moment du changement).
 - Tout message porte `sender_id, recipient_id, timestamp, nonce, verb, payload, sender_public_key, signature`. La **signature** couvre le **JCS** (RFC 8785, `serde_jcs`) de l'envelope (tout sauf `signature`). Le champ `sender_public_key` accompagne le message sur le fil ; le destinataire vérifie `hash(sender_public_key) == sender_id` puis utilise cette clé pour vérifier la signature. (Voir amendement 2026-05-08 dans `n3ur0n-architecture-v0.md`.)
 - **Sans canonicalisation, les signatures divergent silencieusement** — ne jamais sérialiser à la main pour signer.
 - Vérifications obligatoires côté destinataire : binding pk↔id, signature, `recipient_id`, fenêtre timestamp ±5 min, anti-replay nonce sur 1h.

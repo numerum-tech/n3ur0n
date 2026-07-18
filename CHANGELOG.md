@@ -9,6 +9,8 @@ All notable changes to this project are documented here. The format is loosely b
 - Blob protocol layer (spec `n3ur0n-blob-protocol-v0.md` + 2026-06-04 amendment): hash-addressed transfer on `PUT/GET/HEAD/DELETE /n3ur0n/v0/blobs/*hash` authorized by the new signed `blob_ticket` verb (never dispatched via `/messages`); A–D blob classes; periodic GC; local Files API (`/api/v0/files`, `/api/v0/cap-jobs/blobs`) and Files panel in the UI; message attachments threaded through planners via `UserInput`.
 
 ### Changed
+- Instance id shortened: derived from the **first 20 bytes** of `SHA-256(pubkey)` instead of the full 32 (`n3:` + 32 Base32 chars, was 52). Truncation is on the hash bytes, not the Base32 string; `ID_HASH_BYTES` in `core/identity.rs`. Collision ~2^80, second-preimage ~2^160. No `protocol_version` bump — no deployed network at the time. **Breaking for any pre-existing `keys.json`: the same key now yields a different id.**
+- Dependencies: rand 0.8→0.10, ed25519-dalek 2→3, sha2 0.10→0.11, serde_jcs 0.1→0.2 (canonical output verified byte-identical via golden test), axum 0.7→0.8 (route param syntax `:x`→`{x}`), tower-http 0.5→0.6, http-body-util 0.1.4, docker builder base rust 1.97.
 - `OpenAIBackend`: caller-supplied `model` in invoke payloads is now ignored unless `allow_model_override` is set (network-facing backends lock to `default_model`); base URLs are normalized (strips `/v1`, `/api/generate`, `/v1/chat/completions` suffixes).
 
 ## [0.4.0] — open source, i18n, RBAC, settings UX

@@ -14,6 +14,12 @@ use crate::error::{CoreError, CoreResult};
 /// Canonical identifier prefix.
 pub const ID_PREFIX: &str = "n3:";
 
+/// Number of leading SHA-256 bytes kept when deriving an instance id.
+/// 20 bytes = 160 bits → 32 Base32 chars (`n3:` + 32 = 35 total), collision
+/// resistance ~2^80, second-preimage ~2^160. Truncating the hash (not the
+/// Base32 string) keeps the security statement clean and byte-aligned.
+pub const ID_HASH_BYTES: usize = 20;
+
 /// A canonical instance identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -25,7 +31,7 @@ impl InstanceId {
         let mut hasher = Sha256::new();
         hasher.update(pk.as_bytes());
         let digest = hasher.finalize();
-        let encoded = BASE32_NOPAD.encode(&digest).to_lowercase();
+        let encoded = BASE32_NOPAD.encode(&digest[..ID_HASH_BYTES]).to_lowercase();
         Self(format!("{ID_PREFIX}{encoded}"))
     }
 
@@ -154,6 +160,18 @@ mod tests {
         let parsed = InstanceId::parse(id.as_str()).unwrap();
         assert_eq!(id, parsed);
         assert!(id.as_str().starts_with(ID_PREFIX));
+    }
+
+    #[test]
+    fn id_length_matches_truncation() {
+        // 20 hash bytes -> 32 Base32 chars; guards against silent changes to
+        // ID_HASH_BYTES that would reshape every instance id.
+        let id = Keypair::generate().instance_id();
+        let payload = &id.as_str()[ID_PREFIX.len()..];
+        let expected_chars = (ID_HASH_BYTES * 8).div_ceil(5); // Base32 = 5 bits/char
+        assert_eq!(payload.len(), expected_chars);
+        assert_eq!(payload.len(), 32);
+        assert!(payload.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
     }
 
     #[test]
