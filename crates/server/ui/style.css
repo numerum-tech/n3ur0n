@@ -883,6 +883,12 @@ button.secondary:hover,
     padding-top: 2px;
 }
 .inspector-body .kv dd { margin: 0; word-break: break-word; }
+/* Help/caption inside a 2-column kv grid must span the full width, else the
+   next label wraps into the leftover column (broken backend form layout). */
+.inspector-body .kv .row-sub {
+    grid-column: 1 / -1;
+    margin: 2px 0 8px;
+}
 .inspector-body .kv input,
 .inspector-body .kv label {
     font: inherit;

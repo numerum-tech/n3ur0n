@@ -7,7 +7,8 @@ import { applyIcons, iconHtml, mimeIcon } from "./icons.js";
 // `:root[data-theme]`; CSS variables in style.css branch on the attribute.
 const THEME_KEY = "n3ur0n_theme";
 function currentThemePref() {
-    return localStorage.getItem(THEME_KEY) || "system";
+    // Default to dark until the user picks otherwise.
+    return localStorage.getItem(THEME_KEY) || "dark";
 }
 function resolveTheme(pref) {
     if (pref === "dark" || pref === "light") return pref;
@@ -1191,18 +1192,24 @@ function renderSkillsList() {
 // Inspector overlay (replaces chat view temporarily)
 // ---------------------------------------------------------------------------
 
+// What the inspector header ← does. Default: close (back to the list).
+// Multi-step flows (cap template picker → form) set it to step back instead.
+let inspectorBackHandler = null;
+
 function openInspector(title, html) {
     const overlay = document.getElementById("inspector");
     document.getElementById("inspector-title").textContent = title;
     document.getElementById("inspector-body").innerHTML = html;
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
+    inspectorBackHandler = null;
 }
 
 function closeInspector() {
     const overlay = document.getElementById("inspector");
     overlay.classList.add("hidden");
     overlay.setAttribute("aria-hidden", "true");
+    inspectorBackHandler = null;
 }
 
 async function openPeerInspector(peerId) {
@@ -2795,6 +2802,8 @@ function openCapTemplatePicker() {
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
     document.getElementById("cf-picker-cancel")?.addEventListener("click", closeInspector);
+    // The picker is the first step: its ← closes back to the skills list.
+    inspectorBackHandler = null;
     document.querySelectorAll("#cf-templates [data-template]").forEach(card => {
         card.addEventListener("click", () => {
             const key = card.dataset.template;
@@ -3016,6 +3025,9 @@ async function openCapForm(existingName, templateKey) {
     if (parserSel) parserSel.value = prefill.prompt?.parser || "text";
 
     document.getElementById("cf-back-templates")?.addEventListener("click", openCapTemplatePicker);
+    // Header ← steps back to the template picker for a new skill; closes to the
+    // list when editing an existing one.
+    inspectorBackHandler = existingName ? null : openCapTemplatePicker;
 
     const kindSel = document.getElementById("cf-bindkind");
     const backendSel = document.getElementById("cf-backend");
@@ -3277,7 +3289,7 @@ async function openBackendForm(existingName) {
             <h3>${escapeHtml(t("backend.form.openai.title"))}</h3>
             <form class="kv" onsubmit="return false;">
                 <label for="bf-base">${escapeHtml(t("backend.form.openai.base_url"))}</label>
-                <input id="bf-base" type="url" value="${escapeHtml(prefill?.base_url || "")}" placeholder="https://api.openai.com · http://192.168.4.101:11434" />
+                <input id="bf-base" type="url" value="${escapeHtml(prefill?.base_url || "")}" placeholder="https://api.openai.com · http://localhost:11434" />
                 <p class="row-sub">${escapeHtml(t("backend.form.openai.base_url.help"))}</p>
                 <label for="bf-model">${escapeHtml(t("backend.form.openai.default_model"))}</label>
                 <input id="bf-model" type="text" value="${escapeHtml(prefill?.default_model || "")}" placeholder="gpt-4o-mini · llama3.1:8b · qwen2.5:7b" />
@@ -3456,7 +3468,10 @@ composerFileInput?.addEventListener("change", async (e) => {
 document.getElementById("network-filter")?.addEventListener("input", renderNetworkList);
 document.getElementById("skills-filter")?.addEventListener("input", renderSkillsList);
 document.getElementById("skills-type-filter")?.addEventListener("change", renderSkillsList);
-document.getElementById("inspector-back")?.addEventListener("click", closeInspector);
+document.getElementById("inspector-back")?.addEventListener("click", () => {
+    if (inspectorBackHandler) inspectorBackHandler();
+    else closeInspector();
+});
 document.getElementById("inspector-close")?.addEventListener("click", closeInspector);
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeInspector();
