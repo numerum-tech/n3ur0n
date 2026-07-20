@@ -1,134 +1,141 @@
 # N3UR0N use cases (samples)
 
-Illustrative scenarios — not product commitments. They show where a **peer protocol for signed capability invoke** is doing work that a hosted chatbot or a single API gateway does not.
+Illustrative scenarios — not promises. They show where a **peer-to-peer network for AI skills** does something a hosted chatbot or a single API gateway can't.
 
-Common thread: the unit of trust and commerce is a **capability published on someone’s node**, invoked with Ed25519-signed envelopes. Callers keep their own identity; publishers keep their own backends.
+The common thread: the thing you share and call is a **skill running on someone's own machine**. Every call is signed, so you always know who published a skill and who's calling it. Callers keep their own identity; publishers keep their own models and data.
 
----
+A few words used throughout:
 
-## 1. Public — community skill commons (with provenance)
-
-### Situation
-
-Open-source, civic, and linguistic communities share AI “skills” as prompts and scripts on Discord, Gists, and forums. Nobody can verify who published them, they rot, and every consumer re-glues HTTP clients and model wrappers.
-
-### How N3UR0N fits
-
-Operators (libraries, NGOs, universities, hobbyists) run **publishers** and advertise TOML capabilities, for example:
-
-- `translate-xx-yy` — prompt binding over a local or sponsored model  
-- `summarize-legislation` — document in → short brief out  
-- MCP tools (filesystem, search) wrapped as caps  
-
-Consumers **build from source**, bootstrap a known seed (or peer they trust), discover caps via `describe_self` / cascade, and `invoke` with signed messages. The skill stays on the publisher’s machine; the caller never deposits keys in a central SaaS.
-
-### Why not “just ChatGPT / a forum”?
-
-| Need | N3UR0N |
-|------|--------|
-| Who offered this skill? | Cryptographic `n3:` identity + signed invoke |
-| Where does code/data live? | Publisher’s node; caps are data (`caps/*.toml`) |
-| Swap model without rewriting clients | Backend is behind the gateway |
-| Start without a marketplace | Gossip + optional bootstrap seed |
-
-### First mile
-
-1. Run a public **seed** with free `echo` (proof of path).  
-2. Document `--bootstrap https://seed…` for builders.  
-3. Community publishers add real free/restricted caps over time.
+- **Skill (capability)** — one unit of work a node offers, described in a small text file: a translation prompt, a document summarizer, a tool wrapped for the network.
+- **Publisher** — a node that exposes skills to the network.
+- **Consumer** — a node you talk to; it plans and calls skills on your behalf (a desktop app or your own small server).
+- **Seed** — a public starting point a fresh node can connect to, to discover its first peers.
 
 ---
 
-## 2. Company — multi-team capability fabric
+## 1. Public — a shared library of community skills, with provenance
 
-### Situation
+### The situation
 
-Enterprises collapse AI into one shared gateway or one ops-owned “agent platform.” Team tools, models, and compliance boundaries get mixed. Security wants audit trails; teams want independence; legal cares which vendor saw which data.
+Communities (open source, civic, language) trade AI "skills" as prompts and scripts on Discord, Gists, and forums. Nobody can verify who wrote them, they go stale, and everyone re-wires the same model and API plumbing to use them.
 
-### How N3UR0N fits
+### How N3UR0N helps
 
-Each team or environment runs one or more **publishers**:
+Libraries, non-profits, universities, and hobbyists run a node and publish skills — for example:
 
-| Team | Example caps | Access |
-|------|----------------|--------|
-| Legal | `contract-redact` | restricted / private |
-| Data | `query-warehouse-safe` | restricted |
-| SRE | `runbook-diagnose` | restricted |
-| ML | experimental chat caps | private (never in `describe_self`) |
+- a French→English translator over a local or sponsored model
+- a "summarize this legislation" skill: document in, short brief out
+- existing tools (file search, lookups) wrapped so the network can call them
 
-Employees run a **consumer** (desktop or internal server). Bootstrap points at a **corp seed**, not the open internet. The local **PlanExec** planner compiles multi-step plans; each step is a signed `invoke` to the owning peer. UI RBAC covers who may configure backends locally; commercial/subscription checks stay out-of-band (IdP, tickets).
+Anyone can **download N3UR0N** (or build from source), connect to a seed they trust, see what skills the network offers, and call them — with signed messages. The skill stays on the publisher's machine; you never hand your keys to a central service, and every skill carries a verifiable "who published this."
 
-### Why not “one corporate ChatGPT”?
+### Why not just ChatGPT or a forum post?
 
-| Need | N3UR0N |
-|------|--------|
-| Team owns model keys / GPU | Publisher boundary |
-| Audit who called what | Signed envelopes + peer ids |
-| Same path for LLM and tools | `invoke` + bindings (`prompt` / `mcp` / `http`) |
-| Sensitive skills invisible to the mesh | `AccessMode::Private` |
+| What you need | With N3UR0N |
+|---|---|
+| Know who actually offered a skill | A self-verifying ID + a signed call — no impersonation |
+| Know where the code and data live | On the publisher's own machine; skills are just files |
+| Swap the underlying model without breaking callers | The model sits behind the gateway |
+| Get going without waiting for a marketplace | Peers introduce each other; a public seed is optional |
 
-### First mile
+### First step
 
-1. Internal seed + `echo` / health caps.  
-2. One real restricted cap from a willing team.  
-3. Desktop or loopback server for planners; no public UI on publishers.
+1. Run a public **seed** offering a free `echo` skill (proves the path works).
+2. Tell builders which seed to connect to.
+3. Community publishers add real skills over time.
 
 ---
 
-## 3. Hybrid — vendor / partner capability edge
+## 2. Company — one fabric, many teams
 
-### Situation
+### The situation
 
-A vendor or OEM wants partners to use specialized AI (defect classification, config generation, vertical RAG) without shipping the model or building a full multi-tenant SaaS portal for every SKU. Today: API keys, rate portals, brittle OpenAPI.
+Companies tend to funnel all AI through one shared gateway or a single ops-owned "agent platform." Team tools, models, and compliance lines get blurred. Security wants an audit trail; teams want independence; legal cares which vendor saw which data.
 
-### How N3UR0N fits
+### How N3UR0N helps
 
-The vendor runs a reachable publisher (public internet or partner VPN):
+Each team (or environment) runs its own node and publishes its own skills:
 
-- Free demo caps for evaluation  
-- Restricted production caps for contracted partners  
+| Team | Example skill | Who can use it |
+|---|---|---|
+| Legal | contract redaction | restricted / private |
+| Data | safe warehouse queries | restricted |
+| SRE | runbook diagnosis | restricted |
+| ML | experimental chat skills | private (never advertised) |
 
-Partners run their own neuron as **consumer**, and optionally as **publisher** of site-local caps (plant adapters, local RAG) that never leave the site. The planner can stitch **vendor cognition** + **local actuators** without the vendor seeing OT data, if payloads are designed that way.
+Employees use a **consumer** (the desktop app or an internal server). It connects to an **internal seed**, not the open internet. When someone makes a request, the built-in planner breaks it into steps and calls the right team's skill for each — every call signed and attributable. Sensitive skills can be **private**: usable, but never listed to the rest of the network.
 
-Bootstrap = vendor seed. Commercial onboarding (contracts, rate limits, billing) stays outside the wire; the protocol only carries signed invoke and opaque subscription tokens if the operator requires them.
+### Why not one corporate ChatGPT?
 
-### Why not “partner API + SDK”?
+| What you need | With N3UR0N |
+|---|---|
+| Each team keeps its own model keys / GPUs | Each team is its own publisher |
+| Audit who called what | Every call is signed and tied to an ID |
+| One path for both models and tools | A skill can be a prompt, a tool, or an API |
+| Sensitive skills invisible to everyone else | Mark them private |
 
-| Need | N3UR0N |
-|------|--------|
-| Extensibility without a new SDK | Caps are manifests |
-| Partner keeps regional / air-gapped backends | Their publishers |
-| Same identity model for vendor and partner nodes | Ed25519 + `n3:` |
-| Future discovery without a baked-in registry | Gossip; optional “registry as capability” later |
+### First step
 
-### First mile
-
-1. Vendor seed with free `echo` + one demo cap.  
-2. Contracted partner: bootstrap + restricted cap keying via out-of-band process.  
-3. Optional on-site partner publisher for local-only caps.
+1. Stand up an internal seed with a health/`echo` skill.
+2. Add one real restricted skill from a willing team.
+3. Point people at the desktop app or an internal server — no public interface on the publishers.
 
 ---
 
-## Mapping
+## 3. Hybrid — a vendor's edge to its partners
+
+### The situation
+
+A vendor wants partners to use its specialized AI (defect classification, config generation, industry-specific search) **without** shipping the model or building a full multi-tenant portal for every product line. Today that means API keys, rate portals, and brittle integrations.
+
+### How N3UR0N helps
+
+The vendor runs a reachable node offering:
+
+- free demo skills for evaluation
+- restricted production skills for contracted partners
+
+Partners run their own node to consume those skills — and can optionally publish their **own** site-local skills (plant-floor adapters, local search over their data) that never leave their premises. The planner can combine **the vendor's intelligence** with **the partner's local actions**, and — if the data is shaped for it — the vendor never sees the partner's on-site data.
+
+Contracts, rate limits, and billing stay off the wire and out of band; the network only carries signed calls (and an opaque access token if the operator requires one).
+
+### Why not a partner API + SDK?
+
+| What you need | With N3UR0N |
+|---|---|
+| Extend without shipping a new SDK | Skills are just files |
+| Partner keeps regional / air-gapped models | On the partner's own nodes |
+| One identity model for vendor and partner nodes | The same signed-ID scheme everywhere |
+| Discovery later, without a hard-coded registry | Peers introduce each other |
+
+### First step
+
+1. Vendor runs a node with a free demo skill.
+2. Contracted partner connects and gets access to a restricted skill (keyed through the vendor's normal onboarding).
+3. Optionally, the partner publishes local-only skills on their own node.
+
+---
+
+## At a glance
 
 | # | Context | Seed | Success looks like |
-|---|---------|------|--------------------|
-| 1 | Public commons | Optional public seed | Strangers invoke a third-party skill with verifiable publisher identity |
-| 2 | Company mesh | Internal only | Two teams compose a plan across peers without a shared AI bus |
-| 3 | Vendor ↔ partner | Vendor endpoint | Partner ships product using vendor caps + local caps without a proprietary agent cloud |
+|---|---|---|---|
+| 1 | Public commons | Optional public seed | Strangers call a third party's skill and can verify who published it |
+| 2 | Company fabric | Internal only | Two teams' skills combine into one answer, no shared AI bus |
+| 3 | Vendor ↔ partner | Vendor's node | A partner ships a product using the vendor's skills plus their own, no proprietary agent cloud |
 
 ---
 
-## What these are not
+## What N3UR0N is not
 
-- A multi-user web chat over a single Ollama host (useful for demos; not the differentiator).  
-- A central model marketplace baked into the protocol (explicitly out of scope; see [ROADMAP.md](ROADMAP.md)).  
-- Guaranteed free unlimited LLM for the internet (abuse and cost are operator problems).
+- A multi-user web chat in front of one local model — handy for a demo, but not the point.
+- A model marketplace baked into the network — deliberately out of scope (see [ROADMAP.md](ROADMAP.md)).
+- A promise of free, unlimited AI for the internet — cost and abuse are the operator's to manage.
 
 ---
 
 ## Related docs
 
-- [README.md](README.md) — project overview  
-- [n3ur0n-architecture-v0.md](n3ur0n-architecture-v0.md) — protocol  
-- [ROADMAP.md](ROADMAP.md) — milestones and registry-as-capability reflection  
+- [README.md](README.md) — project overview
+- [n3ur0n-architecture-v0.md](n3ur0n-architecture-v0.md) — how it works under the hood
+- [ROADMAP.md](ROADMAP.md) — what's planned
