@@ -4,14 +4,29 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-07-20 — planner accuracy + release plumbing
+
+First properly-documented release since 0.4.0; also carries everything that shipped unversioned in 0.4.1 (direct chat, blob layer, id truncation, dependency bumps, `OpenAIBackend` hardening — listed below).
+
 ### Added
-- Direct chat mode: `DirectChatPlanner`, `POST .../messages` `{ mode?: "auto"|"direct", model?: string }`, composer toggle + model override in UI (EN/FR).
-- Blob protocol layer (spec `n3ur0n-blob-protocol-v0.md` + 2026-06-04 amendment): hash-addressed transfer on `PUT/GET/HEAD/DELETE /n3ur0n/v0/blobs/*hash` authorized by the new signed `blob_ticket` verb (never dispatched via `/messages`); A–D blob classes; periodic GC; local Files API (`/api/v0/files`, `/api/v0/cap-jobs/blobs`) and Files panel in the UI; message attachments threaded through planners via `UserInput`.
+- Reusable planner-accuracy eval suite (`crates/node/tests/planner_eval.rs` + `fixtures/planner_cases.json`, `scripts/planner-eval.sh`): 22 cases across single/multi/chain/none/trap categories; grades valid/exact/precision/recall per category, JSON report, tool-valid gate ≥95%. Ignored by default (needs an LLM).
+- `GET /n3ur0n/v0/health` now returns `version` (`env!("CARGO_PKG_VERSION")`) alongside `protocol_version`, so a deployed node's release is checkable directly.
+- www: planner-model guidance (8B/14B, CPU hosting) folded into Start; GitHub links hub.
+- Direct chat mode: `DirectChatPlanner`, `POST .../messages` `{ mode?: "auto"|"direct", model?: string }`, composer toggle + model override in UI (EN/FR). *(shipped unversioned in 0.4.1)*
+- Blob protocol layer (spec `n3ur0n-blob-protocol-v0.md` + 2026-06-04 amendment): hash-addressed transfer on `PUT/GET/HEAD/DELETE /n3ur0n/v0/blobs/*hash` authorized by the new signed `blob_ticket` verb (never dispatched via `/messages`); A–D blob classes; periodic GC; local Files API (`/api/v0/files`, `/api/v0/cap-jobs/blobs`) and Files panel in the UI; message attachments threaded through planners via `UserInput`. *(shipped unversioned in 0.4.1)*
+
+### Fixed
+- Planner tool selection reliability: compile prompt now separates `peer:`/`capability:` (was a combined `peer::cap` header the model copied whole into `peer`) and lists each skill's `output_fields`; `validate_plan` gained a ref-path guard (step exists, no self-ref, field in `schema_out`). Measured tool-valid rate 12%→100% on the eval suite.
+- Planner no longer fabricates temporal values on an empty plan (prompt counter-rule: the model does not know the current time — it must use a time skill, never invent one).
+- Compile-prompt size guard (`COMPILE_PROMPT_TOKEN_BUDGET`, logs approx tokens, warns above budget).
+- UI: live plan-step chips are clickable during streaming (stream `args`/`result` through `StepDone`), not only after reload.
+- Release assets named `n3ur0n-server-*` / `n3ur0n-desktop-*`.
 
 ### Changed
-- Instance id shortened: derived from the **first 20 bytes** of `SHA-256(pubkey)` instead of the full 32 (`n3:` + 32 Base32 chars, was 52). Truncation is on the hash bytes, not the Base32 string; `ID_HASH_BYTES` in `core/identity.rs`. Collision ~2^80, second-preimage ~2^160. No `protocol_version` bump — no deployed network at the time. **Breaking for any pre-existing `keys.json`: the same key now yields a different id.**
-- Dependencies: rand 0.8→0.10, ed25519-dalek 2→3, sha2 0.10→0.11, serde_jcs 0.1→0.2 (canonical output verified byte-identical via golden test), axum 0.7→0.8 (route param syntax `:x`→`{x}`), tower-http 0.5→0.6, http-body-util 0.1.4, docker builder base rust 1.97.
-- `OpenAIBackend`: caller-supplied `model` in invoke payloads is now ignored unless `allow_model_override` is set (network-facing backends lock to `default_model`); base URLs are normalized (strips `/v1`, `/api/generate`, `/v1/chat/completions` suffixes).
+- Instance id shortened: derived from the **first 20 bytes** of `SHA-256(pubkey)` instead of the full 32 (`n3:` + 32 Base32 chars, was 52). Truncation is on the hash bytes, not the Base32 string; `ID_HASH_BYTES` in `core/identity.rs`. Collision ~2^80, second-preimage ~2^160. No `protocol_version` bump — no deployed network at the time. **Breaking for any pre-existing `keys.json`: the same key now yields a different id** (a stale id in `keys.json` self-heals to the secret-derived one with a warning). *(shipped unversioned in 0.4.1)*
+- Dependencies: rand 0.8→0.10, ed25519-dalek 2→3, sha2 0.10→0.11, serde_jcs 0.1→0.2 (canonical output verified byte-identical via golden test), axum 0.7→0.8 (route param syntax `:x`→`{x}`), tower-http 0.5→0.6, http-body-util 0.1.4, docker builder base rust 1.97. *(shipped unversioned in 0.4.1)*
+- `OpenAIBackend`: caller-supplied `model` in invoke payloads is now ignored unless `allow_model_override` is set (network-facing backends lock to `default_model`); base URLs are normalized (strips `/v1`, `/api/generate`, `/v1/chat/completions` suffixes). *(shipped unversioned in 0.4.1)*
+- UI: dark theme is the default; backend base-url example uses `localhost`; Firstcaps labels; cap-form back-nav returns to the template picker.
 
 ## [0.4.0] — open source, i18n, RBAC, settings UX
 

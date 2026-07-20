@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/numerum-tech/n3ur0n"

@@ -64,14 +64,21 @@ fn load_cases() -> Vec<Case> {
             query: c["query"].as_str().expect("case.query").to_string(),
             expect: c["expect_tools"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
         })
         .collect()
 }
 
 async fn build_catalog() -> Catalog {
-    let decls = UtilityBackend.describe().await.expect("describe utility caps");
+    let decls = UtilityBackend
+        .describe()
+        .await
+        .expect("describe utility caps");
     let tools = decls
         .into_iter()
         .map(|cap| ToolDef {
@@ -104,8 +111,8 @@ struct Agg {
 #[tokio::test]
 #[ignore = "needs a running LLM endpoint; run with --ignored"]
 async fn planner_eval() {
-    let base = std::env::var("PLANNER_EVAL_BASE_URL")
-        .unwrap_or_else(|_| "http://localhost:11434".into());
+    let base =
+        std::env::var("PLANNER_EVAL_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".into());
     let model = std::env::var("PLANNER_EVAL_MODEL").unwrap_or_else(|_| "llama3.1:8b".into());
     let runs: usize = std::env::var("PLANNER_EVAL_RUNS")
         .ok()
@@ -144,7 +151,10 @@ async fn planner_eval() {
     for case in &cases {
         for _ in 0..runs {
             let t0 = Instant::now();
-            let plan = compiler.compile(&case.query, &catalog).await.expect("compile");
+            let plan = compiler
+                .compile(&case.query, &catalog)
+                .await
+                .expect("compile");
             let ms = t0.elapsed().as_millis();
             latencies.push(ms);
             total += 1;
@@ -169,7 +179,11 @@ async fn planner_eval() {
                 tool_cases += 1;
                 tool_valid += usize::from(valid);
                 let inter = got.intersection(&case.expect).count() as f64;
-                prec_sum += if got.is_empty() { 0.0 } else { inter / got.len() as f64 };
+                prec_sum += if got.is_empty() {
+                    0.0
+                } else {
+                    inter / got.len() as f64
+                };
                 rec_sum += inter / case.expect.len() as f64;
             }
 
@@ -193,24 +207,51 @@ async fn planner_eval() {
         percentile(&sorted, 0.95),
         sorted.last().copied().unwrap_or(0),
     );
-    let tool_prec = if tool_cases > 0 { prec_sum / tool_cases as f64 } else { 1.0 };
-    let tool_rec = if tool_cases > 0 { rec_sum / tool_cases as f64 } else { 1.0 };
+    let tool_prec = if tool_cases > 0 {
+        prec_sum / tool_cases as f64
+    } else {
+        1.0
+    };
+    let tool_rec = if tool_cases > 0 {
+        rec_sum / tool_cases as f64
+    } else {
+        1.0
+    };
 
     println!("\n--- aggregate ({total} runs) ---");
-    println!("plan-valid : {valid_ok}/{total}  ({:.0}%)", 100.0 * valid_ok as f64 / n);
+    println!(
+        "plan-valid : {valid_ok}/{total}  ({:.0}%)",
+        100.0 * valid_ok as f64 / n
+    );
     println!(
         "  tool-valid : {tool_valid}/{tool_cases}  ({:.0}%)  [gated]",
-        if tool_cases > 0 { 100.0 * tool_valid as f64 / tool_cases as f64 } else { 100.0 }
+        if tool_cases > 0 {
+            100.0 * tool_valid as f64 / tool_cases as f64
+        } else {
+            100.0
+        }
     );
-    println!("tool-exact : {exact_ok}/{total}  ({:.0}%)", 100.0 * exact_ok as f64 / n);
-    println!("  (note: `none`/`trap` \"invalid\" = model over-planned; rejected at compile -> safe direct-reply fallback)");
-    println!("tool prec  : {:.0}%   recall {:.0}%   (tool cases only)", 100.0 * tool_prec, 100.0 * tool_rec);
+    println!(
+        "tool-exact : {exact_ok}/{total}  ({:.0}%)",
+        100.0 * exact_ok as f64 / n
+    );
+    println!(
+        "  (note: `none`/`trap` \"invalid\" = model over-planned; rejected at compile -> safe direct-reply fallback)"
+    );
+    println!(
+        "tool prec  : {:.0}%   recall {:.0}%   (tool cases only)",
+        100.0 * tool_prec,
+        100.0 * tool_rec
+    );
     println!("compile ms : mean {mean} · p50 {p50} · p95 {p95} · max {max}");
     println!("\n  by category:");
     for (cat, a) in &by_cat {
         println!(
             "    {:<7} valid {:>3.0}%  exact {:>3.0}%  (n={})",
-            cat, 100.0 * a.valid as f64 / a.n as f64, 100.0 * a.exact as f64 / a.n as f64, a.n
+            cat,
+            100.0 * a.valid as f64 / a.n as f64,
+            100.0 * a.exact as f64 / a.n as f64,
+            a.n
         );
     }
     println!();

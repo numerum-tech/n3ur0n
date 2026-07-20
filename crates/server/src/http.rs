@@ -346,6 +346,7 @@ async fn public_health(State(state): State<AppState>) -> Json<serde_json::Value>
         "status": "ok",
         "instance_id": state.node.instance_id().as_str(),
         "protocol_version": n3ur0n_core::protocol::PROTOCOL_VERSION,
+        "version": env!("CARGO_PKG_VERSION"),
     }))
 }
 

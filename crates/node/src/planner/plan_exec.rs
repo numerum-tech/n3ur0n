@@ -533,7 +533,10 @@ fn render_skill_block(catalog: &Catalog, t: &ToolDef) -> String {
     // to copy the whole string into the plan's `peer` field, producing an
     // unresolvable `peer::cap::cap` tool name.
     let full = catalog.tool_name(t);
-    let peer = full.split_once("::").map(|(p, _)| p).unwrap_or(full.as_str());
+    let peer = full
+        .split_once("::")
+        .map(|(p, _)| p)
+        .unwrap_or(full.as_str());
     let schema_in = serde_json::to_string(&cap.schema_in).unwrap_or_else(|_| "{}".into());
 
     let mut out = String::new();

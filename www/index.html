@@ -56,7 +56,7 @@
           middle: your keys, your nodes, signed end to end.
         </p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="#start">Download v0.4.1</a>
+          <a class="btn btn-primary" href="#start">Download v0.4.2</a>
           <a class="btn btn-ghost" href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">Build with us on GitHub</a>
         </div>
       </div>
@@ -200,9 +200,9 @@ n3ur0n send --endpoint https://peer.example \
 
     <section class="section" id="start">
       <p class="section-label">Get started</p>
-      <h2>Download v0.4.1.</h2>
+      <h2>Download v0.4.2.</h2>
       <p class="start-note">
-        <strong>First tagged release.</strong>
+        <strong>Latest release.</strong>
         Desktop installers and server binaries are attached to the GitHub Release.
         The apps are <strong>not code-signed</strong> yet, so macOS Gatekeeper and Windows SmartScreen will warn on first launch — see the note below.
       </p>
@@ -211,7 +211,7 @@ n3ur0n send --endpoint https://peer.example \
         <h3>Desktop app</h3>
         <p>Pick your installer on the release page: <code>.dmg</code> (macOS universal), <code>.AppImage</code> / <code>.deb</code> (Linux), <code>.msi</code> (Windows).</p>
         <p>
-          <a class="btn btn-primary" href="https://github.com/numerum-tech/n3ur0n/releases/latest" target="_blank" rel="noopener noreferrer">Download v0.4.1</a>
+          <a class="btn btn-primary" href="https://github.com/numerum-tech/n3ur0n/releases/latest" target="_blank" rel="noopener noreferrer">Download v0.4.2</a>
         </p>
         <p class="start-note">
           <strong>Unsigned build.</strong>
@@ -226,11 +226,11 @@ n3ur0n send --endpoint https://peer.example \
         <h3>Server binary</h3>
         <p>Headless publisher — no toolchain needed. Direct downloads:</p>
         <pre><code># macOS (Apple Silicon)
-curl -L -o n3ur0n https://github.com/numerum-tech/n3ur0n/releases/latest/download/n3ur0n-macos-aarch64
-# macOS (Intel):   n3ur0n-macos-x86_64
-# Linux x86_64:    n3ur0n-linux-x86_64
-# Linux aarch64:   n3ur0n-linux-aarch64
-# Windows:         n3ur0n-windows-x86_64.exe
+curl -L -o n3ur0n https://github.com/numerum-tech/n3ur0n/releases/latest/download/n3ur0n-server-macos-aarch64
+# macOS (Intel):   n3ur0n-server-macos-x86_64
+# Linux x86_64:    n3ur0n-server-linux-x86_64
+# Linux aarch64:   n3ur0n-server-linux-aarch64
+# Windows:         n3ur0n-server-windows-x86_64.exe
 chmod +x n3ur0n && ./n3ur0n init && ./n3ur0n serve --port 4242 \
   --endpoint http://127.0.0.1:4242 --bootstrap https://seed.n3ur0n.net</code></pre>
       </div>
@@ -239,7 +239,7 @@ chmod +x n3ur0n && ./n3ur0n init && ./n3ur0n serve --port 4242 \
         <h3>Docker</h3>
         <p>Multi-arch publisher image on GitHub Container Registry.</p>
         <pre><code>docker pull ghcr.io/numerum-tech/n3ur0n:latest
-docker run --rm ghcr.io/numerum-tech/n3ur0n:0.4.1 --help</code></pre>
+docker run --rm ghcr.io/numerum-tech/n3ur0n:0.4.2 --help</code></pre>
       </div>
 
       <h3 class="start-alt">Or build from source</h3>
