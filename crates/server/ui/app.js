@@ -699,6 +699,9 @@ function appendStepper(isDirect = false) {
     conv.scrollTop = conv.scrollHeight;
 
     const chips = new Map();
+    // Per-step meta from PlanReady (peer_id / capability) so a completed step
+    // can be made clickable with full detail during live streaming.
+    const meta = new Map();
 
     function setStatus(text) {
         status.textContent = text;
@@ -748,6 +751,11 @@ function appendStepper(isDirect = false) {
             wrap.classList.remove("no-plan");
             for (const s of steps) {
                 ensureChip(s.id, s.peer_short, s.capability);
+                meta.set(s.id, {
+                    peer_id: s.peer_id,
+                    peer_short: s.peer_short,
+                    capability: s.capability,
+                });
             }
             setStatus(`plan ready · ${steps.length} step${steps.length > 1 ? "s" : ""}`);
         },
@@ -756,8 +764,22 @@ function appendStepper(isDirect = false) {
             setChipState(id, "running");
             setStatus(`running ${id}…`);
         },
-        doneStep(id, error) {
+        doneStep(id, args, result, error) {
             setChipState(id, error ? "error" : "done");
+            const chip = chips.get(id);
+            if (!chip) return;
+            // Make the live chip clickable with the same detail panel as the
+            // historical render (was only wired after a reload).
+            const m = meta.get(id) || {};
+            const call = {
+                id,
+                peer_id: m.peer_id || id,
+                capability: m.capability || "",
+                args: args || {},
+            };
+            const res = { result: result ?? null, error: error ?? null };
+            chip.style.cursor = "pointer";
+            chip.onclick = () => toggleStepDetails(wrap, call, res, chip);
         },
         reflecting() {
             setStatus("composing reply…");
@@ -848,7 +870,7 @@ function handleSseFrame(frame, stepper) {
             stepper.startStep(payload.id);
             break;
         case "step_done":
-            stepper.doneStep(payload.id, payload.error);
+            stepper.doneStep(payload.id, payload.args, payload.result, payload.error);
             break;
         case "reflecting":
             stepper.reflecting();
