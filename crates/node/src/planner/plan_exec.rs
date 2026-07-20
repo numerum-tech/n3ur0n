@@ -496,6 +496,12 @@ own knowledge.\n\
 languages, definitions, well-known facts, simple arithmetic, code explanations, \
 summaries of text the user already provided. Do not invent a chain of skills \
 just because they are listed.\n\
+- BUT you must NEVER answer from memory when the request needs live or current \
+data you cannot possibly know from training — above all the CURRENT TIME, the \
+time \"now\", or today's DATE. You do not know the current time. If a skill \
+provides it (e.g. a `time` skill), you MUST use it; do not fabricate a time. \
+This applies even when the time is only an input to another step (e.g. \
+\"show the current time reversed\" → get the time, then reverse it).\n\
 - A skill is RELEVANT only when its declared description and examples match the \
 user's intent. When in doubt, prefer fewer steps. Skill-specific semantics live \
 in the skill metadata below — read it.\n\
@@ -536,6 +542,26 @@ fn render_skill_block(catalog: &Catalog, t: &ToolDef) -> String {
     out.push_str(&format!("capability: {}\n", cap.name));
     out.push_str(&format!("description: {}\n", cap.description));
     out.push_str(&format!("schema_in: {schema_in}\n"));
+
+    // Output field names, so later steps reference the RIGHT path
+    // (`${step.<field>}`). Without this the model guesses (e.g. `${s1.value}`
+    // on a step whose output is actually `{now, unix}`), producing an
+    // unresolvable reference at execution time.
+    if let Some(props) = cap.schema_out.get("properties").and_then(|p| p.as_object())
+        && !props.is_empty()
+    {
+        let fields = props
+            .iter()
+            .map(|(k, v)| {
+                let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("any");
+                format!("{k} ({ty})")
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "output_fields: {fields}   (reference as ${{<step_id>.<field>}})\n"
+        ));
+    }
 
     // Up to 2 examples — enough to seed pattern match, not so many we
     // crowd the context window.

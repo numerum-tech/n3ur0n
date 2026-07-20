@@ -94,9 +94,12 @@ pub enum DispatchEvent {
     LowConfidence { confidence: f32 },
     /// One step starts executing.
     StepStart { id: String },
-    /// One step finished (with or without error).
+    /// One step finished (with or without error). Carries the resolved `args`
+    /// so the live UI can show step detail (args + result) without waiting for
+    /// a reload from persisted turns.
     StepDone {
         id: String,
+        args: Value,
         result: Option<Value>,
         error: Option<String>,
     },

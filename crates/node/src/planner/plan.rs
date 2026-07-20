@@ -142,6 +142,56 @@ pub fn validate_plan(plan: &Plan, catalog: &Catalog) -> Result<(), PlanError> {
             }
         }
     }
+    // Validate `${step.field}` references: the step id must exist, must not be
+    // the step's own id, and the referenced top-level field must be a declared
+    // output of that step's cap. Catches the common "wrong output path" error
+    // (e.g. `${s1.value}` when s1 outputs `{now, unix}`) at compile time instead
+    // of surfacing as an unresolved-template failure mid-execution.
+    let id_to_schema_out: HashMap<&str, &Value> = plan
+        .plan
+        .iter()
+        .filter_map(|s| {
+            catalog
+                .find(&format!("{}::{}", s.peer, s.capability))
+                .map(|t| (s.id.as_str(), &t.cap.schema_out))
+        })
+        .collect();
+    let known_ids: HashSet<&str> = plan.plan.iter().map(|s| s.id.as_str()).collect();
+    for step in &plan.plan {
+        let mut keys = Vec::new();
+        collect_ref_keys(&step.args, &mut keys);
+        for key in keys {
+            let mut parts = key.split('.');
+            let rid = parts.next().unwrap_or("");
+            if !known_ids.contains(rid) {
+                return Err(PlanError::Validation(format!(
+                    "step `{}`: reference `${{{key}}}` points to unknown step `{rid}`",
+                    step.id
+                )));
+            }
+            if rid == step.id {
+                return Err(PlanError::Validation(format!(
+                    "step `{}`: references its own output `${{{key}}}`",
+                    step.id
+                )));
+            }
+            if let Some(field) = parts.next()
+                && let Some(schema) = id_to_schema_out.get(rid)
+                && let Some(props) = schema.get("properties").and_then(|p| p.as_object())
+                && !props.is_empty()
+                && !props.contains_key(field)
+            {
+                let avail: Vec<&str> = props.keys().map(|s| s.as_str()).collect();
+                return Err(PlanError::Validation(format!(
+                    "step `{}`: `${{{key}}}` references field `{field}` not produced by step \
+                     `{rid}` (available: {})",
+                    step.id,
+                    avail.join(", ")
+                )));
+            }
+        }
+    }
+
     // Cycle detection via Kahn-style topological sort over declared edges
     // PLUS edges inferred from `${id...}` references in args.
     let order = topological_order(plan)?;
@@ -254,6 +304,16 @@ pub fn collect_refs(v: &Value, out: &mut HashSet<String>) {
         }
         Value::Array(arr) => arr.iter().for_each(|x| collect_refs(x, out)),
         Value::Object(o) => o.values().for_each(|x| collect_refs(x, out)),
+        _ => {}
+    }
+}
+
+/// Collect the full `id.path` keys of every `${...}` reference in `v`.
+fn collect_ref_keys(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::String(s) => out.extend(extract_template_keys(s)),
+        Value::Array(a) => a.iter().for_each(|x| collect_ref_keys(x, out)),
+        Value::Object(o) => o.values().for_each(|x| collect_ref_keys(x, out)),
         _ => {}
     }
 }
@@ -739,12 +799,15 @@ use raw refs only, let the downstream tool combine values)",
         match result {
             Ok(value) => {
                 blackboard.insert(id.clone(), value.clone());
+                let mut step_args = json!({});
                 if let Some(entry) = trace_by_id.get_mut(&id) {
                     entry.result = Some(value.clone());
+                    step_args = entry.args.clone();
                 }
                 if let Some(tx) = events {
                     let _ = tx.send(DispatchEvent::StepDone {
                         id: id.clone(),
+                        args: step_args,
                         result: Some(value),
                         error: None,
                     });
@@ -753,12 +816,15 @@ use raw refs only, let the downstream tool combine values)",
             }
             Err(err) => {
                 blackboard.insert(id.clone(), json!({"error": err.clone()}));
+                let mut step_args = json!({});
                 if let Some(entry) = trace_by_id.get_mut(&id) {
                     entry.error = Some(err.clone());
+                    step_args = entry.args.clone();
                 }
                 if let Some(tx) = events {
                     let _ = tx.send(DispatchEvent::StepDone {
                         id: id.clone(),
+                        args: step_args,
                         result: None,
                         error: Some(err),
                     });
@@ -990,14 +1056,25 @@ mod tests {
             "properties": {"text": {"type": "string"}}
         });
         let cat = make_catalog("reverse", "peera", schema);
+        // s2's arg is a template referencing the real step s1 — it must skip the
+        // schema_in check (resolved at exec time) yet still pass ref validation.
         let plan = Plan {
-            plan: vec![PlanStep {
-                id: "s1".into(),
-                peer: short_peer_helper("peera"),
-                capability: "reverse".into(),
-                args: json!({"text": "${s0.value}"}),
-                depends_on: vec![],
-            }],
+            plan: vec![
+                PlanStep {
+                    id: "s1".into(),
+                    peer: short_peer_helper("peera"),
+                    capability: "reverse".into(),
+                    args: json!({"text": "hello"}),
+                    depends_on: vec![],
+                },
+                PlanStep {
+                    id: "s2".into(),
+                    peer: short_peer_helper("peera"),
+                    capability: "reverse".into(),
+                    args: json!({"text": "${s1.reversed}"}),
+                    depends_on: vec![],
+                },
+            ],
         };
         assert!(validate_plan(&plan, &cat).is_ok());
     }
