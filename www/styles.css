@@ -235,6 +235,40 @@ a:hover {
   }
 }
 
+/* Below the 2-column breakpoint the shot sits under the copy — fill the column
+   instead of tracking viewport height (which made it shrink on resize). */
+@media (max-width: 959px) {
+  .hero-shot-frame {
+    width: 100%;
+  }
+}
+
+/* Mobile: the fixed single-row topbar collided the nav into the brand. Un-fix
+   it and stack brand over a wrapping nav — no overlap, no clearance hack. */
+@media (max-width: 700px) {
+  .topbar {
+    /* Sticky (not fixed): stays pinned on scroll but sits in flow, so the
+       stacked brand + nav never overlap the hero. */
+    position: sticky;
+    top: 0;
+    padding: 0.75rem var(--hero-pad);
+  }
+  .topbar-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+  .topbar-nav {
+    width: 100%;
+    gap: 0.4rem 1.1rem;
+    font-size: 0.82rem;
+  }
+  .hero {
+    min-height: auto;
+    padding-top: 1.5rem;
+  }
+}
+
 .hero-shot {
   width: 100%;
   height: auto;
@@ -566,7 +600,7 @@ main {
 
 /* Get started */
 .start-note {
-  margin: 0 0 1.75rem;
+  margin: 1.5rem 0 1.75rem;
   padding: 0.9rem 1rem;
   border: 1px solid rgba(232, 160, 84, 0.35);
   border-radius: 4px;
@@ -605,6 +639,15 @@ main {
   margin: 0 0 0.85rem;
   color: var(--muted);
   font-size: 0.95rem;
+}
+/* A note inside a start-block needs a gap above it; the `.start-block > p`
+   rule above has higher specificity than `.start-note`, so target it here. */
+.start-block .start-note {
+  margin-top: 1.5rem;
+}
+/* GitHub section: separate the link list from the buttons above it. */
+#github .not-list {
+  margin-top: 1.5rem;
 }
 
 pre {

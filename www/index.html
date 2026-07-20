@@ -39,7 +39,7 @@
         <a href="#profiles">Profiles</a>
         <a href="#start">Start</a>
         <a href="#network">Network</a>
-        <a href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="#github">GitHub</a>
       </nav>
     </div>
   </div>
@@ -268,6 +268,25 @@ docker run --rm ghcr.io/numerum-tech/n3ur0n:0.4.1 --help</code></pre>
         <pre><code>docker compose -f docker/compose.yml up -d --build
 # planner UI → http://localhost:4242/ui/</code></pre>
       </div>
+
+      <div class="start-block">
+        <h3>Planner model</h3>
+        <p>The planner drives any OpenAI-compatible LLM you point it at (Ollama, llama.cpp, vLLM, or hosted) — it needs constrained decoding and tool competence.</p>
+        <ul class="not-list">
+          <li>
+            <span>8B — CPU-friendly floor</span>
+            <code>llama3.1:8b</code> / <code>qwen2.5:7b</code>. ~5–6 GB at Q4, runs on a 16 GB CPU box. The default.
+          </li>
+          <li>
+            <span>14B — with a small GPU</span>
+            <code>qwen2.5:14b</code> or Phi-4. ~9–10 GB, fits a 12 GB GPU — near-instant plans, better restraint. CPU works but is minute-scale.
+          </li>
+        </ul>
+        <p class="start-note">
+          <strong>Give it room:</strong> ≥4K context (8K recommended) or the skill catalog truncates.
+          Ollama <code>OLLAMA_CONTEXT_LENGTH=8192</code> · vLLM <code>--max-model-len 8192</code> · llama.cpp <code>-c 8192</code>.
+        </p>
+      </div>
     </section>
 
     <section class="section" id="network">
@@ -298,6 +317,25 @@ docker run --rm ghcr.io/numerum-tech/n3ur0n:0.4.1 --help</code></pre>
           seed.n3ur0n.net
         </a>
       </div>
+    </section>
+
+    <section class="section" id="github">
+      <p class="section-label">GitHub</p>
+      <h2>Open source, in the open.</h2>
+      <p class="lede">
+        Everything lives on GitHub.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/numerum-tech/n3ur0n" target="_blank" rel="noopener noreferrer">View the source</a>
+        <a class="btn btn-ghost" href="https://github.com/numerum-tech/n3ur0n/issues/new/choose" target="_blank" rel="noopener noreferrer">Open an issue</a>
+      </div>
+      <ul class="not-list">
+        <li><span>Architecture</span><a href="https://github.com/numerum-tech/n3ur0n/blob/main/n3ur0n-architecture-v0.md" target="_blank" rel="noopener noreferrer">n3ur0n-architecture-v0.md</a></li>
+        <li><span>Use cases</span><a href="https://github.com/numerum-tech/n3ur0n/blob/main/USE_CASES.md" target="_blank" rel="noopener noreferrer">USE_CASES.md</a></li>
+        <li><span>Roadmap</span><a href="https://github.com/numerum-tech/n3ur0n/blob/main/ROADMAP.md" target="_blank" rel="noopener noreferrer">ROADMAP.md</a></li>
+        <li><span>Contributing</span><a href="https://github.com/numerum-tech/n3ur0n/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener noreferrer">CONTRIBUTING.md</a></li>
+        <li><span>Security</span><a href="https://github.com/numerum-tech/n3ur0n/blob/main/SECURITY.md" target="_blank" rel="noopener noreferrer">report a vulnerability privately</a></li>
+      </ul>
     </section>
   </main>
 
