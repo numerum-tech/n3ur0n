@@ -13,6 +13,10 @@
     { "name": "reverse_and_length", "category": "multi", "query": "Reverse \"abcdef\", and separately count the characters in \"hello\".", "expect_tools": ["reverse", "string_length"] },
 
     { "name": "reverse_then_count", "category": "chain", "query": "Reverse the word \"planner\", then tell me how many characters the reversed word has.", "expect_tools": ["reverse", "string_length"] },
+    { "name": "time_then_reverse", "category": "chain", "query": "Show the current server time, then give that timestamp back reversed as a string.", "expect_tools": ["time", "reverse"] },
+    { "name": "random_then_length", "category": "chain", "query": "Pick a random integer between 1 and 1000, then count how many characters that number has written out.", "expect_tools": ["random_int", "string_length"] },
+    { "name": "current_time_reversed", "category": "chain", "query": "show current time as reverted string", "expect_tools": ["time", "reverse"] },
+    { "name": "current_time", "category": "single", "query": "what is the current time?", "expect_tools": ["time"] },
 
     { "name": "greeting", "category": "none", "query": "Hi there, how are you doing today?", "expect_tools": [] },
     { "name": "definition", "category": "none", "query": "In one sentence, what is a neural network?", "expect_tools": [] },
