@@ -462,8 +462,8 @@ this schema:\n\n\
   \"plan\": [\n\
     {\n\
       \"id\":         \"<short alpha-numeric id, unique>\",\n\
-      \"peer\":       \"<short_peer from the skills list>\",\n\
-      \"capability\": \"<capability name from the skills list>\",\n\
+      \"peer\":       \"<the `peer:` value of the chosen skill — NOT the `##` header>\",\n\
+      \"capability\": \"<the `capability:` value of the chosen skill>\",\n\
       \"args\":       { ...skill-specific args... },\n\
       \"depends_on\": [ \"<other step ids>\", ... ]\n\
     },\n\
@@ -522,11 +522,18 @@ disambiguation, anti-patterns):\n\n",
 /// having to bake skill-specific rules into the system prompt.
 fn render_skill_block(catalog: &Catalog, t: &ToolDef) -> String {
     let cap = &t.cap;
-    let name = catalog.tool_name(t);
+    // `tool_name` is `<short_peer>::<capability>`. Present the two parts on
+    // *separate* labelled lines: a combined `peer::cap` header led small models
+    // to copy the whole string into the plan's `peer` field, producing an
+    // unresolvable `peer::cap::cap` tool name.
+    let full = catalog.tool_name(t);
+    let peer = full.split_once("::").map(|(p, _)| p).unwrap_or(full.as_str());
     let schema_in = serde_json::to_string(&cap.schema_in).unwrap_or_else(|_| "{}".into());
 
     let mut out = String::new();
-    out.push_str(&format!("## {name}\n"));
+    out.push_str(&format!("## {}\n", cap.name));
+    out.push_str(&format!("peer: {peer}\n"));
+    out.push_str(&format!("capability: {}\n", cap.name));
     out.push_str(&format!("description: {}\n", cap.description));
     out.push_str(&format!("schema_in: {schema_in}\n"));
 
@@ -704,7 +711,11 @@ mod tests {
             cap: enriched_cap(),
         });
         let block = render_skill_block(&cat, &cat.tools[0]);
-        assert!(block.contains("## abcdef123456::reverse"));
+        // peer and capability are on separate labelled lines (not a combined
+        // `peer::cap` header) so small models don't conflate them.
+        assert!(block.contains("## reverse"));
+        assert!(block.contains("peer: abcdef123456"));
+        assert!(block.contains("capability: reverse"));
         assert!(block.contains("description: Reverses"));
         assert!(block.contains("examples:"));
         assert!(block.contains("reverse 'hello'"));
