@@ -21,7 +21,13 @@ use n3ur0n_core::Keypair;
 use n3ur0n_core::message::ProtocolVerb;
 use reqwest::Client as HttpClient;
 use serde_json::{Value, json};
-use tracing::warn;
+use tracing::{debug, warn};
+
+/// Rough token budget for the compile prompt. Above this the assembled prompt
+/// risks exceeding a modest served context window (e.g. Ollama's default), which
+/// truncates silently and degrades planning. ~4 chars/token; keeps headroom
+/// under an 8K context alongside the reply.
+const COMPILE_PROMPT_TOKEN_BUDGET: usize = 6000;
 
 use crate::client as peer_client;
 use crate::error::{NodeError, NodeResult};
@@ -75,6 +81,29 @@ impl std::fmt::Debug for LocalLLMCompiler {
 impl PlanCompiler for LocalLLMCompiler {
     async fn compile(&self, user_msg: &str, catalog: &Catalog) -> NodeResult<Plan> {
         let system = (self.system_prompt)(catalog);
+
+        // Surface prompt size: a growing catalog can push the compile prompt
+        // past a modest served context (Ollama num_ctx / OLLAMA_CONTEXT_LENGTH),
+        // which truncates silently. `num_ctx` can't be set over the OpenAI-compat
+        // endpoint, so operators must size the server context — this makes the
+        // need visible instead of manifesting as mysteriously bad plans.
+        let approx_tokens = system.chars().count() / 4;
+        debug!(
+            approx_tokens,
+            caps = catalog.tools.len(),
+            "compile prompt assembled"
+        );
+        if approx_tokens > COMPILE_PROMPT_TOKEN_BUDGET {
+            warn!(
+                approx_tokens,
+                budget = COMPILE_PROMPT_TOKEN_BUDGET,
+                caps = catalog.tools.len(),
+                "compile prompt is large — ensure the model's served context \
+                 (Ollama OLLAMA_CONTEXT_LENGTH / num_ctx, or the model's context) \
+                 exceeds it, else the prompt truncates and planning degrades"
+            );
+        }
+
         let messages = vec![
             json!({"role": "system", "content": system}),
             json!({"role": "user",   "content": user_msg}),

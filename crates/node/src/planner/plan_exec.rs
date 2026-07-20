@@ -729,6 +729,33 @@ mod tests {
     }
 
     #[test]
+    fn compile_prompt_size_is_bounded() {
+        // Measure the assembled compile prompt for a small catalog and guard
+        // against prompt bloat. Prints the size so we can eyeball headroom vs a
+        // modest served context (Ollama default ~4K). Run with --nocapture.
+        let mut cat = Catalog::default();
+        for i in 0..6 {
+            cat.tools.push(ToolDef {
+                peer_id: format!("n3:peer{i}00000000000000000000000000"),
+                peer_endpoint: Some("http://x".into()),
+                cap: enriched_cap(),
+            });
+        }
+        let prompt = default_compile_system_prompt(&cat);
+        let approx_tokens = prompt.chars().count() / 4;
+        println!(
+            "compile prompt (6 caps): {} chars, ~{approx_tokens} tokens",
+            prompt.len()
+        );
+        // ~6K-token budget leaves headroom under an 8K context; 6 rich caps must
+        // stay well under it.
+        assert!(
+            approx_tokens < 6000,
+            "compile prompt ~{approx_tokens} tokens exceeds budget"
+        );
+    }
+
+    #[test]
     fn skill_block_renders_metadata() {
         let mut cat = Catalog::default();
         cat.tools.push(ToolDef {
