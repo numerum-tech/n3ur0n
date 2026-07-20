@@ -1,0 +1,27 @@
+{
+  "_comment": "Golden planning-accuracy cases. Catalog = the four UtilityBackend caps (time, random_int, reverse, string_length). Add cases freely — the harness reads this file at runtime; no recompile needed for new cases. `expect_tools` is the exact multiset of capability names the compiled plan should call ([] = answer directly, no tools). `category`: single | multi | chain | none | trap.",
+  "cases": [
+    { "name": "reverse", "category": "single", "query": "Reverse the word \"hello\".", "expect_tools": ["reverse"] },
+    { "name": "random_int", "category": "single", "query": "Give me a random integer between 1 and 10.", "expect_tools": ["random_int"] },
+    { "name": "time", "category": "single", "query": "What is the current server time right now?", "expect_tools": ["time"] },
+    { "name": "string_length", "category": "single", "query": "How many characters are in the text \"hello world\"?", "expect_tools": ["string_length"] },
+    { "name": "reverse_quoted", "category": "single", "query": "Take the string \"OpenWolf\" and give it back reversed.", "expect_tools": ["reverse"] },
+    { "name": "count_chars_sentence", "category": "single", "query": "Count the number of characters in: The quick brown fox.", "expect_tools": ["string_length"] },
+
+    { "name": "reverse_and_random", "category": "multi", "query": "Reverse the word \"neuron\" and also give me a random integer between 1 and 100.", "expect_tools": ["reverse", "random_int"] },
+    { "name": "time_and_random", "category": "multi", "query": "Tell me the current server time and pick a random number from 1 to 6.", "expect_tools": ["time", "random_int"] },
+    { "name": "reverse_and_length", "category": "multi", "query": "Reverse \"abcdef\", and separately count the characters in \"hello\".", "expect_tools": ["reverse", "string_length"] },
+
+    { "name": "reverse_then_count", "category": "chain", "query": "Reverse the word \"planner\", then tell me how many characters the reversed word has.", "expect_tools": ["reverse", "string_length"] },
+
+    { "name": "greeting", "category": "none", "query": "Hi there, how are you doing today?", "expect_tools": [] },
+    { "name": "definition", "category": "none", "query": "In one sentence, what is a neural network?", "expect_tools": [] },
+    { "name": "translation", "category": "none", "query": "Translate \"bonjour le monde\" into English.", "expect_tools": [] },
+    { "name": "arithmetic", "category": "none", "query": "What is 17 plus 25?", "expect_tools": [] },
+    { "name": "summarize_provided", "category": "none", "query": "Summarize this in one line: N3UR0N is a peer-to-peer gateway for invoking AI capabilities with signed messages.", "expect_tools": [] },
+    { "name": "code_explain", "category": "none", "query": "What does the Rust expression `vec.iter().map(|x| x + 1).collect::<Vec<_>>()` do?", "expect_tools": [] },
+
+    { "name": "trap_shuffle", "category": "trap", "query": "Shuffle this list of names into a random order: Alice, Bob, Carol.", "expect_tools": [] },
+    { "name": "trap_future_date", "category": "trap", "query": "What day of the week is 25 December 2030?", "expect_tools": [] }
+  ]
+}
