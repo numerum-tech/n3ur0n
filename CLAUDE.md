@@ -9,9 +9,11 @@ This project uses OpenWolf for context management. Read and follow .wolf/OPENWOL
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## État du dépôt (mis à jour 2026-06-10)
+## État du dépôt (mis à jour 2026-07-28)
 
-Releases : **0.1.0** (protocole initial), **0.2.0** (planner v2, BM25, GBNF, cascade), **0.3.0** (manifestes TOML, hot-reload caps, master-detail UI), **0.4.0** (open source, i18n EN/FR, RBAC phase 1, composer tous bindings, backend hot-reload). Version workspace = `0.4.0` ; `protocol_version` fil = `n3ur0n/0.3` (inchangé). Non releasé (post-0.4.0) : mode chat direct (`DirectChatPlanner`, toggle auto/direct), couche blob (verbe `blob_ticket`, endpoint `/n3ur0n/v0/blobs`, panneau Files, attachments), durcissement `OpenAIBackend` (`allow_model_override`, normalisation base_url). Cf. [CHANGELOG.md](CHANGELOG.md) et [ROADMAP.md](ROADMAP.md).
+Releases : **0.1.0** (protocole initial), **0.2.0** (planner v2, BM25, GBNF, cascade), **0.3.0** (manifestes TOML, hot-reload caps, master-detail UI), **0.4.0** (open source, i18n EN/FR, RBAC phase 1, composer tous bindings, backend hot-reload), **0.4.2** (précision planner + suite d'éval, `version` dans `/health`, nommage des assets de release ; absorbe aussi ce qui avait shippé sans version en 0.4.1 : mode chat direct, couche blob, id tronqué à 20 octets, durcissement `OpenAIBackend`). Version workspace = `0.4.2` ; `protocol_version` fil = `n3ur0n/0.3` (inchangé). Cf. [CHANGELOG.md](CHANGELOG.md) et [ROADMAP.md](ROADMAP.md).
+
+**Note d'écart 2026-07-28 — frontend.** Le dossier `frontend/` (scaffold SvelteKit du commit initial `1453c6b`) était **mort** : jamais buildé par la CI, jamais servi, 214 LOC de boilerplate dont la page d'accueil disait elle-même « pre-implementation scaffold ». Supprimé. L'UI web réelle est et reste `crates/server/ui/` — **JS vanilla en ES modules + CSS, sans bundler ni package.json** (~4,3k LOC : `app.js` 3500, `auth.js`, `i18n.js`, `icons.js`, `index.html`, `style.css`, `locales/{en,fr}.json`). Elle est embarquée par rust-embed (`#[folder = "ui/"]`, [http.rs](crates/server/src/http.rs)) et sert **aussi** le desktop (`frontendDist: "../server/ui"` dans `crates/desktop/tauri.conf.json`). Les mentions de SvelteKit / `adapter-static` / `bits-ui` / `pnpm --filter frontend` dans les docs antérieures sont **fausses** ; corrigées ici et par la note du même jour en tête de [project-tech-stack.md](project-tech-stack.md).
 
 Documents de spec et de référence :
 
@@ -45,7 +47,7 @@ Système distribué pair-à-pair pour publier et invoquer des **capacités d'IA*
 2. **Instance n3ur0n** — gateway : routage, identité crypto, signature, politique de souscription, répertoire local.
 3. **Identité & autorisation** — Ed25519 par message (non négociable) + souscription optionnelle au choix du destinataire.
 4. **Lobe** — fédération nommée d'instances. v0.1 : seuls les lobes **communautaires** sont supportés.
-5. **Surface utilisateur** — CLI / API REST + UI Svelte (desktop Tauri ou web servie par le binaire serveur).
+5. **Surface utilisateur** — CLI / API REST + UI web statique (une seule codebase `crates/server/ui/`, servie soit par le shell desktop Tauri, soit par le binaire serveur).
 
 ## Invariants protocolaires non négociables
 
@@ -96,9 +98,13 @@ n3ur0n/
 │   │   ├── bootstrap.rs       # config dirs, load_node, create_identity
 │   │   ├── cli.rs             # init / serve / keys
 │   │   └── main.rs
+│       ├── ui/                # UI web : JS vanilla ES modules + CSS, AUCUN build step
+│       │                      #   app.js, auth.js, i18n.js, icons.js, index.html,
+│       │                      #   style.css, locales/{en,fr}.json — embarqués par
+│       │                      #   rust-embed (`#[folder = "ui/"]`, http.rs) et servis
+│       │                      #   aussi au desktop (tauri.conf.json `frontendDist`).
 │   └── desktop/               # shell Tauri 2 (profil consumer, scaffold 0.4.0)
-├── frontend/                  # SvelteKit + adapter-static + Tailwind
-└── .gitignore                 # ignore /target, frontend build artifacts, runtime files
+└── .gitignore                 # ignore /target, runtime files, secrets
 ```
 
 **Discipline de dépendances (à respecter strictement)** :
@@ -128,7 +134,7 @@ Si `core` veut importer `axum` ou `rusqlite`, c'est une erreur de couche.
 | Crypto | `ed25519-dalek` 2.x, `sha2` | autres impls Ed25519 |
 | JSON canonique | `serde_jcs` | sérialisation maison |
 | Stockage | `rusqlite` bundled | Postgres, MySQL, Redis (services externes interdits v0.1) |
-| Frontend | SvelteKit + `adapter-static` + Tailwind + bits-ui | React/Next, Vue/Nuxt (SSR incompatible avec embed statique) |
+| Frontend | JS vanilla (ES modules) + CSS, servi statiquement depuis `crates/server/ui/`, aucun bundler — voir note 2026-07-28 ci-dessous | React/Next, Vue/Nuxt (SSR incompatible avec embed statique) ; réintroduire un framework + build step demande une décision explicite |
 | Shell desktop | Tauri 2.x | Electron, Wails, Neutralino |
 | CLI | `clap` v4 derive | structopt, argh |
 | Logs | `tracing` + `tracing-subscriber` | `log` direct, `slog` |
@@ -251,13 +257,18 @@ cargo build --release -p n3ur0n-server
 cargo test                                   # cible 80%+ sur core
 cargo run -p n3ur0n-server -- serve
 
-# Frontend (codebase UI unique)
-pnpm --filter frontend build                 # output dans frontend/build/
-pnpm --filter frontend dev                   # proxy Vite vers /api du serveur
+# Frontend — AUCUNE commande de build, aucun bundler, aucun package.json.
+#   Les assets de crates/server/ui/ sont pris par rust-embed. En build DEBUG
+#   rust-embed les relit sur disque à chaque requête : éditer un .js/.css puis
+#   recharger la page suffit, pas de recompilation (vérifié 2026-07-28).
+#   En build RELEASE ils sont embarqués dans le binaire → recompiler.
 
-# Desktop Tauri
-pnpm tauri dev                               # hot reload UI + recompile Rust
-pnpm tauri build --target <triple>           # .dmg / .msi / .AppImage / .deb
+# Desktop Tauri (pas de package.json racine ; tout passe par cargo)
+cargo run   -p n3ur0n-desktop                # dev
+cargo build -p n3ur0n-desktop --release      # binaire nu
+cargo install tauri-cli@^2 && cargo tauri build   # bundles .dmg/.msi/.AppImage/.deb
+#   En CI c'est tauri-action avec projectPath: crates/desktop
+#   (cf. .github/workflows/release.yml). Voir crates/desktop/README.md.
 
 # CLI publisher
 n3ur0n init                                  # paire de clés + config + SQLite

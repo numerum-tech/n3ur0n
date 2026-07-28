@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [Unreleased]
 
+### Removed
+- `frontend/` — dead SvelteKit scaffold from the initial commit (`1453c6b`, May 2026). 214 LOC of boilerplate whose own landing copy read *"Pre-implementation scaffold. UI surfaces … will land progressively"*; they never did. It was never built by CI (no `pnpm`/`npm` step in either workflow), never served, and had no root `package.json` to `--filter` from. Its only external reference was a `COPY frontend ./frontend` in `docker/Dockerfile`, which fed an image with no node toolchain — removed too.
+
+### Changed
+- Docs corrected to describe the UI that actually ships. The web UI is `crates/server/ui/`: hand-written vanilla JS (ES modules) + CSS, **no bundler, no package.json, no build step** — ~4.3k LOC across `app.js` (3500), `auth.js`, `i18n.js`, `icons.js`, `index.html`, `style.css`, `locales/{en,fr}.json`. It is embedded by rust-embed (`#[folder = "ui/"]`, `crates/server/src/http.rs`) and is also what the desktop shell loads (`"frontendDist": "../server/ui"`). In debug builds rust-embed reads the assets from disk, so editing a `.js`/`.css` and reloading the page needs no recompile; release builds embed them. Claims of SvelteKit / `adapter-static` / Tailwind / `bits-ui` / `pnpm --filter frontend` in `CLAUDE.md`, `project-tech-stack.md` (§8, §10.1, §12.4, §15) and the 0.1.0 entry below were never true; each is now corrected in place with a dated deviation note.
+
 ## [0.4.2] — 2026-07-20 — planner accuracy + release plumbing
 
 First properly-documented release since 0.4.0; also carries everything that shipped unversioned in 0.4.1 (direct chat, blob layer, id truncation, dependency bumps, `OpenAIBackend` hardening — listed below).
@@ -82,5 +88,5 @@ First properly-documented release since 0.4.0; also carries everything that ship
 - OpenAI-compatible backend (Ollama, llama.cpp, vLLM).
 - Echo + utility backends for tests.
 - Tower/axum HTTP server + clap CLI.
-- Bundled Svelte web UI (rust-embed).
+- Bundled static web UI (rust-embed). *(Listed as "Svelte" until 2026-07-28 — it never was; see Unreleased.)*
 - Docker compose cluster + smoke test.
