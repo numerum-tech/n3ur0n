@@ -109,11 +109,16 @@ impl PlanCompiler for LocalLLMCompiler {
             json!({"role": "user",   "content": user_msg}),
         ];
 
+        // Constrained decoding is built from *this* catalog: the grammars
+        // enumerate the actual `(peer, capability)` pairs, so a tool
+        // outside the catalog is unsampleable rather than caught after
+        // the fact by `validate_plan` (which would kill the whole plan).
+        let tool_names = catalog.tool_names();
         let mut args = json!({
             "messages": messages,
-            "grammar":         crate::planner::grammar::plan_grammar(),
-            "response_format": crate::planner::grammar::plan_response_format(),
-            "format":          crate::planner::grammar::plan_json_schema(),
+            "grammar":         crate::planner::grammar::plan_grammar(&tool_names),
+            "response_format": crate::planner::grammar::plan_response_format(&tool_names),
+            "format":          crate::planner::grammar::plan_json_schema(&tool_names),
             "temperature": 0.0,
         });
         if let Some(model) = &self.model_hint {

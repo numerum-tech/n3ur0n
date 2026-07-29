@@ -176,6 +176,22 @@ impl Catalog {
         format!("{short}::{}", t.cap.name)
     }
 
+    /// The `(short_peer, capability)` pairs the planner may choose from,
+    /// in catalog order (locals first, so the ordering is stable across
+    /// dispatches).
+    ///
+    /// Feeds the constrained-decoding grammars, which enumerate these
+    /// pairs so an out-of-catalog tool cannot be sampled at all. The
+    /// peer component is the *short* form — the same one `tool_name` /
+    /// [`find`](Self::find) and the compile prompt use — so a plan that
+    /// satisfies the grammar resolves here by construction.
+    pub fn tool_names(&self) -> Vec<(String, String)> {
+        self.tools
+            .iter()
+            .map(|t| (short_peer(&t.peer_id), t.cap.name.clone()))
+            .collect()
+    }
+
     /// Resolve a tool name (`<short_peer>::<cap>`) back to its full
     /// `ToolDef`.
     pub fn find(&self, tool_name: &str) -> Option<&ToolDef> {
