@@ -22,6 +22,7 @@ Documents de spec et de référence :
 - [n3ur0n-capability-manifest-v0.md](n3ur0n-capability-manifest-v0.md) — brouillon de format de manifeste (spec conceptuelle ; le split caps/backends effectif diverge, voir note d'écart en tête du doc).
 - [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md) — spec blob protocol (endpoint `/n3ur0n/v0/blobs`, classes A–D, panneau Files utilisateur ; amendement 2026-06-04 inclus). **Implémentée 2026-06-05** : `core/blob.rs`, `server/{blobs,blob_gc,files_api}.rs`, `node/{blob_client,blob_resolve}.rs`, verbe `blob_ticket`, attachments dans `UserInput`.
 - [n3ur0n-direct-chat-v0.md](n3ur0n-direct-chat-v0.md) — mode chat direct (API locale + UI ; un appel LLM/message, toggle auto/direct).
+- [n3ur0n-planner-selection-v0.md](n3ur0n-planner-selection-v0.md) — **brainstorm ouvert 2026-07-28**, rien d'acté : refonte de la sélection d'outils (grammaire énumérée par dispatch, retrieval hybride, retry sur erreur de validation, classement des caps locales) + couche de cadrage par mention explicite `@` et par lobe. Remonte deux questions ouvertes §11 archi (granularité de la synapse, noms de marque).
 - [n3ur0n-planner-recommendations-v0.md](n3ur0n-planner-recommendations-v0.md) — recommandations planner v0.1→v0.2 (largement absorbées par 0.2.0/0.3.0, conservé comme trace de raisonnement).
 - [n3ur0n-planner-brainstorm.md](n3ur0n-planner-brainstorm.md) — brainstorm initial planner (référence pour comprendre les choix v0.2).
 
