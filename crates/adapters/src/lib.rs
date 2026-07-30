@@ -39,5 +39,6 @@ pub trait Backend: Send + Sync {
 }
 
 pub mod echo;
+pub mod embeddings;
 pub mod openai;
 pub mod utility;

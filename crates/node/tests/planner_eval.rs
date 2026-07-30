@@ -21,6 +21,9 @@
 //!                          stochastic; >1 exposes variance and firms up rates.
 //!   PLANNER_EVAL_API_KEY   bearer token for hosted endpoints
 //!   PLANNER_EVAL_REPORT    path to write a JSON summary (for tracking runs)
+//!   PLANNER_EVAL_EMBED_MODEL  enable hybrid retrieval with this embedding
+//!                          model (e.g. bge-m3). Unset = BM25 only.
+//!   PLANNER_EVAL_EMBED_BASE_URL  defaults to PLANNER_EVAL_BASE_URL
 //!
 //! Grading per compiled plan:
 //!   - valid : empty plan (legit "answer directly") OR passes `validate_plan`.
@@ -39,6 +42,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use n3ur0n_adapters::Backend;
+use n3ur0n_adapters::embeddings::{EmbeddingClient, EmbeddingConfig};
 use n3ur0n_adapters::openai::{OpenAIBackend, OpenAIConfig};
 use n3ur0n_adapters::utility::UtilityBackend;
 use n3ur0n_node::planner::catalog::{Catalog, ToolDef};
@@ -47,6 +51,7 @@ use n3ur0n_node::planner::plan::{Plan, validate_plan};
 use n3ur0n_node::planner::plan_exec::{
     PlanOutcome, REMOTE_TOP_K, default_compile_system_prompt, resolve_plan,
 };
+use n3ur0n_node::planner::retriever::Retriever;
 use serde_json::{Value, json};
 
 struct Case {
@@ -181,11 +186,31 @@ async fn planner_eval() {
         model_hint: Some(model.clone()),
         system_prompt: Arc::new(default_compile_system_prompt),
     };
+    // Hybrid retrieval is opt-in so a run stays comparable with earlier
+    // BM25-only numbers unless the embedding model is named explicitly.
+    let retriever = match std::env::var("PLANNER_EVAL_EMBED_MODEL") {
+        Ok(m) if !m.trim().is_empty() => {
+            let client = EmbeddingClient::new(EmbeddingConfig {
+                base_url: std::env::var("PLANNER_EVAL_EMBED_BASE_URL")
+                    .unwrap_or_else(|_| base.clone()),
+                model: m,
+                api_key: std::env::var("PLANNER_EVAL_API_KEY").ok(),
+            })
+            .expect("build embedding client");
+            Arc::new(Retriever::hybrid(Arc::new(client)))
+        }
+        _ => Arc::new(Retriever::lexical()),
+    };
     let catalog = build_catalog().await;
     let cases = load_cases();
 
     println!(
-        "\n=== planner eval · model={model} · endpoint={base} · {} cases × {runs} run(s) ===\n",
+        "\n=== planner eval · model={model} · endpoint={base} · retrieval={} · {} cases × {runs} run(s) ===\n",
+        if retriever.is_hybrid() {
+            "hybrid"
+        } else {
+            "bm25"
+        },
         cases.len()
     );
 
@@ -208,7 +233,8 @@ async fn planner_eval() {
             // grade a code path no user ever hits — and would hide both
             // the benefit of the relevance floor and any capability it
             // wrongly prunes.
-            let catalog = catalog.clone().filter_for_query(&case.query, REMOTE_TOP_K);
+            let scores = retriever.score(&catalog.tools, &case.query).await;
+            let catalog = catalog.clone().filter_with_scores(&scores, REMOTE_TOP_K);
             let t0 = Instant::now();
             let plan = compiler
                 .compile(&case.query, &catalog)

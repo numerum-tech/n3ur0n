@@ -23,6 +23,7 @@ use crate::node::Node;
 use crate::planner::catalog::{Catalog, ToolDef};
 use crate::planner::compiler::PlanCompiler;
 use crate::planner::plan::{Plan, execute_plan_streaming, validate_plan};
+use crate::planner::retriever::Retriever;
 use crate::planner::{
     DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, MAX_CONTEXT_TURNS,
     PlanStepInfo, Planner, TraceEntry,
@@ -56,6 +57,9 @@ pub struct PlanExecPlanner {
     /// the same backend as the local compiler today.
     pub llm_backend: Arc<dyn Backend>,
     pub model_hint: Option<String>,
+    /// Capability retrieval. Defaults to BM25-only; `with_retriever`
+    /// swaps in a hybrid one when an embeddings endpoint is configured.
+    pub retriever: Arc<Retriever>,
 }
 
 impl std::fmt::Debug for PlanExecPlanner {
@@ -80,6 +84,7 @@ impl PlanExecPlanner {
             compiler,
             llm_backend,
             model_hint,
+            retriever: Arc::new(Retriever::lexical()),
         }
     }
 
@@ -95,7 +100,15 @@ impl PlanExecPlanner {
             compiler,
             llm_backend,
             model_hint,
+            retriever: Arc::new(Retriever::lexical()),
         }
+    }
+
+    /// Swap in a retriever — used to enable hybrid (BM25 + embedding)
+    /// capability retrieval when the node has an embeddings endpoint.
+    pub fn with_retriever(mut self, retriever: Arc<Retriever>) -> Self {
+        self.retriever = retriever;
+        self
     }
 
     fn reflect_system_prompt(&self) -> String {
@@ -161,18 +174,19 @@ impl PlanExecPlanner {
         persist_last(node.db(), state)
             .map_err(|e| NodeError::InvalidPayload(format!("persist user: {e}")))?;
 
-        // 2. Build catalog — query-aware: local caps always kept, remote
-        // caps ranked against the user message via BM25 and trimmed to the
-        // top REMOTE_TOP_K. Keeps prompt size bounded as the network grows.
+        // 2. Build catalog, then rank and bound it against the user
+        //    message so prompt size stays bounded as the network grows.
+        //    Scoring is the retriever's job (BM25, plus embeddings when
+        //    configured); ranking policy is the catalog's.
         let registry_snapshot = node.registry();
-        let catalog = Catalog::build_for_query(
+        let catalog = Catalog::build(
             node.instance_id().as_str(),
             &registry_snapshot,
             node.db(),
             500,
-            &planner_text,
-            REMOTE_TOP_K,
         )?;
+        let scores = self.retriever.score(&catalog.tools, &planner_text).await;
+        let catalog = catalog.filter_with_scores(&scores, REMOTE_TOP_K);
 
         // 3. Compile: delegate to the configured PlanCompiler. The
         // default LocalLLMCompiler ships the constrained-decoding fields

@@ -172,12 +172,37 @@ impl Catalog {
         if remote_top_k == 0 || user_query.trim().is_empty() {
             return self;
         }
-
         // Score *every* tool, local ones included — see LOCAL_TOP_K.
         let index = BM25Index::build(&self.tools);
         let scores: Vec<f32> = (0..self.tools.len())
             .map(|i| index.score(user_query, i))
             .collect();
+        self.filter_with_scores(&scores, remote_top_k)
+    }
+
+    /// Rank and bound using scores computed elsewhere.
+    ///
+    /// Separated from scoring because scoring may do IO — the hybrid
+    /// retriever embeds the query over HTTP — while this half is pure
+    /// policy and stays synchronous and unit-testable. `scores` is
+    /// positional: `scores[i]` belongs to `tools[i]`.
+    ///
+    /// A length mismatch means the caller paired the wrong scores with
+    /// the wrong catalog, which would silently rank capabilities by
+    /// another catalog's relevance. Filtering is skipped rather than
+    /// applying a scrambled order.
+    pub fn filter_with_scores(self, scores: &[f32], remote_top_k: usize) -> Self {
+        if remote_top_k == 0 {
+            return self;
+        }
+        if scores.len() != self.tools.len() {
+            tracing::error!(
+                scores = scores.len(),
+                tools = self.tools.len(),
+                "score/tool length mismatch; skipping catalog filtering"
+            );
+            return self;
+        }
 
         let mut locals: Vec<(ToolDef, f32)> = Vec::new();
         let mut remotes: Vec<(ToolDef, f32)> = Vec::new();

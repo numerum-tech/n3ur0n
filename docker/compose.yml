@@ -48,6 +48,9 @@ services:
       N3UR0N_PLANNER_MODE: ${PLANNER_MODE:-plan_exec}
       N3UR0N_PLANNER_LLM_BASE_URL: ${PLANNER_BASE_URL:-http://host.docker.internal:11434}
       N3UR0N_PLANNER_LLM_MODEL: ${PLANNER_MODEL:-qwen2.5:7b}
+      # Hybrid capability retrieval (BM25 + embeddings). Empty = BM25 only.
+      # Needs the model pulled on the host Ollama, e.g. `ollama pull bge-m3`.
+      N3UR0N_PLANNER_EMBED_MODEL: ${PLANNER_EMBED_MODEL:-}
       RUST_LOG: info,n3ur0n=debug
     ports:
       - "4242:4242"
