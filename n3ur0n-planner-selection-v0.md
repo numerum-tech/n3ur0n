@@ -113,6 +113,92 @@ C'est le problème du triangle de Zooko, et la réponse honnête est le **petnam
 
 **e. Appartenance à un lobe non vérifiée.** Une cap peut déclarer `lobe_ids = ["medical"]` sans que rien ne le contrôle. Le protocole d'appartenance aux lobes est en v0.5. **Avant lui, le cadrage par lobe est purement indicatif** — à ne pas présenter à l'utilisateur comme une garantie.
 
+## 6bis. Résultat mesuré — le sur-planning était surtout un problème de modèle (2026-07-29)
+
+Bake-off sur la suite d'éval, **3 runs par cas** (66 runs par modèle), endpoint Ollama local, suite et code identiques d'un modèle à l'autre :
+
+| modèle | exact | valid | 1er passage | none | trap | chain | p50 |
+|---|---|---|---|---|---|---|---|
+| **qwen2.5:7b** | **100 %** | 100 % | 95 % | **100 %** | **100 %** | 100 % | 2711 ms |
+| llama3.1:8b | 86 % | 100 % | 95 % | 83 % | 50 % | 75 % | 2087 ms |
+| qwen2.5:3b | 68 % | 79 % | 73 % | 50 % | 0 % | 50 % | 978 ms |
+| llama3.2:3b | 50 % | 86 % | 82 % | 67 % | 50 % | 25 % | 1979 ms |
+| qwen2.5:0.5b | 41 % | 57 % | 59 % | 17 % | 0 % | 25 % | 604 ms |
+
+Trois conclusions :
+
+1. **`qwen2.5:7b` règle le sur-planning.** Les catégories d'abstention passent de 83 %/50 % (llama3.1:8b) à 100 %/100 %. Confirmé en runtime sur le cluster : `« What is 17 plus 25? »` produisait `[random_int, chat]` et une réponse incohérente avec llama3.1:8b ; avec qwen2.5:7b, **0 step** et « The sum of 17 and 25 is 42. » `llama3.1:8b` reste le défaut documenté et le défaut de `docker/compose.yml` — **à changer**.
+2. **Falaise entre 3B et 7B, indépendante de la famille.** Les deux 3B échouent largement le seuil `tool_valid ≥ 95 %` (79 % et 86 %). 7B est le plancher praticable pour cette tâche. Un 0.5B est inutilisable (41 %).
+3. **La suite est saturée en haut.** 100 % sur 22 cas × 3 runs ne discrimine plus rien : impossible de mesurer la marge restante de qwen2.5:7b. L'extension de la suite (§7) change donc d'objectif — non plus mesurer la faiblesse de llama, mais **trouver les modes d'échec de qwen**.
+
+**Effet secondaire — cela tranche la question du retry (§5.3).** Le retry recouvre 3/3 plans invalides avec qwen2.5:7b (1er passage 95 % → 100 % après retry, exact reste à 100 %) : bénéfice net, aucun dommage. Avec les modèles faibles il est inutile ou nuisible — 0 récupération sur 27 tentatives en 0.5B, et sur llama3.1:8b son seul effet observé avait été de repêcher un cas `none` sur-planifié vers l'exécution d'un outil injustifié. Le retry est donc **à conserver, adossé à un modèle qui tient le seuil** ; ce n'est pas un correctif pour un modèle trop petit.
+
+**Reste ouvert en runtime** : `« Translate … into French »` route encore vers `chat` (1 step) au lieu du plan vide attendu. Défendable (chat sait traduire) mais contraire à la règle du prompt. À couvrir par la suite étendue.
+
+## 6ter. Suite durcie — ce que des capacités complexes révèlent (2026-07-29)
+
+La suite d'origine tournait sur les 4 caps `UtilityBackend` : triviales, mono-argument, toutes sur **un seul** peer. D'où le 100 % de qwen2.5:7b — la suite ne discriminait plus rien.
+
+Ajout de `crates/node/tests/fixtures/planner_caps.json` : 9 capacités sur 5 peers, fusionnées au catalogue réel. Chacune ajoute une pression précise — recouvrement sémantique (`translate` vs `chat`, `summarize` vs `extract_keywords`, `web_search` vs `fetch_url`), nom dupliqué (`chat` sur deux peers), schémas multi-arguments (`convert_currency` : 3 requis ; `translate` : enum `formality`), pièges thématiques (`weather_forecast`, `convert_currency`). 20 cas ajoutés, dont une catégorie `disambig`. `PLANNER_EVAL_CATALOG=basic` restaure l'ancien catalogue.
+
+**Séparation des modèles, 2 runs × 42 cas (84 runs) :**
+
+| modèle | exact (facile) | exact (dur) | tool-valid (dur) | disambig | none |
+|---|---|---|---|---|---|
+| qwen2.5:7b | 100 % | **95 %** | 100 % | 86 % | 86 % |
+| llama3.1:8b | 86 % | **67 %** | **93 % — sous le seuil** | 43 % | 43 % |
+
+La suite durcie sépare bien plus nettement (14 points d'écart → 28), et **llama3.1:8b passe sous le seuil `tool_valid ≥ 95 %`**. Elle a aussi de la marge : qwen n'est plus au plafond.
+
+**Quatre enseignements :**
+
+1. **Les distracteurs dégradent l'abstention, même pour un bon modèle.** Catégorie `none` de qwen : 100 % (catalogue trivial) → 75 % (catalogue riche) avant correction des cas. C'est l'effet observé sur le cluster, désormais quantifié : plus le réseau grandit, plus le sur-planning revient. Le plancher de pertinence (§5.4) n'est pas une optimisation, c'est un correctif.
+
+2. **La règle « traduction / résumé → plan vide » du prompt de compile est fausse dès qu'une cap dédiée existe.** Deux cas `none` échouaient en choisissant `translate` / `summarize` — le modèle avait raison, l'attente était périmée. Le prompt code en dur une liste d'intentions à traiter sans outil, indépendamment du catalogue. **Bug de prompt à corriger** : la règle doit être conditionnelle à l'existence d'une cap correspondante.
+
+3. **Les exemples positifs font le travail ; les exemples négatifs sont faibles.** `search_unknown_url` échouait de façon déterministe (`fetch_url` au lieu de `web_search`) alors que `fetch_url` portait un `negative_example` reprenant l'intention quasi mot pour mot. Ajouter **un** exemple positif « find the official website for X » sur `web_search` a corrigé le cas. **Règle d'écriture** : couvrir par des exemples positifs sur la bonne cap les formulations qu'on veut voir gagner ; ne pas compter sur un contre-exemple porté par la mauvaise cap.
+
+4. **L'écriture d'exemples a des effets non locaux — et c'est le point le plus gênant.** Ce même ajout d'un exemple à `web_search` a fait basculer deux cas sans rapport (`rewrite_not_translate`, `fetch_known_url`), net 98 % → 95 %. Dans un réseau où des publishers indépendants rédigent leurs caps, **une modification chez l'un perturbe la sélection chez les autres**. Conséquence : toute retouche d'exemples doit passer par la suite d'éval ; on ne peut pas régler une cap isolément.
+
+**Limite de la suite elle-même** : `expect_tools` fait une égalité exacte d'ensemble, ce qui punit des réponses défendables. `« Fetch <url> and tell me what it says »` → `{fetch_url, chat}` est raisonnable ; `« Rewrite this sentence »` → `{chat}` ou `{}` le sont tous les deux. Prochain correctif de la suite : accepter **plusieurs ensembles valides** par cas plutôt qu'un seul.
+
+## 6quater. Correctifs findings 1 & 2 — appliqués et mesurés (2026-07-30)
+
+### Ce qui a été changé
+
+**Finding 2 — règle du prompt de compile rendue relative au catalogue.** L'ancienne règle énumérait des *types de tâche* (« traduction, définitions, arithmétique → plan vide ») indépendamment du catalogue, ce qui contredisait la règle voisine « une skill est PERTINENTE seulement si sa description correspond à l'intention » et rendait invisible toute cap dédiée à ces tâches. Remplacée par : utiliser une skill **dédiée** si elle existe, répondre directement sinon — avec une clause explicite qu'une skill de chat généraliste n'est *dédiée à rien* (sans quoi le modèle route « bonjour » vers `chat`).
+
+**Finding 1 — caps locales classées et bornées (`LOCAL_TOP_K = 12`).** Elles contournaient totalement le classement et étaient non bornées : un opérateur avec douze skills les présentait toutes, à chaque message. Elles sont désormais scorées et bornées comme les distantes. Le filtre est extrait en `Catalog::filter_for_query`, appelé aussi par la suite d'éval — sinon on mesurait un chemin que personne n'exécute.
+
+### Résultat (suite durcie, 2 runs × 42 cas)
+
+| | qwen avant | **qwen après** | llama avant | llama après |
+|---|---|---|---|---|
+| tool-exact | 95 % | **98 %** | 67 % | 69 % |
+| tool-valid | 100 % | **100 %** | 93 % *(sous seuil)* | **100 %** |
+| disambig | 86 % | **100 %** | 43 % | 57 % |
+| none | 86 % | 86 % | 43 % | 57 % |
+| chain | 100 % | 100 % | 71 % | 57 % |
+
+Seul échec restant sur qwen : `rewrite_not_translate`, un cas de test ambigu (`{chat}` et `{}` sont tous deux défendables pour « reformule cette phrase »), pas un défaut du planner.
+
+**Hypothèse infirmée** : la liste codée en dur devait servir de béquille aux modèles faibles. Sa suppression a *amélioré* l'abstention de llama3.1:8b (`none` 43 % → 57 %). Ce n'était pas une béquille, c'était une contradiction.
+
+### Résultat négatif important — pas de plancher de pertinence
+
+Le plancher recommandé au §5.4 (« couper les caps sous X % du meilleur score ») a été **implémenté, mesuré, puis retiré**. Avec un retrieval purement lexical il transforme une faiblesse de *classement* (inoffensive : le modèle voit quand même la cap et la choisit correctement) en **perte de capacité silencieuse**. Deux mesures l'ont tué :
+
+- `« …then summarise what you find. »` → `summarize` score 0.384, rel 0.17 → **coupé**
+  `« …then summarize what you find. »` → `summarize` score 1.113, rel 0.49 → gardé
+  **Une seule lettre** (orthographe britannique/américaine) décide si la capacité existe. Régression mesurée : catégorie `chain` 100 % → 86 %.
+- `« Quelle heure est-il maintenant ? »` sur un catalogue anglais score **0.000 partout**. Produit EN/FR : une requête sur laquelle BM25 n'a aucun avis est un cas courant, pas exotique. Couper là viderait le catalogue et ferait perdre `time` à un francophone qui demande l'heure.
+
+**Conclusion** : classer et borner est sûr (on ne retire une cap que si une autre la dépasse) ; couper sur un seuil absolu ne l'est pas. Le plancher ne redevient envisageable qu'**après** le retrieval sémantique (§5.2) — l'ordre des travaux §7 doit donc mettre 5.2 avant tout re-essai de plancher.
+
+### Troisième confirmation de la non-localité
+
+Trier systématiquement le catalogue (au lieu de ne trier que lorsqu'il faut élaguer) a fait échouer un cas `chain` sans rapport — `reverse` émis sans son argument requis `text` — au seul motif que **l'ordre des skills dans le prompt avait changé**. Corrigé en ne triant que si le groupe dépasse sa borne. Troisième occurrence du même phénomène après §6ter #4 : *toute* perturbation du prompt (exemples, ordre, formulation) a des effets non locaux et doit passer par la suite d'éval.
+
 ## 7. Ordre de travaux proposé
 
 | # | Travail | Dépendances | Mesurable par |
