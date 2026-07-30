@@ -5,7 +5,7 @@
 #      PLANNER_EVAL_API_KEY, PLANNER_EVAL_REPORT (default target/planner-eval-report.json)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export PLANNER_EVAL_MODEL="${1:-${PLANNER_EVAL_MODEL:-llama3.1:8b}}"
+export PLANNER_EVAL_MODEL="${1:-${PLANNER_EVAL_MODEL:-qwen2.5:7b}}"
 export PLANNER_EVAL_RUNS="${2:-${PLANNER_EVAL_RUNS:-1}}"
 export PLANNER_EVAL_BASE_URL="${PLANNER_EVAL_BASE_URL:-http://localhost:11434}"
 export PLANNER_EVAL_REPORT="${PLANNER_EVAL_REPORT:-$PWD/target/planner-eval-report.json}"

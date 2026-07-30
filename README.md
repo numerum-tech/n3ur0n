@@ -42,7 +42,7 @@ cargo build --release -p n3ur0n-server
 ./target/release/n3ur0n init
 ./target/release/n3ur0n serve --port 4242 \
   --endpoint http://127.0.0.1:4242 \
-  --backend ollama --openai-model llama3.1:8b
+  --backend ollama --openai-model qwen2.5:7b
 ```
 
 Open `http://localhost:4242/ui/` in a browser.

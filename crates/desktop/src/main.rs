@@ -39,7 +39,7 @@ use tracing::{info, warn};
 
 const TUI_PROBE_OLLAMA_URL: &str = "http://localhost:11434/v1/models";
 const OLLAMA_BACKEND_NAME: &str = "local_ollama";
-const OLLAMA_DEFAULT_MODEL: &str = "llama3.1:8b";
+const OLLAMA_DEFAULT_MODEL: &str = "qwen2.5:7b";
 
 fn app_config_dir() -> PathBuf {
     // dirs::config_dir() resolves to platform-standard locations.

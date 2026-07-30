@@ -195,7 +195,9 @@ Le user **dialogue uniquement avec son instance**. L'instance compile un plan ty
 
 Impl : `PlanExecPlanner` dans `crates/node/src/planner/plan_exec.rs`. Le trait `PlanCompiler` permet l'escalade vers un peer remote exposant la cap `plan` (cascade). Constrained decoding GBNF / JSON Schema activé quand le backend le supporte (`crates/node/src/planner/grammar.rs`). Retrieval BM25 sur le catalogue avant compile (`crates/node/src/planner/retrieval.rs`).
 
-`LLMPlanner` (ReAct boucle, présent en 0.1.0) **a été supprimé** en 0.2.0 — toute référence dans des docs anciennes est obsolète. Modèle recommandé inchangé : `llama3.1:8b` ou `qwen2.5:7b`.
+`LLMPlanner` (ReAct boucle, présent en 0.1.0) **a été supprimé** en 0.2.0 — toute référence dans des docs anciennes est obsolète.
+
+**Modèle planner : `qwen2.5:7b` (défaut depuis 2026-07-29, mesuré).** Bake-off sur la suite d'éval (`scripts/planner-eval.sh <modèle> <runs>`) : qwen2.5:7b 95 % tool-exact sur la suite durcie contre 67 % pour llama3.1:8b, qui passe *sous* le seuil `tool_valid ≥ 95 %`. **7B est le plancher praticable** — qwen2.5:3b 68 %, llama3.2:3b 50 %, qwen2.5:0.5b 41 % sur la suite d'origine. Ne pas revenir à llama3.1:8b : son mode d'échec dominant est le sur-planning (il invoque un outil là où il faut répondre directement). Détail et méthode : [n3ur0n-planner-selection-v0.md](n3ur0n-planner-selection-v0.md) §6bis/§6ter.
 
 Cf `n3ur0n-planner-brainstorm.md` pour le brainstorm complet (3 modes, 4 niveaux, limites assumées).
 
