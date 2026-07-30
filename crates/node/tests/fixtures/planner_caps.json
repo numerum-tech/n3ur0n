@@ -1,0 +1,381 @@
+{
+  "_comment": [
+    "Extra capabilities for the planner eval, merged on top of the four real",
+    "UtilityBackend caps (time, random_int, reverse, string_length).",
+    "",
+    "These exist to make the catalog HARD in ways the utility caps are not.",
+    "The utility caps are trivially distinct, single-argument, and all live on",
+    "one peer, which is why a competent 7B scores 100% against them and the",
+    "suite stops discriminating. Every cap below adds one specific pressure:",
+    "",
+    "  - semantic overlap  : translate vs chat, summarize vs extract_keywords,",
+    "                        web_search vs fetch_url. More than one cap is a",
+    "                        defensible answer, so the model must read the",
+    "                        disambiguation, not just match keywords.",
+    "  - multiple peers    : caps are spread over 5 peers, so the plan must",
+    "                        carry the right peer as well as the right cap.",
+    "  - duplicate names   : `chat` exists on two peers with different",
+    "                        disambiguation (small vs large model).",
+    "  - multi-arg schemas : convert_currency needs 3 required args;",
+    "                        translate has a required arg plus an enum option.",
+    "  - traps             : weather_forecast and convert_currency are topical",
+    "                        magnets for questions that are conceptual, not",
+    "                        operational ('what causes climate change').",
+    "  - output paths      : fetch_url returns {status, text}, web_search",
+    "                        returns a list — so `${step.field}` refs have to",
+    "                        follow output_fields rather than a guessed `value`.",
+    "",
+    "Every cap carries >=1 example (the catalog drops example-less caps) plus",
+    "disambiguation and negative_examples, so a failure here is a genuine",
+    "selection failure, not an under-specified declaration."
+  ],
+  "peers": {
+    "translator": "n3:evaltrans00000000000000000000",
+    "llm_small": "n3:evalchatsm000000000000000000",
+    "llm_large": "n3:evalchatlg000000000000000000",
+    "web": "n3:evalweb00000000000000000000",
+    "data": "n3:evaldata0000000000000000000"
+  },
+  "caps": [
+    {
+      "peer": "translator",
+      "decl": {
+        "name": "translate",
+        "description": "Translate a text from any language into a target language. Dedicated translation engine — more accurate and cheaper than prompting a general chat model.",
+        "schema_in": {
+          "type": "object",
+          "required": ["text", "target_lang"],
+          "properties": {
+            "text": { "type": "string" },
+            "target_lang": { "type": "string", "description": "BCP 47 tag, e.g. \"fr\", \"es\", \"ja\"" },
+            "formality": { "type": "string", "enum": ["formal", "informal"] }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "translated": { "type": "string" },
+            "detected_source_lang": { "type": "string" }
+          }
+        },
+        "mode": "free",
+        "tags": ["translation", "language"],
+        "examples": [
+          {
+            "user_intent": "Translate \"good morning\" into Spanish",
+            "args": { "text": "good morning", "target_lang": "es" },
+            "expected_output": { "translated": "buenos días", "detected_source_lang": "en" }
+          },
+          {
+            "user_intent": "Put this sentence into formal Japanese",
+            "args": { "text": "see you tomorrow", "target_lang": "ja", "formality": "formal" },
+            "expected_output": { "translated": "また明日お会いしましょう", "detected_source_lang": "en" }
+          }
+        ],
+        "disambiguation": "Use for translation between human languages. Prefer this over `chat` whenever the request is purely a translation. Do NOT use for rewriting, summarising, or explaining text in the same language.",
+        "negative_examples": [
+          { "user_intent": "Rewrite this paragraph to sound friendlier", "why_not": "Same language — this is rewriting, not translation. Use `chat`." },
+          { "user_intent": "What language is this text in?", "why_not": "Detection alone is not translation; `chat` can answer." }
+        ],
+        "output_semantic": "`translated` is the text in the target language; `detected_source_lang` is the language it was translated from.",
+        "version": "1.2.0",
+        "languages": ["en", "fr", "es", "ja", "de"]
+      }
+    },
+    {
+      "peer": "llm_small",
+      "decl": {
+        "name": "chat",
+        "description": "General-purpose conversational LLM (7B). Answers open questions, writes and rewrites text, explains concepts.",
+        "schema_in": {
+          "type": "object",
+          "required": ["prompt"],
+          "properties": { "prompt": { "type": "string" } }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "message": { "type": "object" },
+            "model": { "type": "string" }
+          }
+        },
+        "mode": "free",
+        "tags": ["llm", "chat", "general"],
+        "examples": [
+          {
+            "user_intent": "Write a haiku about rain",
+            "args": { "prompt": "Write a haiku about rain" },
+            "expected_output": { "message": { "role": "assistant", "content": "..." }, "model": "small" }
+          }
+        ],
+        "disambiguation": "Use for open-ended generation or rewriting. Do NOT use it as a substitute for a dedicated skill: prefer `translate` for translation, `summarize` for summarising, `web_search` for current facts.",
+        "negative_examples": [
+          { "user_intent": "Translate this into German", "why_not": "`translate` is dedicated and more accurate." },
+          { "user_intent": "What is today's date?", "why_not": "A chat model does not know the current time; use `time`." }
+        ],
+        "output_semantic": "`message.content` is the assistant's reply text.",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "peer": "llm_large",
+      "decl": {
+        "name": "chat",
+        "description": "Large conversational LLM (70B). Slower and more expensive than the 7B chat, but stronger on long-form reasoning, code, and nuanced writing.",
+        "schema_in": {
+          "type": "object",
+          "required": ["prompt"],
+          "properties": { "prompt": { "type": "string" } }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "message": { "type": "object" },
+            "model": { "type": "string" }
+          }
+        },
+        "mode": "free",
+        "pricing": "0.002 credits / 1k tokens",
+        "tags": ["llm", "chat", "reasoning"],
+        "examples": [
+          {
+            "user_intent": "Explain the trade-offs between optimistic and pessimistic locking in depth",
+            "args": { "prompt": "Explain the trade-offs between optimistic and pessimistic locking in depth" },
+            "expected_output": { "message": { "role": "assistant", "content": "..." }, "model": "large" }
+          }
+        ],
+        "disambiguation": "Reserve for genuinely hard reasoning or long-form work. For everyday questions prefer the 7B `chat` — it is free and fast.",
+        "negative_examples": [
+          { "user_intent": "Say hello", "why_not": "Trivial — the 7B `chat` is enough and costs nothing." }
+        ],
+        "output_semantic": "`message.content` is the assistant's reply text.",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "peer": "web",
+      "decl": {
+        "name": "web_search",
+        "description": "Search the public web and return ranked results with titles, URLs and snippets. Use for current facts the model cannot know.",
+        "schema_in": {
+          "type": "object",
+          "required": ["query"],
+          "properties": {
+            "query": { "type": "string" },
+            "limit": { "type": "integer" }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "results": { "type": "array" },
+            "top_url": { "type": "string" },
+            "top_snippet": { "type": "string" }
+          }
+        },
+        "mode": "free",
+        "tags": ["web", "search", "current"],
+        "examples": [
+          {
+            "user_intent": "Who won the 2026 Tour de France?",
+            "args": { "query": "2026 Tour de France winner", "limit": 3 },
+            "expected_output": { "results": [], "top_url": "https://example.org/tdf", "top_snippet": "..." }
+          },
+          {
+            "user_intent": "Find the official website for the Rust programming language",
+            "args": { "query": "Rust programming language official website", "limit": 1 },
+            "expected_output": { "results": [], "top_url": "https://www.rust-lang.org", "top_snippet": "..." }
+          }
+        ],
+        "disambiguation": "Use when you need to FIND pages for a question. If the user already gave a specific URL to read, use `fetch_url` instead.",
+        "negative_examples": [
+          { "user_intent": "Read https://example.com/article and summarise it", "why_not": "The URL is already known — use `fetch_url`." },
+          { "user_intent": "What is a hash function?", "why_not": "Timeless concept; answer directly without any skill." }
+        ],
+        "output_semantic": "`top_url` and `top_snippet` describe the best-ranked result; `results` holds the full ranked list.",
+        "version": "2.0.0"
+      }
+    },
+    {
+      "peer": "web",
+      "decl": {
+        "name": "fetch_url",
+        "description": "Download one specific URL and return its status code and extracted text content.",
+        "schema_in": {
+          "type": "object",
+          "required": ["url"],
+          "properties": { "url": { "type": "string" } }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "integer" },
+            "text": { "type": "string" }
+          }
+        },
+        "mode": "free",
+        "tags": ["web", "http", "fetch"],
+        "examples": [
+          {
+            "user_intent": "Get the contents of https://example.com",
+            "args": { "url": "https://example.com" },
+            "expected_output": { "status": 200, "text": "Example Domain ..." }
+          }
+        ],
+        "disambiguation": "Only when the user supplies an explicit URL. To discover which page to read, use `web_search` first.",
+        "negative_examples": [
+          { "user_intent": "Find the official Rust website", "why_not": "No URL given yet — search first with `web_search`." }
+        ],
+        "output_semantic": "`text` is the page's readable text; `status` is the HTTP status code.",
+        "version": "1.1.0"
+      }
+    },
+    {
+      "peer": "data",
+      "decl": {
+        "name": "summarize",
+        "description": "Condense a long text into a short prose summary preserving the main points.",
+        "schema_in": {
+          "type": "object",
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string" },
+            "max_sentences": { "type": "integer" }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": { "summary": { "type": "string" } }
+        },
+        "mode": "free",
+        "tags": ["text", "summary"],
+        "examples": [
+          {
+            "user_intent": "Summarise this article in two sentences",
+            "args": { "text": "<long article>", "max_sentences": 2 },
+            "expected_output": { "summary": "..." }
+          }
+        ],
+        "disambiguation": "Produces flowing prose. If the user wants a list of terms or topics rather than prose, use `extract_keywords`.",
+        "negative_examples": [
+          { "user_intent": "What are the main topics in this text?", "why_not": "That asks for terms, not prose — use `extract_keywords`." }
+        ],
+        "output_semantic": "`summary` is the condensed prose version of the input.",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "peer": "data",
+      "decl": {
+        "name": "extract_keywords",
+        "description": "Extract the most salient terms or topics from a text as a ranked list.",
+        "schema_in": {
+          "type": "object",
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string" },
+            "k": { "type": "integer" }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": { "keywords": { "type": "array" } }
+        },
+        "mode": "free",
+        "tags": ["text", "keywords", "topics"],
+        "examples": [
+          {
+            "user_intent": "List the five main topics in this report",
+            "args": { "text": "<report>", "k": 5 },
+            "expected_output": { "keywords": ["latency", "throughput", "caching"] }
+          }
+        ],
+        "disambiguation": "Returns a list of terms. For flowing prose that a human would read as a summary, use `summarize`.",
+        "negative_examples": [
+          { "user_intent": "Give me a two-sentence summary", "why_not": "Prose requested — use `summarize`." }
+        ],
+        "output_semantic": "`keywords` is the ranked list of salient terms.",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "peer": "data",
+      "decl": {
+        "name": "convert_currency",
+        "description": "Convert a monetary amount between two currencies at the current exchange rate.",
+        "schema_in": {
+          "type": "object",
+          "required": ["amount", "from", "to"],
+          "properties": {
+            "amount": { "type": "number" },
+            "from": { "type": "string", "description": "ISO 4217 code, e.g. EUR" },
+            "to": { "type": "string", "description": "ISO 4217 code, e.g. JPY" }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "converted": { "type": "number" },
+            "rate": { "type": "number" }
+          }
+        },
+        "mode": "free",
+        "tags": ["currency", "finance", "conversion"],
+        "examples": [
+          {
+            "user_intent": "How much is 100 euros in dollars?",
+            "args": { "amount": 100, "from": "EUR", "to": "USD" },
+            "expected_output": { "converted": 108.4, "rate": 1.084 }
+          }
+        ],
+        "disambiguation": "Only for converting an actual amount between currencies. Questions ABOUT money, inflation or economics are conceptual — answer them directly with no skill.",
+        "negative_examples": [
+          { "user_intent": "What is a reserve currency?", "why_not": "Conceptual question, no conversion involved — answer directly." },
+          { "user_intent": "Why do exchange rates move?", "why_not": "Explanation, not a conversion." }
+        ],
+        "output_semantic": "`converted` is the amount in the target currency; `rate` is the exchange rate applied.",
+        "version": "1.4.0"
+      }
+    },
+    {
+      "peer": "data",
+      "decl": {
+        "name": "weather_forecast",
+        "description": "Current conditions and multi-day forecast for a named city.",
+        "schema_in": {
+          "type": "object",
+          "required": ["city"],
+          "properties": {
+            "city": { "type": "string" },
+            "days": { "type": "integer" }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "city": { "type": "string" },
+            "summary": { "type": "string" },
+            "temp_c": { "type": "number" }
+          }
+        },
+        "mode": "free",
+        "tags": ["weather", "forecast"],
+        "examples": [
+          {
+            "user_intent": "What's the weather in Lomé tomorrow?",
+            "args": { "city": "Lomé", "days": 1 },
+            "expected_output": { "city": "Lomé", "summary": "Partly cloudy", "temp_c": 29.5 }
+          }
+        ],
+        "disambiguation": "Operational forecasts for a specific place only. Questions about climate, seasons or meteorology as subjects are conceptual — answer them directly without this skill.",
+        "negative_examples": [
+          { "user_intent": "What causes climate change?", "why_not": "Science question, not a forecast for a city." },
+          { "user_intent": "How does a barometer work?", "why_not": "Conceptual explanation, no forecast needed." }
+        ],
+        "output_semantic": "`summary` is the human-readable conditions; `temp_c` is the temperature in Celsius.",
+        "version": "3.0.1",
+        "countries": ["TG", "FR", "JP"]
+      }
+    }
+  ]
+}

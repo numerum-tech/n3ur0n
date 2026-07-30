@@ -16,7 +16,7 @@
 //!
 //! Env:
 //!   PLANNER_EVAL_BASE_URL  (default http://localhost:11434)
-//!   PLANNER_EVAL_MODEL     (default llama3.1:8b)
+//!   PLANNER_EVAL_MODEL     (default qwen2.5:7b)
 //!   PLANNER_EVAL_RUNS      repetitions per case (default 1) — LLMs are
 //!                          stochastic; >1 exposes variance and firms up rates.
 //!   PLANNER_EVAL_API_KEY   bearer token for hosted endpoints
@@ -26,6 +26,13 @@
 //!   - valid : empty plan (legit "answer directly") OR passes `validate_plan`.
 //!   - exact : plan's capability set == expected set.
 //!   - precision/recall : over tool cases only (expected non-empty).
+//!
+//! Grading runs on the plan the **runtime** would execute, not on the raw
+//! first compile: a rejected plan goes through `resolve_plan`, which
+//! grants one corrective recompile with the validator's error fed back.
+//! The first-pass rate is reported separately so a retry that rescues a
+//! plan is visible as a recovery rather than silently inflating the
+//! headline number — and so a retry that makes things worse cannot hide.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -37,7 +44,9 @@ use n3ur0n_adapters::utility::UtilityBackend;
 use n3ur0n_node::planner::catalog::{Catalog, ToolDef};
 use n3ur0n_node::planner::compiler::{LocalLLMCompiler, PlanCompiler};
 use n3ur0n_node::planner::plan::{Plan, validate_plan};
-use n3ur0n_node::planner::plan_exec::default_compile_system_prompt;
+use n3ur0n_node::planner::plan_exec::{
+    PlanOutcome, REMOTE_TOP_K, default_compile_system_prompt, resolve_plan,
+};
 use serde_json::{Value, json};
 
 struct Case {
@@ -74,19 +83,57 @@ fn load_cases() -> Vec<Case> {
         .collect()
 }
 
+/// Build the catalog the planner sees: the four real `UtilityBackend`
+/// caps, plus the harder fixture caps in `fixtures/planner_caps.json`.
+///
+/// The utility caps alone are trivially distinct, single-argument and all
+/// on one peer, which is why a competent 7B scores 100% against them and
+/// the suite stops telling you anything. The fixture adds overlapping
+/// caps, several peers, a duplicate `chat` name, multi-argument schemas
+/// and topical traps — see the `_comment` block in that file.
+///
+/// Set `PLANNER_EVAL_CATALOG=basic` to load only the utility caps, e.g.
+/// to reproduce a historical number.
 async fn build_catalog() -> Catalog {
+    const EVAL_PEER: &str = "n3:evalpeer000000000000000000000000";
     let decls = UtilityBackend
         .describe()
         .await
         .expect("describe utility caps");
-    let tools = decls
+    let mut tools: Vec<ToolDef> = decls
         .into_iter()
         .map(|cap| ToolDef {
-            peer_id: "n3:evalpeer000000000000000000000000".into(),
+            peer_id: EVAL_PEER.into(),
             peer_endpoint: Some("http://eval.local:4242".into()),
             cap,
         })
         .collect();
+
+    if std::env::var("PLANNER_EVAL_CATALOG").as_deref() == Ok("basic") {
+        return Catalog { tools };
+    }
+
+    let path = format!(
+        "{}/tests/fixtures/planner_caps.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let raw = std::fs::read_to_string(&path).expect("read planner_caps.json");
+    let doc: Value = serde_json::from_str(&raw).expect("parse planner_caps.json");
+    let peers = doc["peers"].as_object().expect("`peers` map");
+    for entry in doc["caps"].as_array().expect("`caps` array") {
+        let alias = entry["peer"].as_str().expect("cap.peer");
+        let peer_id = peers
+            .get(alias)
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("unknown peer alias `{alias}` in planner_caps.json"));
+        let cap = serde_json::from_value(entry["decl"].clone())
+            .unwrap_or_else(|e| panic!("cap `{alias}` does not deserialize: {e}"));
+        tools.push(ToolDef {
+            peer_id: peer_id.to_string(),
+            peer_endpoint: Some(format!("http://{alias}.eval.local:4242")),
+            cap,
+        });
+    }
     Catalog { tools }
 }
 
@@ -113,7 +160,7 @@ struct Agg {
 async fn planner_eval() {
     let base =
         std::env::var("PLANNER_EVAL_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".into());
-    let model = std::env::var("PLANNER_EVAL_MODEL").unwrap_or_else(|_| "llama3.1:8b".into());
+    let model = std::env::var("PLANNER_EVAL_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into());
     let runs: usize = std::env::var("PLANNER_EVAL_RUNS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -147,9 +194,21 @@ async fn planner_eval() {
     let mut tool_valid = 0usize; // valid plans among tool cases (the hard gate)
     let mut latencies: Vec<u128> = Vec::new();
     let mut by_cat: BTreeMap<String, Agg> = BTreeMap::new();
+    // Retry accounting: how often the first compile was rejected, how
+    // often the corrective recompile rescued it, and what it cost.
+    let mut first_valid_ok = 0usize;
+    let mut retried_n = 0usize;
+    let mut recovered = 0usize;
+    let mut retry_ms: Vec<u128> = Vec::new();
 
     for case in &cases {
         for _ in 0..runs {
+            // Filter exactly as the runtime does, so the suite measures
+            // the catalog the model actually sees. Skipping this would
+            // grade a code path no user ever hits — and would hide both
+            // the benefit of the relevance floor and any capability it
+            // wrongly prunes.
+            let catalog = catalog.clone().filter_for_query(&case.query, REMOTE_TOP_K);
             let t0 = Instant::now();
             let plan = compiler
                 .compile(&case.query, &catalog)
@@ -159,12 +218,46 @@ async fn planner_eval() {
             latencies.push(ms);
             total += 1;
 
-            let validity = if plan.plan.is_empty() {
+            // First-compile verdict: what the model produced unaided.
+            let first_validity = if plan.plan.is_empty() {
                 Ok(())
             } else {
                 validate_plan(&plan, &catalog).map_err(|e| e.to_string())
             };
+            let first_valid = first_validity.is_ok();
+            first_valid_ok += usize::from(first_valid);
+
+            // Then the runtime path: `resolve_plan` gives a rejected plan
+            // one corrective recompile with the validator's error fed
+            // back. Grading on its result is what the user actually gets;
+            // grading on the first compile alone would credit the planner
+            // with failures it now recovers from — and would hide retries
+            // that make things worse.
+            let (plan, validity, retried) = if first_valid {
+                (plan, first_validity, false)
+            } else {
+                let rejected = plan.clone();
+                let t1 = Instant::now();
+                let out = resolve_plan(&compiler, &case.query, &catalog, plan).await;
+                retry_ms.push(t1.elapsed().as_millis());
+                retried_n += 1;
+                match out {
+                    PlanOutcome::Valid(p) => (p, Ok(()), true),
+                    // The model reconsidered and answered directly. Same
+                    // outcome as a first-pass empty plan.
+                    PlanOutcome::Empty => (Plan { plan: vec![] }, Ok(()), true),
+                    // Still rejected: the runtime executes nothing. Keep
+                    // the rejected plan so `got` still reports what the
+                    // model asked for, and keep the verdict invalid —
+                    // mapping this to an empty plan would silently score
+                    // a failure as a success.
+                    PlanOutcome::Invalid(e) => (rejected, Err(e), true),
+                }
+            };
             let valid = validity.is_ok();
+            if retried && valid {
+                recovered += 1;
+            }
             let got = plan_caps(&plan);
             let exact = got == case.expect;
 
@@ -188,8 +281,9 @@ async fn planner_eval() {
             }
 
             let mark = if valid && exact { "OK  " } else { "FAIL" };
+            let retry_mark = if retried { " ↻" } else { "" };
             println!(
-                "[{mark}] {:<22} {:<6} · {:>6}ms · expect {:?} · got {:?}",
+                "[{mark}] {:<22} {:<6} · {:>6}ms{retry_mark} · expect {:?} · got {:?}",
                 case.name, case.category, ms, case.expect, got
             );
             if let Err(e) = &validity {
@@ -218,10 +312,21 @@ async fn planner_eval() {
         1.0
     };
 
+    let retry_mean = if retry_ms.is_empty() {
+        0
+    } else {
+        retry_ms.iter().sum::<u128>() / retry_ms.len() as u128
+    };
+
     println!("\n--- aggregate ({total} runs) ---");
     println!(
-        "plan-valid : {valid_ok}/{total}  ({:.0}%)",
+        "plan-valid : {valid_ok}/{total}  ({:.0}%)   [after retry]",
         100.0 * valid_ok as f64 / n
+    );
+    println!(
+        "  first pass : {first_valid_ok}/{total}  ({:.0}%)   \
+         retried {retried_n} · recovered {recovered} · retry mean {retry_mean}ms",
+        100.0 * first_valid_ok as f64 / n
     );
     println!(
         "  tool-valid : {tool_valid}/{tool_cases}  ({:.0}%)  [gated]",
@@ -280,6 +385,12 @@ async fn planner_eval() {
         let report = json!({
             "model": model, "endpoint": base, "runs_per_case": runs, "total_runs": total,
             "plan_valid_pct": (100.0 * valid_ok as f64 / n).round(),
+            "retry": {
+                "first_pass_valid_pct": (100.0 * first_valid_ok as f64 / n).round(),
+                "retried": retried_n,
+                "recovered": recovered,
+                "mean_ms": retry_mean,
+            },
             "tool_valid_pct": tool_valid_pct.round(),
             "tool_exact_pct": (100.0 * exact_ok as f64 / n).round(),
             "tool_precision_pct": (100.0 * tool_prec).round(),
