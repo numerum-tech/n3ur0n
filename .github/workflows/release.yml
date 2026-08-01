@@ -31,7 +31,7 @@ jobs:
       release_id: ${{ steps.create.outputs.id }}
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: tag
         run: |
           if [ -n "${{ github.event.inputs.tag }}" ]; then
@@ -82,7 +82,7 @@ jobs:
             asset: n3ur0n-server-windows-x86_64.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -116,7 +116,7 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/setup-qemu-action@v4
       - uses: docker/login-action@v4
@@ -168,7 +168,7 @@ jobs:
             tauri_args: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.toolchain_targets }}
