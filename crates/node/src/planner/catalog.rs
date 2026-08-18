@@ -26,6 +26,42 @@ pub struct Catalog {
 /// us from recursing plan→plan when v0.2 ships `PlanBackend`.
 const EXCLUDED_CAP_NAMES: &[&str] = &["plan"];
 
+/// Maximum number of *local* capabilities surfaced in the compile prompt.
+///
+/// Locals used to bypass ranking entirely and were unbounded: an operator
+/// with a dozen skills put all twelve in front of the model on every
+/// message, however irrelevant. Over-planning scales with the number of
+/// visible-but-wrong skills, so they are now ranked and capped like
+/// remotes. The bound is generous — locals are the operator's own,
+/// deliberately configured caps, so they keep priority over remotes.
+const LOCAL_TOP_K: usize = 12;
+
+// ---------------------------------------------------------------------------
+// Why there is no *score floor* here (measured 2026-07-30)
+// ---------------------------------------------------------------------------
+//
+// The obvious next step is to drop capabilities scoring below some
+// fraction of the best score, so the model cannot pick a tool it never
+// sees. It was implemented, measured, and reverted. BM25 is lexical, and
+// a floor turns that weakness from "ranked lower" (harmless — the model
+// still sees the cap and picks it correctly) into "absent from the
+// catalog" (silent capability loss). Two measurements killed it:
+//
+//   - "…then summarise what you find."  → `summarize` scores 0.384, rel 0.17
+//     "…then summarize what you find."  → `summarize` scores 1.113, rel 0.49
+//     A single letter (British vs American spelling) decides whether the
+//     capability exists at all. On the eval suite this regressed the
+//     `chain` category from 100% to 86%.
+//
+//   - "Quelle heure est-il maintenant ?" against an English catalog scores
+//     *every* cap at 0.000. This project ships an EN/FR interface, so a
+//     query the retriever has no opinion about is routine, not exotic.
+//
+// A floor only becomes safe once retrieval is semantic (embeddings, or
+// hybrid BM25+embeddings) and a synonym or a translation still scores.
+// Until then, ranking and a bound are safe — they only ever drop a cap
+// when something else outranks it — while an absolute cut is not.
+
 impl Catalog {
     /// Build a fresh catalog from local registry + cached peer descriptors.
     ///
@@ -119,45 +155,94 @@ impl Catalog {
         remote_top_k: usize,
     ) -> NodeResult<Self> {
         let full = Self::build(self_id, local, db, peer_limit)?;
+        Ok(full.filter_for_query(user_query, remote_top_k))
+    }
+
+    /// Apply relevance filtering to an already-built catalog.
+    ///
+    /// Split out of [`build_for_query`](Self::build_for_query) so callers
+    /// that assemble a catalog by other means — the planner accuracy
+    /// suite, which builds one from fixtures — exercise the *same*
+    /// filtering the runtime uses. Measuring the planner against an
+    /// unfiltered catalog would report on a code path no user ever hits.
+    ///
+    /// `remote_top_k == 0` or an empty query disables filtering entirely,
+    /// which is what tests and debug paths want.
+    pub fn filter_for_query(self, user_query: &str, remote_top_k: usize) -> Self {
         if remote_top_k == 0 || user_query.trim().is_empty() {
-            // No filtering: keep everything (useful for tests / debug).
-            return Ok(full);
+            return self;
+        }
+        // Score *every* tool, local ones included — see LOCAL_TOP_K.
+        let index = BM25Index::build(&self.tools);
+        let scores: Vec<f32> = (0..self.tools.len())
+            .map(|i| index.score(user_query, i))
+            .collect();
+        self.filter_with_scores(&scores, remote_top_k)
+    }
+
+    /// Rank and bound using scores computed elsewhere.
+    ///
+    /// Separated from scoring because scoring may do IO — the hybrid
+    /// retriever embeds the query over HTTP — while this half is pure
+    /// policy and stays synchronous and unit-testable. `scores` is
+    /// positional: `scores[i]` belongs to `tools[i]`.
+    ///
+    /// A length mismatch means the caller paired the wrong scores with
+    /// the wrong catalog, which would silently rank capabilities by
+    /// another catalog's relevance. Filtering is skipped rather than
+    /// applying a scrambled order.
+    pub fn filter_with_scores(self, scores: &[f32], remote_top_k: usize) -> Self {
+        if remote_top_k == 0 {
+            return self;
+        }
+        if scores.len() != self.tools.len() {
+            tracing::error!(
+                scores = scores.len(),
+                tools = self.tools.len(),
+                "score/tool length mismatch; skipping catalog filtering"
+            );
+            return self;
         }
 
-        // Split into local (always kept) and remote (ranked).
-        let mut locals: Vec<ToolDef> = Vec::new();
-        let mut remotes: Vec<ToolDef> = Vec::new();
-        for t in full.tools.into_iter() {
+        let mut locals: Vec<(ToolDef, f32)> = Vec::new();
+        let mut remotes: Vec<(ToolDef, f32)> = Vec::new();
+        for (t, s) in self.tools.into_iter().zip(scores.iter().copied()) {
             if t.peer_endpoint.is_none() {
-                locals.push(t);
+                locals.push((t, s));
             } else {
-                remotes.push(t);
+                remotes.push((t, s));
             }
         }
 
-        if remotes.len() <= remote_top_k {
-            // Nothing to trim; preserve local-first order so prompts stay
-            // stable across queries.
-            let mut out = locals;
-            out.extend(remotes);
-            return Ok(Self { tools: out });
+        // Rank each group only when it actually has to be trimmed.
+        //
+        // Reordering is not free: skill order in the compile prompt
+        // perturbs the model's output. Sorting unconditionally regressed
+        // an unrelated chain case (`reverse` emitted without its required
+        // `text` arg) purely because the skills moved. So a group that
+        // already fits its bound keeps catalog order, and sorting is paid
+        // for only when something must be dropped.
+        //
+        // `sort_by` is stable, so equal scores keep catalog order — with
+        // no lexical signal at all (every score 0.0, e.g. a French query
+        // against English caps) this degrades to "first N in catalog
+        // order" rather than dropping everything.
+        if locals.len() > LOCAL_TOP_K {
+            locals.sort_by(|a, b| b.1.total_cmp(&a.1));
+        }
+        if remotes.len() > remote_top_k {
+            remotes.sort_by(|a, b| b.1.total_cmp(&a.1));
         }
 
-        let index = BM25Index::build(&remotes);
-        let mut scored: Vec<(usize, f32)> = (0..remotes.len())
-            .map(|i| (i, index.score(user_query, i)))
-            .collect();
-        // Descending by score; stable sort keeps insertion order on ties.
-        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-        let keep: Vec<ToolDef> = scored
+        // Local-first ordering keeps prompts (and any upstream prefix
+        // cache) stable across queries.
+        let mut out: Vec<ToolDef> = locals
             .into_iter()
-            .take(remote_top_k)
-            .map(|(i, _)| remotes[i].clone())
+            .take(LOCAL_TOP_K)
+            .map(|(t, _)| t)
             .collect();
-
-        let mut out = locals;
-        out.extend(keep);
-        Ok(Self { tools: out })
+        out.extend(remotes.into_iter().take(remote_top_k).map(|(t, _)| t));
+        Self { tools: out }
     }
 
     /// Number of tools.
@@ -174,6 +259,22 @@ impl Catalog {
     pub fn tool_name(&self, t: &ToolDef) -> String {
         let short = short_peer(&t.peer_id);
         format!("{short}::{}", t.cap.name)
+    }
+
+    /// The `(short_peer, capability)` pairs the planner may choose from,
+    /// in catalog order (locals first, so the ordering is stable across
+    /// dispatches).
+    ///
+    /// Feeds the constrained-decoding grammars, which enumerate these
+    /// pairs so an out-of-catalog tool cannot be sampled at all. The
+    /// peer component is the *short* form — the same one `tool_name` /
+    /// [`find`](Self::find) and the compile prompt use — so a plan that
+    /// satisfies the grammar resolves here by construction.
+    pub fn tool_names(&self) -> Vec<(String, String)> {
+        self.tools
+            .iter()
+            .map(|t| (short_peer(&t.peer_id), t.cap.name.clone()))
+            .collect()
     }
 
     /// Resolve a tool name (`<short_peer>::<cap>`) back to its full
@@ -382,9 +483,78 @@ mod tests {
         )
         .unwrap();
         let names: Vec<&str> = cat.tools.iter().map(|t| t.cap.name.as_str()).collect();
-        assert!(names.contains(&"local_only"), "local cap always kept");
         assert!(names.contains(&"translate"), "matching remote kept");
         assert!(!names.contains(&"weather"), "irrelevant remote filtered");
+        // Locals are ranked now, but only *bounded*, never cut by an
+        // absolute relevance score — a single local is always under the
+        // bound, so it survives regardless of how well it matches. See
+        // the "no score floor" note above for why an absolute cut is
+        // unsafe with a lexical retriever.
+        assert!(names.contains(&"local_only"), "local under the bound kept");
+    }
+
+    /// Locals are ranked and bounded at `LOCAL_TOP_K`. Before this they
+    /// bypassed ranking entirely and were unbounded, so an operator with
+    /// many skills put every one of them in front of the model on every
+    /// message — the visible-but-wrong skills that over-planning feeds on.
+    #[test]
+    fn locals_are_ranked_and_bounded() {
+        let db = open_in_memory().unwrap();
+        let mut decls: Vec<CapabilityDecl> = (0..LOCAL_TOP_K + 4)
+            .map(|i| {
+                let mut c = cap(&format!("filler_{i}"));
+                c.description = format!("Unrelated filler capability number {i}.");
+                c
+            })
+            .collect();
+        let mut translate_local = cap("translate");
+        translate_local.description = "Translates text between human languages.".into();
+        decls.push(translate_local);
+        let registry = CapabilityRegistry::from_decls(decls);
+
+        let cat = Catalog::build_for_query(
+            "n3:selfaaa",
+            &registry,
+            &db,
+            100,
+            "translate this sentence into french",
+            5,
+        )
+        .unwrap();
+        let names: Vec<&str> = cat.tools.iter().map(|t| t.cap.name.as_str()).collect();
+        assert_eq!(
+            cat.tools.len(),
+            LOCAL_TOP_K,
+            "locals bounded, got {names:?}"
+        );
+        assert!(
+            names.contains(&"translate"),
+            "the matching local must rank into the bound, got {names:?}"
+        );
+    }
+
+    /// **The safety net.** BM25 is lexical, so a query in another language
+    /// scores every capability at zero. That is the retriever having no
+    /// opinion, not proof that no tool fits — pruning there would strip
+    /// the catalog and lose `time` for a French speaker asking the time.
+    /// This project ships an EN/FR UI, so it is a routine case.
+    #[test]
+    fn all_zero_scores_keep_the_whole_catalog() {
+        let db = open_in_memory().unwrap();
+        let mut time_cap = cap("time");
+        time_cap.description = "Returns the current server time.".into();
+        let mut rev = cap("reverse");
+        rev.description = "Reverses a string.".into();
+        let registry = CapabilityRegistry::from_decls(vec![time_cap, rev]);
+
+        // No lexical overlap whatsoever with the English declarations.
+        let cat = Catalog::build_for_query("n3:selfaaa", &registry, &db, 100, "quelle heure ?", 5)
+            .unwrap();
+        let names: Vec<&str> = cat.tools.iter().map(|t| t.cap.name.as_str()).collect();
+        assert!(
+            names.contains(&"time") && names.contains(&"reverse"),
+            "no BM25 signal must not silently empty the catalog, got {names:?}"
+        );
     }
 
     #[test]

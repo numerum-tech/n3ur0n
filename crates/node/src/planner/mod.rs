@@ -8,6 +8,7 @@ pub mod plan;
 pub mod plan_exec;
 pub mod planner_cap;
 pub mod retrieval;
+pub mod retriever;
 
 use async_trait::async_trait;
 use serde::Serialize;

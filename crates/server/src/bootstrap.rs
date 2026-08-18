@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use n3ur0n_adapters::{
     Backend,
     echo::EchoBackend,
+    embeddings::{EmbeddingClient, EmbeddingConfig},
     openai::{OpenAIBackend, OpenAIConfig},
     utility::UtilityBackend,
 };
@@ -19,6 +20,7 @@ use n3ur0n_node::planner::compiler::{
     CascadingCompiler, LocalLLMCompiler, PlanCompiler, RemotePlanCompiler,
 };
 use n3ur0n_node::planner::plan_exec::default_compile_system_prompt;
+use n3ur0n_node::planner::retriever::Retriever;
 use n3ur0n_node::planner::{DirectChatPlanner, PlanExecPlanner, Planner};
 use n3ur0n_node::runtime::{NodeRuntime, RuntimeConfig};
 use n3ur0n_node::{CapabilityRegistry, IdentityFile, Node, NodeConfig, identity_file};
@@ -256,6 +258,10 @@ fn build_runtime_from_resolved(
 ) -> Result<NodeRuntime> {
     let (auto, direct): (Arc<dyn Planner>, Arc<dyn Planner>) = {
         let mut planner_cfg = resolved.openai.clone();
+        // Kept for the embedding client below — `planner_cfg` is moved
+        // into the backend on the next lines.
+        let embed_base_url = planner_cfg.base_url.clone();
+        let embed_api_key = planner_cfg.api_key.clone();
         planner_cfg.allow_model_override = true;
         let llm: Arc<dyn Backend> = Arc::new(
             OpenAIBackend::new(planner_cfg)
@@ -296,11 +302,48 @@ fn build_runtime_from_resolved(
                 _ => local,
             };
 
-        let auto = Arc::new(PlanExecPlanner::with_compiler(
-            compiler,
-            llm.clone(),
-            Some(chosen_model.clone()),
-        ));
+        // Hybrid capability retrieval, opt-in via
+        // `N3UR0N_PLANNER_EMBED_MODEL` (same env-driven shape as the
+        // remote-fallback cascade above).
+        //
+        // Only the model name is required: embeddings are normally served
+        // by the same endpoint as the planner LLM (one Ollama), so the
+        // base URL and key default to the planner's own.
+        // `N3UR0N_PLANNER_EMBED_BASE_URL` overrides when they are not.
+        //
+        // Unset, or a client that fails to build, leaves the planner on
+        // BM25-only retrieval — the behaviour that shipped before
+        // embeddings existed. Retrieval quality must never be able to
+        // stop a node from starting.
+        let auto =
+            PlanExecPlanner::with_compiler(compiler, llm.clone(), Some(chosen_model.clone()));
+        let auto = match std::env::var("N3UR0N_PLANNER_EMBED_MODEL") {
+            Ok(model) if !model.trim().is_empty() => {
+                let base_url = std::env::var("N3UR0N_PLANNER_EMBED_BASE_URL")
+                    .unwrap_or_else(|_| embed_base_url.clone());
+                match EmbeddingClient::new(EmbeddingConfig {
+                    base_url: base_url.clone(),
+                    model: model.clone(),
+                    api_key: embed_api_key.clone(),
+                }) {
+                    Ok(client) => {
+                        tracing::info!(
+                            %model,
+                            %base_url,
+                            "planner: hybrid capability retrieval enabled (BM25 + embeddings)"
+                        );
+                        auto.with_retriever(Arc::new(Retriever::hybrid(Arc::new(client))))
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "planner: embedding client unavailable; \
+                             falling back to BM25-only retrieval");
+                        auto
+                    }
+                }
+            }
+            _ => auto,
+        };
+        let auto = Arc::new(auto);
         let direct = Arc::new(DirectChatPlanner::new(llm, Some(chosen_model)));
         (auto, direct)
     };

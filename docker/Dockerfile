@@ -30,9 +30,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/work/target \
     cargo fetch
 
-# Now copy real sources and build the release binary.
+# Now copy real sources and build the release binary. The web UI is plain
+# static assets under crates/server/ui/ (embedded by rust-embed at compile
+# time) — there is no JS build step and no node toolchain in this image.
 COPY crates ./crates
-COPY frontend ./frontend
 
 # Re-strip the desktop member after the real crates/ tree is copied
 # (the COPY restored the original tree).

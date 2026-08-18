@@ -91,7 +91,7 @@ pub(crate) struct ServeArgs {
     #[arg(long, env = "N3UR0N_PLANNER_LLM_BASE_URL")]
     pub(crate) planner_llm_base_url: Option<String>,
 
-    /// Model identifier for the planner LLM (e.g. `llama3.1:8b`).
+    /// Model identifier for the planner LLM (e.g. `qwen2.5:7b`).
     #[arg(long, env = "N3UR0N_PLANNER_LLM_MODEL")]
     pub(crate) planner_llm_model: Option<String>,
 

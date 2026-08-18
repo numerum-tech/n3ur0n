@@ -17,6 +17,14 @@
 6. **RBAC phase 1** (0.4.0). Migration `0003_users_sessions.sql`, rôles User / Operator / Admin, cookie de session, routes `/api/v0` protégées par permission. `N3UR0N_AUTH_DISABLE=1` pour le dev loopback. Le protocole pair (`/n3ur0n/v0`) reste signé Ed25519, indépendant des comptes locaux.
 7. **`AccessMode::Private` implémenté** (0.4.0). Filtré de `describe_self` ; invoke réseau → `UnknownCapability`.
 
+**Amendement 2026-07-28 — le frontend n'est pas SvelteKit** (écart le plus ancien et le plus large du document) :
+
+8. **Tout le §8 (Frontend partagée), le sous-arbre `frontend/` du §10.1, le §12.4 (Workflow dev) et les lignes Frontend / Composants du tableau §15 décrivent une stack jamais implémentée.** SvelteKit, `adapter-static`, `bits-ui`, Tailwind, Vite, `pnpm --filter frontend` : rien de tout cela n'est utilisé. Le dossier `frontend/` a existé de mai 2026 au 2026-07-28 comme scaffold de 214 LOC, jamais buildé par la CI (aucun step `pnpm`/`npm` dans `.github/workflows/`), jamais servi, puis supprimé.
+9. **L'UI réelle est `crates/server/ui/`** : JS vanilla en ES modules + CSS écrits à la main, **aucun bundler, aucun package.json, aucune étape de build**. ~4,3k LOC (`app.js` 3500, `auth.js` 269, `i18n.js` 140, `icons.js` 74, `index.html` 314, `style.css`, `locales/{en,fr}.json`). Chargée en `<script type="module">`.
+10. **Une seule codebase UI pour les deux cibles** — l'intention du §8 tient, le moyen change. Le serveur l'embarque via rust-embed (`#[folder = "ui/"]` dans `crates/server/src/http.rs`) ; le desktop pointe dessus (`"frontendDist": "../server/ui"` dans `crates/desktop/tauri.conf.json`) et la charge depuis l'axum loopback embarqué. Le `transport.ts` unifié Tauri-IPC/HTTP décrit §8.3 n'existe pas : le desktop parle à son propre serveur local en HTTP, donc `fetch` suffit partout.
+11. **Dev loop** : rust-embed sans la feature `debug-embed` relit les assets sur disque en build debug — éditer un `.js`/`.css` puis recharger la page, sans recompiler (vérifié 2026-07-28). En release les assets sont dans le binaire.
+12. **Ce que ça coûte** : `app.js` est un monolithe de 3500 lignes. C'est la vraie dette UI — pas l'absence de framework. La découper en modules ES est un refactor JS ordinaire ; réintroduire un framework + build step serait une décision de stack à part entière, à discuter avant, pas à supposer acquise.
+
 Le code prime sur les docs. Cf. règle de précédence CLAUDE.md.
 
 ---

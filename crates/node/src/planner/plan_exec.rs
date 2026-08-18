@@ -15,13 +15,15 @@ use async_trait::async_trait;
 use n3ur0n_adapters::Backend;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::conversation::{ConversationState, persist_last, persist_tool_pair_at};
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
 use crate::planner::catalog::{Catalog, ToolDef};
+use crate::planner::compiler::PlanCompiler;
 use crate::planner::plan::{Plan, execute_plan_streaming, validate_plan};
+use crate::planner::retriever::Retriever;
 use crate::planner::{
     DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, MAX_CONTEXT_TURNS,
     PlanStepInfo, Planner, TraceEntry,
@@ -30,7 +32,18 @@ use crate::planner::{
 /// tools always pass through (the operator configured them explicitly).
 /// 20 picked to keep prompts under ~3k tokens for moderately enriched
 /// caps; tune if observed compile latency starts to dominate.
-const REMOTE_TOP_K: usize = 20;
+pub const REMOTE_TOP_K: usize = 20;
+
+/// How many corrective recompiles a rejected plan gets. One.
+///
+/// The one-shot compile gives up the recovery loop a ReAct agent leans
+/// on: a plan that fails `validate_plan` is discarded whole and the user
+/// gets a no-tool answer. A single retry carrying the validator's own
+/// error message buys part of that loop back for one extra LLM call
+/// *only on failure* — the success path stays at two calls. More than
+/// one retry is not worth the latency: if the model cannot fix a plan
+/// given the exact error, another identical nudge rarely helps.
+const COMPILE_RETRY_LIMIT: usize = 1;
 
 #[derive(Clone)]
 pub struct PlanExecPlanner {
@@ -44,6 +57,9 @@ pub struct PlanExecPlanner {
     /// the same backend as the local compiler today.
     pub llm_backend: Arc<dyn Backend>,
     pub model_hint: Option<String>,
+    /// Capability retrieval. Defaults to BM25-only; `with_retriever`
+    /// swaps in a hybrid one when an embeddings endpoint is configured.
+    pub retriever: Arc<Retriever>,
 }
 
 impl std::fmt::Debug for PlanExecPlanner {
@@ -68,6 +84,7 @@ impl PlanExecPlanner {
             compiler,
             llm_backend,
             model_hint,
+            retriever: Arc::new(Retriever::lexical()),
         }
     }
 
@@ -83,7 +100,15 @@ impl PlanExecPlanner {
             compiler,
             llm_backend,
             model_hint,
+            retriever: Arc::new(Retriever::lexical()),
         }
+    }
+
+    /// Swap in a retriever — used to enable hybrid (BM25 + embedding)
+    /// capability retrieval when the node has an embeddings endpoint.
+    pub fn with_retriever(mut self, retriever: Arc<Retriever>) -> Self {
+        self.retriever = retriever;
+        self
     }
 
     fn reflect_system_prompt(&self) -> String {
@@ -149,18 +174,19 @@ impl PlanExecPlanner {
         persist_last(node.db(), state)
             .map_err(|e| NodeError::InvalidPayload(format!("persist user: {e}")))?;
 
-        // 2. Build catalog — query-aware: local caps always kept, remote
-        // caps ranked against the user message via BM25 and trimmed to the
-        // top REMOTE_TOP_K. Keeps prompt size bounded as the network grows.
+        // 2. Build catalog, then rank and bound it against the user
+        //    message so prompt size stays bounded as the network grows.
+        //    Scoring is the retriever's job (BM25, plus embeddings when
+        //    configured); ranking policy is the catalog's.
         let registry_snapshot = node.registry();
-        let catalog = Catalog::build_for_query(
+        let catalog = Catalog::build(
             node.instance_id().as_str(),
             &registry_snapshot,
             node.db(),
             500,
-            &planner_text,
-            REMOTE_TOP_K,
         )?;
+        let scores = self.retriever.score(&catalog.tools, &planner_text).await;
+        let catalog = catalog.filter_with_scores(&scores, REMOTE_TOP_K);
 
         // 3. Compile: delegate to the configured PlanCompiler. The
         // default LocalLLMCompiler ships the constrained-decoding fields
@@ -179,26 +205,31 @@ impl PlanExecPlanner {
             let _ = tx.send(DispatchEvent::LowConfidence { confidence });
         }
 
-        // 4. Validate.
-        if let Err(e) = validate_plan(&plan, &catalog) {
-            warn!(error = %e, "plan validation failed; falling back to direct reply");
-            if let Some(tx) = events {
-                let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
+        // 4. Validate, with one corrective recompile if the plan is
+        //    structurally wrong (see `resolve_plan`).
+        let plan = match resolve_plan(self.compiler.as_ref(), &planner_text, &catalog, plan).await {
+            // Empty plan = answer directly without any tool. This is a
+            // legitimate, prompt-instructed outcome (translation,
+            // arithmetic, definitions…), never a retry trigger.
+            PlanOutcome::Empty => {
+                if let Some(tx) = events {
+                    let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
+                }
+                return self
+                    .reflect_only(node, state, &planner_text, None, Vec::new(), events)
+                    .await;
             }
-            return self
-                .reflect_only(node, state, &planner_text, None, Vec::new(), events)
-                .await;
-        }
-
-        // Special case: empty plan = answer directly without any tool.
-        if plan.plan.is_empty() {
-            if let Some(tx) = events {
-                let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
+            PlanOutcome::Invalid(e) => {
+                warn!(error = %e, "plan still invalid after retry; falling back to direct reply");
+                if let Some(tx) = events {
+                    let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
+                }
+                return self
+                    .reflect_only(node, state, &planner_text, None, Vec::new(), events)
+                    .await;
             }
-            return self
-                .reflect_only(node, state, &planner_text, None, Vec::new(), events)
-                .await;
-        }
+            PlanOutcome::Valid(p) => p,
+        };
 
         // Announce the plan upfront so the UI can render the chip row.
         if let Some(tx) = events {
@@ -453,6 +484,113 @@ fn render_blackboard_value(v: &Value) -> String {
 /// Canonical compile system prompt — moved out of `PlanExecPlanner` so
 /// `LocalLLMCompiler` can share it as the default. Pure function of the
 /// catalog; no planner state involved.
+/// What a compiled plan turned out to be, after validation and at most
+/// [`COMPILE_RETRY_LIMIT`] corrective recompiles.
+#[derive(Debug)]
+pub enum PlanOutcome {
+    /// No steps — the model chose to answer from its own knowledge. A
+    /// legitimate outcome the compile prompt explicitly asks for, not a
+    /// failure, so it never triggers a retry.
+    Empty,
+    /// Structurally sound against the catalog.
+    Valid(Plan),
+    /// Still rejected after the retry budget; carries the last error.
+    Invalid(String),
+}
+
+/// Validate `plan`, and on a structural failure recompile once with the
+/// validator's own error fed back to the model.
+///
+/// Split out of `dispatch_inner` so the retry can be unit-tested against
+/// a stub `PlanCompiler` — exercising it through `dispatch_inner` would
+/// need a whole `Node` (db, keypair, registry).
+///
+/// The empty-plan check comes **before** validation on purpose.
+/// `validate_plan` reports an empty plan as `"plan has no steps"`, so
+/// validating first would treat every legitimate no-tool answer as a
+/// failure and burn a second LLM call on the most common path.
+pub async fn resolve_plan(
+    compiler: &dyn PlanCompiler,
+    user_msg: &str,
+    catalog: &Catalog,
+    plan: Plan,
+) -> PlanOutcome {
+    if plan.plan.is_empty() {
+        return PlanOutcome::Empty;
+    }
+    let Err(first) = validate_plan(&plan, catalog) else {
+        return PlanOutcome::Valid(plan);
+    };
+
+    let mut last = first.to_string();
+    for attempt in 1..=COMPILE_RETRY_LIMIT {
+        warn!(
+            error = %last,
+            attempt,
+            "plan rejected; recompiling once with the validation error fed back"
+        );
+        let retried = match compiler
+            .compile(&compile_retry_message(user_msg, &last), catalog)
+            .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                // The retry call itself failed (backend down, timeout).
+                // Report the original validation error — it is the more
+                // useful diagnostic — but note the retry never landed.
+                warn!(error = %e, "corrective recompile failed to reach the backend");
+                return PlanOutcome::Invalid(last);
+            }
+        };
+        // The model may conclude on the second pass that no skill fits.
+        // That is a valid answer, not a second failure.
+        if retried.plan.is_empty() {
+            return PlanOutcome::Empty;
+        }
+        match validate_plan(&retried, catalog) {
+            Ok(()) => {
+                debug!(attempt, "corrective recompile produced a valid plan");
+                return PlanOutcome::Valid(retried);
+            }
+            Err(e) => last = e.to_string(),
+        }
+    }
+    PlanOutcome::Invalid(last)
+}
+
+/// Build the corrective user message: the original request, the
+/// validator's verbatim complaint, and the two ways out.
+///
+/// The error is fed back verbatim because `validate_plan`'s messages are
+/// already actionable and name the offending step — e.g. ``step `s2`:
+/// tool `abc::x` not in catalog``.
+///
+/// **Order matters here, and it is not cosmetic.** An earlier draft led
+/// with "emit a corrected plan" and offered the empty plan as a
+/// footnote; measured against the eval suite that rescued a `none` case
+/// (`code_explain`) into executing a tool it never should have called.
+/// A rejected plan is frequently a plan that should not have existed:
+/// on the `none` / `trap` categories the validation failure was acting
+/// as an accidental safety net, and a retry framed as "fix it" defeats
+/// that net. Reconsidering therefore comes first and correcting second,
+/// so the model is not anchored on producing a plan at any cost.
+fn compile_retry_message(user_msg: &str, error: &str) -> String {
+    format!(
+        "{user_msg}\n\n\
+         [plan rejected] Your previous plan was rejected by the validator:\n\
+         {error}\n\
+         \n\
+         First reconsider whether any skill is needed at all. A rejected plan is \
+         often a plan that should not exist: if this request can be answered from \
+         your own knowledge — translation, arithmetic, definitions, explaining code \
+         or text the user already provided — return {{\"plan\": []}}. That is the \
+         correct answer, not a failure.\n\
+         Only if a skill genuinely is required, emit a corrected plan: use the exact \
+         `peer:` and `capability:` values from the skills list above, and only \
+         argument fields the skill's schema declares."
+    )
+}
+
 pub fn default_compile_system_prompt(catalog: &Catalog) -> String {
     let mut s = String::from(
         "You are an n3ur0n plan compiler. Given a user request, produce ONE JSON \
@@ -492,10 +630,16 @@ Do NOT invent step ids.\n\
 prior knowledge with no skill, return an empty plan: `{\"plan\": []}`. The \
 reflection step that runs after execution will compose the answer using your \
 own knowledge.\n\
-- Tasks that should return `{\"plan\": []}` include: translation between human \
-languages, definitions, well-known facts, simple arithmetic, code explanations, \
-summaries of text the user already provided. Do not invent a chain of skills \
-just because they are listed.\n\
+- Decide this against the skills that are actually listed below, not against \
+the kind of task it is. If a listed skill is DEDICATED to what the user asked \
+(a translation skill for a translation, a summarising skill for a summary), \
+use it — it is more accurate than answering from memory. A general-purpose \
+chat or LLM skill is NOT dedicated to anything: never route to one for \
+something you can answer yourself. If nothing listed is dedicated to the \
+request and you can answer from your own knowledge — greetings, definitions, \
+well-known facts, simple arithmetic, explaining code or text the user already \
+gave you — return `{\"plan\": []}`. Do not invent a chain of skills just \
+because they are listed.\n\
 - BUT you must NEVER answer from memory when the request needs live or current \
 data you cannot possibly know from training — above all the CURRENT TIME, the \
 time \"now\", or today's DATE. You do not know the current time. If a skill \
@@ -682,6 +826,173 @@ fn extract_first_json_object(s: &str) -> Option<String> {
 mod tests {
     use super::*;
     use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
+
+    // ---- retry harness -------------------------------------------------
+    //
+    // A stub compiler returning canned plans, so `resolve_plan` can be
+    // driven without a `Node`. It records the messages it was handed,
+    // which is how the tests assert the validation error is actually fed
+    // back rather than the retry being a blind second roll of the dice.
+
+    #[derive(Debug, Default)]
+    struct StubCompiler {
+        replies: std::sync::Mutex<std::collections::VecDeque<NodeResult<Plan>>>,
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl StubCompiler {
+        fn with(replies: Vec<NodeResult<Plan>>) -> Self {
+            Self {
+                replies: std::sync::Mutex::new(replies.into()),
+                seen: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+        fn calls(&self) -> Vec<String> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PlanCompiler for StubCompiler {
+        async fn compile(&self, user_msg: &str, _catalog: &Catalog) -> NodeResult<Plan> {
+            self.seen.lock().unwrap().push(user_msg.to_string());
+            self.replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Ok(Plan { plan: vec![] }))
+        }
+    }
+
+    fn retry_catalog() -> Catalog {
+        let mut cat = Catalog::default();
+        cat.tools.push(ToolDef {
+            peer_id: "n3:abcdef123456".into(),
+            peer_endpoint: None,
+            cap: enriched_cap(),
+        });
+        cat
+    }
+
+    /// A step naming a tool the catalog does not contain.
+    fn bad_plan() -> Plan {
+        Plan {
+            plan: vec![crate::planner::plan::PlanStep {
+                id: "s1".into(),
+                peer: "ghostpeer000".into(),
+                capability: "nope".into(),
+                args: serde_json::json!({}),
+                depends_on: vec![],
+            }],
+        }
+    }
+
+    fn good_plan(cat: &Catalog) -> Plan {
+        let t = &cat.tools[0];
+        let full = cat.tool_name(t);
+        let (peer, cap) = full.split_once("::").unwrap();
+        Plan {
+            plan: vec![crate::planner::plan::PlanStep {
+                id: "s1".into(),
+                peer: peer.into(),
+                capability: cap.into(),
+                args: serde_json::json!({"text": "hello"}),
+                depends_on: vec![],
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_plan_is_not_recompiled() {
+        let cat = retry_catalog();
+        let stub = StubCompiler::default();
+        let out = resolve_plan(&stub, "hi", &cat, good_plan(&cat)).await;
+        assert!(matches!(out, PlanOutcome::Valid(_)), "got {out:?}");
+        assert!(
+            stub.calls().is_empty(),
+            "success path must not call the LLM again"
+        );
+    }
+
+    /// The most common no-tool path. `validate_plan` reports an empty
+    /// plan as an error, so validating before the empty check would burn
+    /// a second LLM call on every translation / arithmetic / definition.
+    #[tokio::test]
+    async fn empty_plan_is_not_a_failure_and_never_retries() {
+        let cat = retry_catalog();
+        let stub = StubCompiler::default();
+        let out = resolve_plan(&stub, "translate this", &cat, Plan { plan: vec![] }).await;
+        assert!(matches!(out, PlanOutcome::Empty), "got {out:?}");
+        assert!(
+            stub.calls().is_empty(),
+            "empty plan must not trigger a retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_plan_recompiles_once_and_recovers() {
+        let cat = retry_catalog();
+        let stub = StubCompiler::with(vec![Ok(good_plan(&cat))]);
+        let out = resolve_plan(&stub, "do the thing", &cat, bad_plan()).await;
+        assert!(matches!(out, PlanOutcome::Valid(_)), "got {out:?}");
+
+        let calls = stub.calls();
+        assert_eq!(calls.len(), 1, "exactly one corrective recompile");
+        // The retry must carry the original request *and* the validator's
+        // complaint, else it is just a blind re-roll.
+        assert!(calls[0].contains("do the thing"));
+        assert!(calls[0].contains("[plan rejected]"));
+        assert!(
+            calls[0].contains("not in catalog"),
+            "verbatim error: {}",
+            calls[0]
+        );
+        assert!(calls[0].contains(r#"{"plan": []}"#), "must allow giving up");
+    }
+
+    #[tokio::test]
+    async fn retry_budget_is_one() {
+        let cat = retry_catalog();
+        // Both the first plan and the retry are bad.
+        let stub = StubCompiler::with(vec![Ok(bad_plan())]);
+        let out = resolve_plan(&stub, "q", &cat, bad_plan()).await;
+        match out {
+            PlanOutcome::Invalid(e) => assert!(e.contains("not in catalog"), "got {e}"),
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+        assert_eq!(
+            stub.calls().len(),
+            COMPILE_RETRY_LIMIT,
+            "no unbounded looping"
+        );
+    }
+
+    /// A model that reconsiders and returns `{"plan": []}` on the second
+    /// pass is answering, not failing twice.
+    #[tokio::test]
+    async fn retry_may_conclude_no_tool_fits() {
+        let cat = retry_catalog();
+        let stub = StubCompiler::with(vec![Ok(Plan { plan: vec![] })]);
+        let out = resolve_plan(&stub, "q", &cat, bad_plan()).await;
+        assert!(matches!(out, PlanOutcome::Empty), "got {out:?}");
+    }
+
+    /// If the retry call cannot reach the backend, report the original
+    /// validation error — the transport error is not what the operator
+    /// needs to see about the plan.
+    #[tokio::test]
+    async fn backend_failure_during_retry_reports_the_validation_error() {
+        let cat = retry_catalog();
+        let stub = StubCompiler::with(vec![Err(NodeError::InvalidPayload("upstream down".into()))]);
+        let out = resolve_plan(&stub, "q", &cat, bad_plan()).await;
+        match out {
+            PlanOutcome::Invalid(e) => {
+                assert!(e.contains("not in catalog"), "got {e}");
+                assert!(!e.contains("upstream down"), "transport error leaked: {e}");
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
 
     #[test]
     fn parse_plan_direct() {

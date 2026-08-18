@@ -8,10 +8,9 @@ coverage/
 tarpaulin-report.*
 
 # ---- Frontend ----
-frontend/node_modules/
-frontend/.svelte-kit/
-frontend/build/
-frontend/.vite/
+# The web UI (crates/server/ui/) is hand-written static assets with no build
+# step, so it has no generated output to ignore. These stay for tooling that
+# may drop artefacts locally.
 node_modules/
 dist/
 out/

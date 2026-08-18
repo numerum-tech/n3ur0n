@@ -111,7 +111,7 @@ impl BM25Index {
 /// Concatenate the fields of a `ToolDef` we want indexed. Weight is implicit
 /// (more important fields are repeated by the user's caller of `searchable_
 /// text` if needed; for v0.2 a flat concat is fine).
-fn searchable_text(t: &ToolDef) -> String {
+pub(crate) fn searchable_text(t: &ToolDef) -> String {
     let cap = &t.cap;
     let mut s = String::new();
     s.push_str(&cap.name);
