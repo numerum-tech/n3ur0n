@@ -9,7 +9,8 @@
 //! Between the two, a deterministic executor walks the plan in
 //! topological order and substitutes `${step_id.path}` references.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -262,7 +263,16 @@ impl PlanExecPlanner {
                     let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
                 }
                 return self
-                    .reflect_only(node, state, &planner_text, None, Vec::new(), 1, events)
+                    .reflect_only(
+                        node,
+                        state,
+                        &planner_text,
+                        None,
+                        None,
+                        Vec::new(),
+                        1,
+                        events,
+                    )
                     .await;
             }
             PlanOutcome::Invalid(e) => {
@@ -271,7 +281,16 @@ impl PlanExecPlanner {
                     let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
                 }
                 return self
-                    .reflect_only(node, state, &planner_text, None, Vec::new(), 1, events)
+                    .reflect_only(
+                        node,
+                        state,
+                        &planner_text,
+                        None,
+                        None,
+                        Vec::new(),
+                        1,
+                        events,
+                    )
                     .await;
             }
             PlanOutcome::Valid(p) => p,
@@ -573,6 +592,7 @@ impl PlanExecPlanner {
                 state,
                 &planner_text,
                 Some(&run.blackboard_summary()),
+                Some(&run.blackboard),
                 run.trace,
                 rounds_used,
                 events,
@@ -600,6 +620,7 @@ impl PlanExecPlanner {
         state: &mut ConversationState,
         user_message: &str,
         blackboard_summary: Option<&str>,
+        blackboard: Option<&HashMap<String, Value>>,
         trace: Vec<TraceEntry>,
         rounds: usize,
         events: Option<&EventSender>,
@@ -612,9 +633,20 @@ impl PlanExecPlanner {
         // Include the conversation tail so the LLM has continuity.
         messages.extend(state.to_chat_messages(MAX_CONTEXT_TURNS));
         if let Some(summary) = blackboard_summary {
+            let refs = blackboard.map(referenceable_values).unwrap_or_default();
+            let quoting = if refs.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\n\nTo state any of these values, write its reference and nothing \
+                     else — the system replaces it with the exact value:\n{refs}\n\
+                     Never retype or recompute a value yourself. A reversed string, a \
+                     hash, an id or a timestamp retyped from memory will be wrong."
+                )
+            };
             messages.push(json!({
                 "role": "system",
-                "content": format!("Blackboard from this dispatch:\n{}", summary)
+                "content": format!("Blackboard from this dispatch:\n{summary}{quoting}")
             }));
         }
         // A message made only of mentions scopes the catalogue without asking
@@ -639,12 +671,22 @@ impl PlanExecPlanner {
             args["model"] = Value::String(model.clone());
         }
         let response = self.llm_backend.invoke("chat", args).await?;
-        let content = response
+        let raw = response
             .pointer("/message/content")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim()
             .to_string();
+        // Substitute any `${step.field}` the composer wrote. Unresolvable ones
+        // are left verbatim by `resolve_value`, so a stray reference degrades
+        // to visible text rather than to a wrong value.
+        let content = match blackboard {
+            Some(bb) => crate::planner::plan::resolve_value(&Value::String(raw), bb)
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_default(),
+            None => raw,
+        };
         let model_used = response
             .get("model")
             .and_then(|v| v.as_str())
@@ -815,6 +857,42 @@ pub async fn resolve_plan(
 /// as an accidental safety net, and a retry framed as "fix it" defeats
 /// that net. Reconsidering therefore comes first and correcting second,
 /// so the model is not anchored on producing a plan at any cost.
+/// The blackboard rendered as *references the composer can quote*.
+///
+/// The narrative summary names capabilities but no step ids, so a model asked
+/// to state a tool's output has no handle for it and can only retype the value.
+/// Measured on a three-step chain, a 7B retyped `reverse`'s output by trying to
+/// redo the reversal in its head and produced a string that was not the one the
+/// tool returned — the character count beside it, being a short number, was
+/// copied correctly.
+///
+/// Listing `${step.field}` tokens gives it something to write instead of a
+/// value, and [`resolve_value`] substitutes the real one afterwards. Fabrication
+/// stops being discouraged and becomes impossible for anything quoted this way.
+fn referenceable_values(blackboard: &HashMap<String, Value>) -> String {
+    let mut ids: Vec<&String> = blackboard.keys().collect();
+    ids.sort();
+    let mut out = String::new();
+    for id in ids {
+        match blackboard.get(id) {
+            Some(Value::Object(fields)) => {
+                for (field, value) in fields {
+                    let _ = writeln!(
+                        out,
+                        "  ${{{id}.{field}}} = {}",
+                        render_blackboard_value(value)
+                    );
+                }
+            }
+            Some(other) => {
+                let _ = writeln!(out, "  ${{{id}}} = {}", render_blackboard_value(other));
+            }
+            None => {}
+        }
+    }
+    out
+}
+
 /// Capabilities a plan intends to call, as `peer::capability`.
 ///
 /// Deliberately coarser than the arguments: a continuation's args are literals
@@ -1645,5 +1723,69 @@ mod tests {
             args: json!({}),
             depends_on: vec![],
         }
+    }
+
+    #[test]
+    fn referenceable_values_lists_one_token_per_field() {
+        let mut bb = HashMap::new();
+        bb.insert(
+            "s1".to_string(),
+            json!({"now": "2026-09-12T18:06:29.780871607Z"}),
+        );
+        bb.insert(
+            "s2".to_string(),
+            json!({"reversed": "Z706178087.92:60:81T21-90-6202"}),
+        );
+        bb.insert("s3".to_string(), json!({"chars": 30, "bytes": 30}));
+        let out = referenceable_values(&bb);
+
+        assert!(out.contains("${s1.now}"), "{out}");
+        assert!(out.contains("${s2.reversed}"), "{out}");
+        assert!(out.contains("${s3.chars}"), "{out}");
+        // The value is shown beside the token, so the model sees what it stands
+        // for without having to guess.
+        assert!(out.contains("Z706178087.92:60:81T21-90-6202"), "{out}");
+        // Sorted by step id: the composer reads them in execution order.
+        assert!(out.find("${s1.").unwrap() < out.find("${s2.").unwrap());
+    }
+
+    #[test]
+    fn referenceable_values_handles_a_non_object_result() {
+        let mut bb = HashMap::new();
+        bb.insert("s1".to_string(), json!(42));
+        assert!(referenceable_values(&bb).contains("${s1} = 42"));
+    }
+
+    /// The other half of the mechanism: a reference the composer writes into
+    /// prose is replaced by the exact value, so what it quotes cannot drift
+    /// from what the tool returned.
+    #[test]
+    fn a_reference_inside_prose_is_substituted_verbatim() {
+        let mut bb = HashMap::new();
+        bb.insert(
+            "s2".to_string(),
+            json!({"reversed": "Z706178087.92:60:81T21-90-6202"}),
+        );
+        bb.insert("s3".to_string(), json!({"chars": 30}));
+
+        let written = Value::String(
+            "The reversed string is ${s2.reversed}, which has ${s3.chars} characters.".into(),
+        );
+        let resolved = crate::planner::plan::resolve_value(&written, &bb);
+
+        assert_eq!(
+            resolved.as_str().unwrap(),
+            "The reversed string is Z706178087.92:60:81T21-90-6202, which has 30 characters."
+        );
+    }
+
+    /// A reference to something that does not exist must degrade to visible
+    /// text, never to a wrong value silently substituted.
+    #[test]
+    fn an_unknown_reference_is_left_alone() {
+        let bb = HashMap::new();
+        let written = Value::String("value: ${s9.nope}".into());
+        let resolved = crate::planner::plan::resolve_value(&written, &bb);
+        assert_eq!(resolved.as_str().unwrap(), "value: ${s9.nope}");
     }
 }
