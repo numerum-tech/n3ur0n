@@ -279,6 +279,36 @@ impl Catalog {
 
     /// Resolve a tool name (`<short_peer>::<cap>`) back to its full
     /// `ToolDef`.
+    /// Narrow the catalogue to what an explicit `@` mention asked for.
+    ///
+    /// Each dimension is independent and only applies when non-empty, so
+    /// `@peer:alice` alone restricts by peer, `@lobe:medical/summarize`
+    /// restricts by lobe *and* capability name.
+    ///
+    /// `peer_ids` must already be resolved to canonical `n3:` ids: an alias
+    /// the local directory does not know is not a mention at all, and the
+    /// caller drops it rather than emptying the catalogue over a typo. Lobe
+    /// and capability names, having no directory to check against, are matched
+    /// here — and matching nothing legitimately yields an empty catalogue,
+    /// which is the honest answer to "do this within a lobe I know nothing
+    /// about".
+    #[must_use]
+    pub fn scoped_to(self, peer_ids: &[String], lobes: &[String], capabilities: &[String]) -> Self {
+        if peer_ids.is_empty() && lobes.is_empty() && capabilities.is_empty() {
+            return self;
+        }
+        let tools = self
+            .tools
+            .into_iter()
+            .filter(|t| {
+                (peer_ids.is_empty() || peer_ids.iter().any(|p| p == &t.peer_id))
+                    && (lobes.is_empty() || t.cap.lobe_ids.iter().any(|l| lobes.contains(l)))
+                    && (capabilities.is_empty() || capabilities.contains(&t.cap.name))
+            })
+            .collect();
+        Self { tools }
+    }
+
     pub fn find(&self, tool_name: &str) -> Option<&ToolDef> {
         let (peer, cap_name) = tool_name.split_once("::")?;
 
@@ -569,5 +599,81 @@ mod tests {
         assert_eq!(name, "abcdef123456::chat");
         let back = cat.find(&name).unwrap();
         assert_eq!(back.cap.name, "chat");
+    }
+
+    fn tool(peer: &str, cap_name: &str, lobes: &[&str]) -> ToolDef {
+        let mut c = cap(cap_name);
+        c.lobe_ids = lobes.iter().map(|l| (*l).to_string()).collect();
+        ToolDef {
+            peer_id: peer.to_string(),
+            peer_endpoint: Some(format!("http://{peer}")),
+            cap: c,
+        }
+    }
+
+    fn names(c: &Catalog) -> Vec<String> {
+        c.tools
+            .iter()
+            .map(|t| format!("{}::{}", t.peer_id, t.cap.name))
+            .collect()
+    }
+
+    #[test]
+    fn scoped_to_without_any_scope_is_a_no_op() {
+        let c = Catalog {
+            tools: vec![tool("n3:a", "sum", &[]), tool("n3:b", "sum", &[])],
+        };
+        assert_eq!(names(&c.clone().scoped_to(&[], &[], &[])), names(&c));
+    }
+
+    #[test]
+    fn scoped_to_a_peer_keeps_only_that_peer() {
+        let c = Catalog {
+            tools: vec![
+                tool("n3:a", "sum", &[]),
+                tool("n3:b", "sum", &[]),
+                tool("n3:b", "translate", &[]),
+            ],
+        };
+        let out = c.scoped_to(&["n3:b".to_string()], &[], &[]);
+        assert_eq!(names(&out), vec!["n3:b::sum", "n3:b::translate"]);
+    }
+
+    #[test]
+    fn scoped_to_a_lobe_keeps_only_caps_carrying_it() {
+        let c = Catalog {
+            tools: vec![
+                tool("n3:a", "sum", &["medical"]),
+                tool("n3:a", "translate", &[]),
+                tool("n3:b", "triage", &["medical", "legal"]),
+            ],
+        };
+        let out = c.scoped_to(&[], &["medical".to_string()], &[]);
+        assert_eq!(names(&out), vec!["n3:a::sum", "n3:b::triage"]);
+    }
+
+    #[test]
+    fn peer_and_capability_together_pin_one_tool() {
+        let c = Catalog {
+            tools: vec![
+                tool("n3:a", "sum", &[]),
+                tool("n3:b", "sum", &[]),
+                tool("n3:b", "translate", &[]),
+            ],
+        };
+        let out = c.scoped_to(&["n3:b".to_string()], &[], &["sum".to_string()]);
+        assert_eq!(names(&out), vec!["n3:b::sum"]);
+    }
+
+    #[test]
+    fn a_lobe_nothing_carries_yields_an_empty_catalogue() {
+        let c = Catalog {
+            tools: vec![tool("n3:a", "sum", &["medical"])],
+        };
+        let out = c.scoped_to(&[], &["finance".to_string()], &[]);
+        assert!(
+            out.tools.is_empty(),
+            "scoping to an unknown lobe must not silently fall back to everything"
+        );
     }
 }

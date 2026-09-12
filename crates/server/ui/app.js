@@ -923,13 +923,27 @@ sendBtn.addEventListener("click", send);
 promptEl.addEventListener("input", () => {
     resizeComposerTextarea();
     updateComposerControls();
+    updateMentionPicker();
 });
 promptEl.addEventListener("keydown", (e) => {
+    // The picker owns the arrow keys, Enter and Escape while it is open.
+    if (mentionState.open) {
+        if (e.key === "ArrowDown") { e.preventDefault(); moveMentionSelection(1); return; }
+        if (e.key === "ArrowUp") { e.preventDefault(); moveMentionSelection(-1); return; }
+        if ((e.key === "Enter" || e.key === "Tab") && !e.isComposing && mentionState.items.length) {
+            e.preventDefault();
+            applyMention(mentionState.active);
+            return;
+        }
+        if (e.key === "Escape") { e.preventDefault(); closeMentionPicker(); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         send();
     }
 });
+promptEl.addEventListener("blur", () => closeMentionPicker());
+promptEl.addEventListener("click", () => updateMentionPicker());
 composerMenuBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
     toggleComposerMenu();
@@ -948,6 +962,216 @@ composerMenuPopover?.addEventListener("click", (e) => e.stopPropagation());
         await renderActive();
     }
 })();
+
+// ---------------------------------------------------------------------------
+// @ mention picker
+// ---------------------------------------------------------------------------
+//
+// One trigger character, three namespaces. Typing `@` opens a categorised list
+// (Files / Peers / Lobes) and selecting an entry inserts the resolved token:
+//
+//     @file:contrats/bail.pdf   @peer:65s25vdkawys   @lobe:medical
+//
+// The type prefix is what makes the grammar unambiguous outside the picker
+// too — in a pasted message, in the API, in replayed history — so the picker
+// always writes the full form even though it reads as a chip to the user.
+//
+// Picking a file also attaches its blob: the token is the readable label, the
+// hash is what actually travels. A mention typed by hand and never resolved
+// stays literal text, exactly like an unmatched @ in Slack.
+
+const mentionPopover = $("mention-popover");
+let mentionState = { open: false, start: -1, items: [], active: 0 };
+
+/// The `@…` token the caret currently sits in, if any.
+function activeMentionFragment(el) {
+    const pos = el.selectionStart;
+    if (pos !== el.selectionEnd) return null;
+    const upto = el.value.slice(0, pos);
+    const at = upto.lastIndexOf("@");
+    if (at < 0) return null;
+    // Must open a token, otherwise an email address triggers the picker.
+    if (at > 0 && !/\s/.test(upto[at - 1])) return null;
+    const frag = upto.slice(at + 1);
+    if (/\s/.test(frag)) return null;
+    return { start: at, frag };
+}
+
+/// Lobes have no registry of their own: the ones worth offering are those the
+/// known capabilities actually declare.
+function knownLobes() {
+    const seen = new Map();
+    for (const p of _peersCache.peers) {
+        for (const c of (p.capabilities || [])) {
+            for (const l of (c.lobe_ids || [])) {
+                seen.set(l, (seen.get(l) || 0) + 1);
+            }
+        }
+    }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function mentionCandidates(frag) {
+    const lower = frag.toLowerCase();
+    const [maybeKind, ...restParts] = lower.split(":");
+    const kinds = ["file", "peer", "lobe"];
+    const scoped = kinds.includes(maybeKind);
+    const kind = scoped ? maybeKind : null;
+    const needle = scoped ? restParts.join(":") : lower;
+
+    const out = [];
+    const want = (k) => !kind || kind === k;
+
+    if (want("file")) {
+        for (const f of _filesCache) {
+            const path = f.path || "";
+            const hay = `${path} ${f.mime || ""} ${f.hash}`.toLowerCase();
+            if (needle && !hay.includes(needle)) continue;
+            const value = path || f.hash;
+            out.push({
+                kind: "file",
+                token: `@file:${value}`,
+                label: path || shortHash(f.hash),
+                sub: f.mime || "",
+                blob: f,
+            });
+        }
+    }
+    if (want("peer")) {
+        for (const p of _peersCache.peers) {
+            const short = shortId(p.instance_id);
+            const hay = `${p.alias || ""} ${p.instance_id} ${p.endpoint || ""}`.toLowerCase();
+            if (needle && !hay.includes(needle)) continue;
+            out.push({
+                kind: "peer",
+                // The token carries the id, never the self-declared alias: an
+                // alias is a claim, the id is self-verifying.
+                token: `@peer:${short}`,
+                label: p.alias || short,
+                sub: p.alias ? short : (p.endpoint || ""),
+            });
+        }
+    }
+    if (want("lobe")) {
+        for (const [lobe, count] of knownLobes()) {
+            if (needle && !lobe.toLowerCase().includes(needle)) continue;
+            out.push({
+                kind: "lobe",
+                token: `@lobe:${lobe}`,
+                label: lobe,
+                sub: t("mention.lobe.caps", { count }),
+            });
+        }
+    }
+    return out.slice(0, 40);
+}
+
+function shortHash(hash) {
+    return `${(hash || "").replace(/^sha256:/, "").slice(0, 12)}…`;
+}
+
+function renderMentionPopover() {
+    if (!mentionPopover) return;
+    const { items, active } = mentionState;
+    if (items.length === 0) {
+        mentionPopover.innerHTML = `<div class="mention-empty">${escapeHtml(t("mention.empty"))}</div>`;
+        return;
+    }
+    const sectionLabel = { file: t("mention.section.files"), peer: t("mention.section.peers"), lobe: t("mention.section.lobes") };
+    let html = "";
+    let lastKind = null;
+    items.forEach((it, i) => {
+        if (it.kind !== lastKind) {
+            html += `<div class="mention-section">${escapeHtml(sectionLabel[it.kind])}</div>`;
+            lastKind = it.kind;
+        }
+        html += `<button type="button" class="mention-item${i === active ? " active" : ""}" role="option" data-idx="${i}">
+            <span class="mention-item-label">${escapeHtml(it.label)}</span>
+            <span class="mention-item-sub">${escapeHtml(it.sub || "")}</span>
+        </button>`;
+    });
+    mentionPopover.innerHTML = html;
+    mentionPopover.querySelectorAll(".mention-item").forEach(btn => {
+        btn.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            applyMention(Number(btn.dataset.idx));
+        });
+    });
+    mentionPopover.querySelector(".mention-item.active")?.scrollIntoView({ block: "nearest" });
+}
+
+function closeMentionPicker() {
+    mentionState = { open: false, start: -1, items: [], active: 0 };
+    mentionPopover?.classList.add("hidden");
+}
+
+/// Files and peers are fetched lazily: the picker is often the first thing in
+/// a session that needs either list.
+async function ensureMentionData() {
+    const jobs = [];
+    if (_filesCache.length === 0) jobs.push(refreshFiles().catch(() => {}));
+    if (_peersCache.peers.length === 0) jobs.push(refreshNetwork().catch(() => {}));
+    if (jobs.length) await Promise.all(jobs);
+}
+
+async function updateMentionPicker() {
+    if (!promptEl || !mentionPopover) return;
+    const frag = activeMentionFragment(promptEl);
+    if (!frag) {
+        closeMentionPicker();
+        return;
+    }
+    await ensureMentionData();
+    // The caret may have moved while we were fetching.
+    const still = activeMentionFragment(promptEl);
+    if (!still) {
+        closeMentionPicker();
+        return;
+    }
+    const items = mentionCandidates(still.frag);
+    mentionState = { open: true, start: still.start, items, active: 0 };
+    mentionPopover.classList.remove("hidden");
+    renderMentionPopover();
+}
+
+function applyMention(idx) {
+    const it = mentionState.items[idx];
+    if (!it || !promptEl) return;
+    const pos = promptEl.selectionStart;
+    const before = promptEl.value.slice(0, mentionState.start);
+    const after = promptEl.value.slice(pos);
+    const insert = `${it.token} `;
+    promptEl.value = before + insert + after;
+    const caret = before.length + insert.length;
+    promptEl.setSelectionRange(caret, caret);
+
+    // A file mention is data: attach the blob so the hash travels with the
+    // message. The token in the text is only the readable label.
+    if (it.kind === "file" && it.blob) {
+        const att = {
+            hash: it.blob.hash,
+            mime: it.blob.mime,
+            size: it.blob.size,
+            name: it.blob.path || null,
+        };
+        if (!draftAttachments.some(a => a.hash === att.hash)) {
+            draftAttachments.push(att);
+            renderComposerDraft();
+        }
+    }
+
+    closeMentionPicker();
+    resizeComposerTextarea();
+    updateComposerControls();
+    promptEl.focus();
+}
+
+function moveMentionSelection(delta) {
+    const n = mentionState.items.length;
+    if (n === 0) return;
+    mentionState.active = (mentionState.active + delta + n) % n;
+    renderMentionPopover();
+}
 
 // ---------------------------------------------------------------------------
 // Sidebar tabs (Chats / Network / Skills) + Inspector overlay

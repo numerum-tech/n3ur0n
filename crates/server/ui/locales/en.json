@@ -274,5 +274,10 @@
   "settings.users.role.admin": "Admin",
   "role.user": "User",
   "role.operator": "Operator",
-  "role.admin": "Admin"
+  "role.admin": "Admin",
+  "mention.section.files": "Files",
+  "mention.section.peers": "Peers",
+  "mention.section.lobes": "Lobes",
+  "mention.empty": "Nothing to mention yet",
+  "mention.lobe.caps": "{count} skills"
 }

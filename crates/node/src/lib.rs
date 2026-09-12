@@ -22,6 +22,7 @@ pub mod error;
 pub mod handler;
 pub mod identity_file;
 pub mod manifest;
+pub mod mention;
 pub mod node;
 pub mod planner;
 pub mod registry;

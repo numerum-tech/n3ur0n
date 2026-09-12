@@ -466,6 +466,9 @@ async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
                                 "name": c.get("name").cloned().unwrap_or(Value::Null),
                                 "description": c.get("description").cloned().unwrap_or(Value::Null),
                                 "schema_in": c.get("schema_in").cloned().unwrap_or(Value::Null),
+                                // Needed by the composer's @lobe: picker, which
+                                // derives the known lobes from the catalogue.
+                                "lobe_ids": c.get("lobe_ids").cloned().unwrap_or(Value::Null),
                             })
                         })
                         .collect();

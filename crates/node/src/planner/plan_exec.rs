@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 
 use crate::conversation::{ConversationState, persist_last, persist_tool_pair_at};
 use crate::error::{NodeError, NodeResult};
+use crate::mention::MentionScope;
 use crate::node::Node;
 use crate::planner::catalog::{Catalog, ToolDef};
 use crate::planner::compiler::PlanCompiler;
@@ -185,6 +186,26 @@ impl PlanExecPlanner {
             node.db(),
             500,
         )?;
+        // 2b. Explicit `@` mentions narrow the catalogue before ranking: when
+        //     the user already said where to go, there is nothing to rank.
+        let scope = MentionScope::from_text(&input.text);
+        let catalog = if scope.is_empty() {
+            catalog
+        } else {
+            let peer_ids = resolve_mentioned_peers(node, &scope.peers);
+            let before = catalog.tools.len();
+            let catalog = catalog.scoped_to(&peer_ids, &scope.lobes, &scope.capabilities);
+            debug!(
+                peers = ?scope.peers,
+                lobes = ?scope.lobes,
+                capabilities = ?scope.capabilities,
+                tools_before = before,
+                tools_after = catalog.tools.len(),
+                "catalogue scoped by explicit mentions"
+            );
+            catalog
+        };
+
         let scores = self.retriever.score(&catalog.tools, &planner_text).await;
         let catalog = catalog.filter_with_scores(&scores, REMOTE_TOP_K);
 
@@ -833,6 +854,50 @@ fn extract_first_json_object(s: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Resolve mentioned peer entities to canonical `n3:` ids.
+///
+/// Accepted spellings are the full `n3:` id and the short form the UI shows
+/// (the id without its prefix, truncated). Self-declared aliases are
+/// deliberately **not** accepted: an alias is a vanity string a peer asserts
+/// about itself, so routing on it would let the first squatter of a name
+/// capture everyone's mentions. Local petnames will be the answer; until they
+/// exist, only the self-verifying id routes.
+///
+/// An entity that resolves to nothing is dropped rather than emptying the
+/// catalogue — a mention that cannot be resolved is not a mention.
+fn resolve_mentioned_peers(node: &Node, entities: &[String]) -> Vec<String> {
+    if entities.is_empty() {
+        return Vec::new();
+    }
+    let known = match n3ur0n_storage::peers::list(node.db(), 500) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(error = %e, "peer directory unavailable; ignoring peer mentions");
+            return Vec::new();
+        }
+    };
+    let self_id = node.instance_id().to_string();
+    let mut ids: Vec<String> = Vec::new();
+    for entity in entities {
+        let candidate = known
+            .iter()
+            .map(|p| p.id.clone())
+            .chain(std::iter::once(self_id.clone()))
+            .find(|id| {
+                id == entity
+                    || id
+                        .strip_prefix("n3:")
+                        .is_some_and(|s| s.starts_with(entity.as_str()) && entity.len() >= 8)
+            });
+        match candidate {
+            Some(id) if !ids.contains(&id) => ids.push(id),
+            Some(_) => {}
+            None => debug!(entity = %entity, "unknown peer mention; left as literal text"),
+        }
+    }
+    ids
 }
 
 #[cfg(test)]
