@@ -1101,48 +1101,21 @@ function knownCaps() {
     return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function mentionCandidates(frag) {
-    const lower = frag.toLowerCase().replace(/"/g, "");
-    const [maybeKind, ...restParts] = lower.split(":");
-    const kinds = ["file", "peer", "lobe", "cap"];
-    const scoped = kinds.includes(maybeKind);
-    const kind = scoped ? maybeKind : null;
-    const needle = scoped ? restParts.join(":") : lower;
+const MENTION_KINDS = ["file", "peer", "cap", "lobe"];
 
+/// Entries of the requested kinds whose text matches `needle`.
+function collectMentions(wanted, needle) {
     const out = [];
-    const want = (k) => !kind || kind === k;
-
-    // `@peer:<id>/` descends into that peer's capabilities. Without this the
-    // list went empty the moment the slash was typed, and the capability name
-    // had to be guessed blind.
-    if (kind === "peer" && needle.includes("/")) {
-        const [peerPart, capPart] = needle.split("/");
-        for (const p of _peersCache.peers) {
-            const short = shortId(p.instance_id);
-            if (!`${p.alias || ""} ${p.instance_id}`.toLowerCase().includes(peerPart)) continue;
-            for (const c of (p.capabilities || [])) {
-                if (capPart && !c.name.toLowerCase().includes(capPart)) continue;
-                out.push({
-                    kind: "cap",
-                    token: `@peer:${quoteMentionValue(`${short}/${c.name}`)}`,
-                    label: c.name,
-                    sub: `${p.alias || hostOf(p.endpoint) || short} · ${c.description || ""}`.trim(),
-                });
-            }
-        }
-        return out.slice(0, 40);
-    }
+    const want = (k) => wanted.includes(k);
 
     if (want("file")) {
         for (const f of _filesCache) {
             const path = f.path || "";
             const hay = `${path} ${f.mime || ""} ${f.hash}`.toLowerCase();
             if (needle && !hay.includes(needle)) continue;
-            const value = path || f.hash;
             out.push({
                 kind: "file",
-                token: `@file:${quoteMentionValue(value)}`,
-                label: path || shortHash(f.hash),
+                token: `@file:${quoteMentionValue(path || f.hash)}`,
                 sub: f.mime || "",
                 blob: f,
             });
@@ -1150,20 +1123,14 @@ function mentionCandidates(frag) {
     }
     if (want("peer")) {
         for (const p of _peersCache.peers) {
-            const short = shortId(p.instance_id);
             const hay = `${p.alias || ""} ${p.instance_id} ${p.endpoint || ""}`.toLowerCase();
             if (needle && !hay.includes(needle)) continue;
-            // A bare id is unreadable, so lead with something human: the
-            // alias, else the endpoint host. Both are strings the peer asserts
-            // about itself, which is fine for a label — the id stays visible
-            // underneath and remains the only thing that routes.
+            // The token carries the id, which is unreadable; the name a human
+            // recognises belongs beside it, not instead of it.
             const readable = p.alias || hostOf(p.endpoint);
             out.push({
                 kind: "peer",
-                token: `@peer:${quoteMentionValue(short)}`,
-                label: readable || short,
-                // The token carries the id, which is unreadable; the name a
-                // human recognises belongs beside it, not instead of it.
+                token: `@peer:${quoteMentionValue(shortId(p.instance_id))}`,
                 sub: readable || p.endpoint || "",
             });
         }
@@ -1177,7 +1144,6 @@ function mentionCandidates(frag) {
                 // No peer in the token: naming a capability says what you want,
                 // not where it runs — the planner picks among the providers.
                 token: `@cap:${quoteMentionValue(c.name)}`,
-                label: c.name,
                 sub: t("mention.cap.providers", { count: c.peers.length }),
             });
         }
@@ -1188,12 +1154,61 @@ function mentionCandidates(frag) {
             out.push({
                 kind: "lobe",
                 token: `@lobe:${quoteMentionValue(lobe)}`,
-                label: lobe,
                 sub: t("mention.lobe.caps", { count }),
             });
         }
     }
-    return out.slice(0, 40);
+    return out;
+}
+
+/// `@peer:<id>/` descends into that peer's own capabilities. Without it the
+/// list went empty the moment the slash was typed, and the capability name had
+/// to be guessed blind.
+function peerCapabilityCandidates(needle) {
+    const [peerPart, capPart] = needle.split("/");
+    const out = [];
+    for (const p of _peersCache.peers) {
+        const short = shortId(p.instance_id);
+        if (!`${p.alias || ""} ${p.instance_id}`.toLowerCase().includes(peerPart)) continue;
+        for (const c of (p.capabilities || [])) {
+            if (capPart && !c.name.toLowerCase().includes(capPart)) continue;
+            out.push({
+                kind: "cap",
+                token: `@peer:${quoteMentionValue(`${short}/${c.name}`)}`,
+                sub: `${p.alias || hostOf(p.endpoint) || short} · ${c.description || ""}`.trim(),
+            });
+        }
+    }
+    return out;
+}
+
+function mentionCandidates(frag) {
+    const lower = frag.toLowerCase().replace(/"/g, "");
+    const [maybeKind, ...restParts] = lower.split(":");
+
+    // A complete `kind:` scopes to that section and filters on the value.
+    if (MENTION_KINDS.includes(maybeKind)) {
+        const needle = restParts.join(":");
+        if (maybeKind === "peer" && needle.includes("/")) {
+            return peerCapabilityCandidates(needle).slice(0, 40);
+        }
+        return collectMentions([maybeKind], needle).slice(0, 40);
+    }
+
+    // A partial one — `@pe` — is a *type being typed*, not a search term.
+    // Treating it as free text sent `@pe` looking for "pe" inside descriptions
+    // and surfaced a skill while the user was plainly reaching for peers.
+    // Matching sections come first, whole; free-text hits follow, so a file
+    // actually named "pe…" is not hidden by the rule.
+    const typing = lower ? MENTION_KINDS.filter(k => k.startsWith(lower)) : [];
+    if (typing.length > 0) {
+        const rest = MENTION_KINDS.filter(k => !typing.includes(k));
+        const byType = collectMentions(typing, "");
+        const byText = collectMentions(rest, lower);
+        return [...byType, ...byText].slice(0, 40);
+    }
+
+    return collectMentions(MENTION_KINDS, lower).slice(0, 40);
 }
 
 function shortHash(hash) {
