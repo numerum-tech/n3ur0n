@@ -193,6 +193,34 @@ pub fn parse_mentions(text: &str) -> Vec<Mention> {
     out
 }
 
+/// The message with every mention removed.
+///
+/// Used to tell whether a message carries an actual request or is nothing but
+/// scoping. `@peer:65s25vdkawys` on its own asks for nothing, and a composer
+/// that lets the user send it means the planner must handle it — silently
+/// inventing a request is the failure it produces otherwise.
+#[must_use]
+pub fn strip_mentions(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for m in parse_mentions(text) {
+        out.push_str(&text[cursor..m.span.0]);
+        cursor = m.span.1;
+    }
+    out.push_str(&text[cursor..]);
+    out.trim().to_string()
+}
+
+/// True when a message is made only of mentions (and punctuation), so it
+/// scopes without asking anything.
+#[must_use]
+pub fn is_scope_only(text: &str) -> bool {
+    if parse_mentions(text).is_empty() {
+        return false;
+    }
+    !strip_mentions(text).chars().any(|c| c.is_alphanumeric())
+}
+
 /// The catalogue narrowing a message asks for.
 ///
 /// Empty means "no explicit scope" — the planner sees the whole catalogue, as
@@ -398,5 +426,25 @@ mod tests {
                 Some("summarize".into())
             )]
         );
+    }
+
+    #[test]
+    fn strips_mentions_from_the_sentence() {
+        assert_eq!(
+            strip_mentions("résume @file:notes.md pour demain"),
+            "résume  pour demain"
+        );
+        assert_eq!(strip_mentions("@peer:alice"), "");
+    }
+
+    #[test]
+    fn recognises_a_message_that_only_scopes() {
+        assert!(is_scope_only("@peer:vphg3ejn4x4s"));
+        assert!(is_scope_only("  @lobe:medical @peer:alice  "));
+        assert!(is_scope_only("@peer:alice ,"));
+        assert!(!is_scope_only("@peer:alice quelle heure est-il ?"));
+        // No mention at all is not "scope only" — it is an ordinary message.
+        assert!(!is_scope_only("bonjour"));
+        assert!(!is_scope_only(""));
     }
 }

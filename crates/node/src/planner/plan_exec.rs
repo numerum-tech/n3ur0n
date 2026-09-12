@@ -121,10 +121,16 @@ do NOT call any tool, do NOT re-explain the plan unless the user asked for it. B
 concise and use the actual values from the blackboard.\n\
 \n\
 Honesty rules — non-negotiable:\n\
+- The blackboard is the complete record of what happened. You performed no \
+action yourself: you cannot open, display, download, send or modify \
+anything. Never write that you did. If the blackboard is empty, nothing \
+was done at all — say so.\n\
 - If the user asked for a side-effect action (sending email, posting, \
 payments, modifying files, calling an external service) and no tool capable \
 of performing it ran successfully, say plainly that you cannot perform it. \
 Do NOT pretend the action was done.\n\
+- Never invent a request the user did not make. If the message does not ask \
+for anything, ask what they want instead of assuming.\n\
 - If a tool step failed but the user gave the data directly (a literal \
 string in the prompt, a number, etc.), compute the answer yourself from \
 that data when you can. Tool failures on simple known data don't excuse you \
@@ -420,6 +426,17 @@ impl PlanExecPlanner {
             messages.push(json!({
                 "role": "system",
                 "content": format!("Blackboard from this dispatch:\n{}", summary)
+            }));
+        }
+        // A message made only of mentions scopes the catalogue without asking
+        // anything. Left unsaid, the model fills the blank — it will happily
+        // report having opened a file from an earlier turn.
+        if crate::mention::is_scope_only(user_message) {
+            messages.push(json!({
+                "role": "system",
+                "content": "The user's message contains only scoping mentions and no \
+            request. Do not guess what they want and do not claim anything was done. Ask them \
+            what they would like, in their language."
             }));
         }
         // Re-state the user's request so the model anchors on it.
