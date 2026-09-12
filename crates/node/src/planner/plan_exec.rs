@@ -576,8 +576,24 @@ impl PlanExecPlanner {
 
             // Merge into the accumulated run so reflect sees every round at
             // once: the user asked one question and gets one answer.
+            //
+            // Step ids are unique within a plan, not across rounds, so a plain
+            // `extend` lets round 2's `s1` silently replace round 1's. That was
+            // harmless while only the trace was read, and stopped being harmless
+            // the moment `referenceable_values` started handing `${s1.field}`
+            // tokens to the composer: a quoted reference would resolve to the
+            // wrong round's value. Colliding ids are suffixed instead.
             depth = plan_depth(&next);
-            run.blackboard.extend(next_run.blackboard);
+            for (id, value) in next_run.blackboard {
+                let key = if run.blackboard.contains_key(&id) {
+                    // No dot: `lookup_path` splits the head on '.', so the
+                    // suffix has to stay inside the id segment.
+                    format!("{id}_r{}", round + 1)
+                } else {
+                    id
+                };
+                run.blackboard.insert(key, value);
+            }
             run.trace.extend(next_run.trace);
             if next_run.last_step_id.is_some() {
                 run.last_step_id = next_run.last_step_id;
@@ -1787,5 +1803,36 @@ mod tests {
         let written = Value::String("value: ${s9.nope}".into());
         let resolved = crate::planner::plan::resolve_value(&written, &bb);
         assert_eq!(resolved.as_str().unwrap(), "value: ${s9.nope}");
+    }
+
+    /// Round 2 reusing `s1` must not shadow round 1's value, now that the
+    /// composer is handed `${s1.field}` tokens to quote.
+    #[test]
+    fn merging_rounds_keeps_both_values_for_a_reused_step_id() {
+        let mut merged: HashMap<String, Value> = HashMap::new();
+        merged.insert("s1".into(), json!({"now": "first"}));
+
+        let round_two: Vec<(String, Value)> = vec![
+            ("s1".into(), json!({"now": "second"})),
+            ("s2".into(), json!({"other": 1})),
+        ];
+        // Mirrors the merge in `dispatch_inner`.
+        for (id, value) in round_two {
+            let key = if merged.contains_key(&id) {
+                format!("{id}_r2")
+            } else {
+                id
+            };
+            merged.insert(key, value);
+        }
+
+        assert_eq!(merged["s1"], json!({"now": "first"}));
+        assert_eq!(merged["s1_r2"], json!({"now": "second"}));
+        assert_eq!(merged["s2"], json!({"other": 1}));
+
+        // And both stay quotable, which is the point of keeping them apart.
+        let rendered = referenceable_values(&merged);
+        assert!(rendered.contains("${s1.now}"), "{rendered}");
+        assert!(rendered.contains("${s1_r2.now}"), "{rendered}");
     }
 }
