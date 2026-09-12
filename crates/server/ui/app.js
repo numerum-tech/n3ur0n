@@ -732,6 +732,11 @@ function appendStepper(isDirect = false) {
     // Per-step meta from PlanReady (peer_id / capability) so a completed step
     // can be made clickable with full detail during live streaming.
     const meta = new Map();
+    // Step ids are unique within a plan, not across continuation rounds: a
+    // round-2 `s1` would otherwise light up round 1's chip. Events that follow
+    // a PlanReady belong to its round, one SSE stream being ordered.
+    let currentRound = 1;
+    const chipKey = (id) => `${currentRound}:${id}`;
 
     function setStatus(text) {
         status.textContent = text;
@@ -765,23 +770,39 @@ function appendStepper(isDirect = false) {
     }
 
     return {
-        renderPlan(steps) {
-            row.innerHTML = "";
-            chips.clear();
+        renderPlan(steps, round = 1) {
+            currentRound = round;
+            // Only a first plan replaces the row. A continuation adds to it —
+            // wiping here erased everything the first round had done.
+            if (round <= 1) {
+                row.innerHTML = "";
+                chips.clear();
+                meta.clear();
+            } else if (steps && steps.length > 0) {
+                const sep = document.createElement("span");
+                sep.className = "chip-round-sep";
+                sep.textContent = "↻";
+                sep.title = t("stepper.round", { round });
+                row.appendChild(sep);
+            }
             if (isDirect) {
                 wrap.classList.add("no-plan", "direct-mode");
                 setStatus(t("composer.direct.status"));
                 return;
             }
             if (!steps || steps.length === 0) {
-                wrap.classList.add("no-plan");
-                setStatus("no plan — answering directly");
+                // A continuation that plans nothing is the normal ending; the
+                // first round's chips must survive it.
+                if (round <= 1) {
+                    wrap.classList.add("no-plan");
+                    setStatus("no plan — answering directly");
+                }
                 return;
             }
             wrap.classList.remove("no-plan");
             for (const s of steps) {
-                ensureChip(s.id, s.peer_short, s.capability);
-                meta.set(s.id, {
+                ensureChip(chipKey(s.id), s.peer_short, s.capability);
+                meta.set(chipKey(s.id), {
                     peer_id: s.peer_id,
                     peer_short: s.peer_short,
                     capability: s.capability,
@@ -790,17 +811,17 @@ function appendStepper(isDirect = false) {
             setStatus(`plan ready · ${steps.length} step${steps.length > 1 ? "s" : ""}`);
         },
         startStep(id) {
-            ensureChip(id);
-            setChipState(id, "running");
+            ensureChip(chipKey(id));
+            setChipState(chipKey(id), "running");
             setStatus(`running ${id}…`);
         },
         doneStep(id, args, result, error) {
-            setChipState(id, error ? "error" : "done");
-            const chip = chips.get(id);
+            setChipState(chipKey(id), error ? "error" : "done");
+            const chip = chips.get(chipKey(id));
             if (!chip) return;
             // Make the live chip clickable with the same detail panel as the
             // historical render (was only wired after a reload).
-            const m = meta.get(id) || {};
+            const m = meta.get(chipKey(id)) || {};
             const call = {
                 id,
                 peer_id: m.peer_id || id,
@@ -891,7 +912,7 @@ function handleSseFrame(frame, stepper) {
     }
     switch (event) {
         case "plan_ready":
-            stepper.renderPlan(payload.steps || []);
+            stepper.renderPlan(payload.steps || [], payload.round || 1);
             break;
         case "low_confidence":
             stepper.markLowConfidence(payload.confidence);

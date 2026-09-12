@@ -89,7 +89,10 @@ impl Planner for DirectChatPlanner {
         opts: DispatchOptions,
         events: EventSender,
     ) -> NodeResult<DispatchOutcome> {
-        let _ = events.send(DispatchEvent::PlanReady { steps: vec![] });
+        let _ = events.send(DispatchEvent::PlanReady {
+            steps: vec![],
+            round: 1,
+        });
         let _ = events.send(DispatchEvent::Reflecting);
         let outcome = self.dispatch_inner(node, state, input, opts).await?;
         let _ = events.send(DispatchEvent::Final {
@@ -433,7 +436,7 @@ mod tests {
         assert_eq!(events.len(), 3, "Should have exactly 3 events");
 
         match &events[0] {
-            DispatchEvent::PlanReady { steps } => {
+            DispatchEvent::PlanReady { steps, .. } => {
                 assert_eq!(steps.len(), 0, "Direct mode should have empty steps");
             }
             _ => panic!("First event should be PlanReady"),

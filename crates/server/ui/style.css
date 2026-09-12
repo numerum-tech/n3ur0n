@@ -1638,6 +1638,17 @@ button.secondary:hover,
     background: var(--panel);
 }
 
+/* Separator between continuation rounds in the plan chip row: the second
+   round adds to the row rather than replacing it, so the boundary has to be
+   visible or the two plans read as one. */
+.chip-round-sep {
+    align-self: center;
+    padding: 0 2px;
+    color: var(--muted);
+    font-size: var(--fs-sm);
+    user-select: none;
+}
+
 /* @ mention picker — anchored above the capsule, never pushes the layout. */
 .mention-popover {
     position: absolute;

@@ -93,8 +93,17 @@ pub struct PlanStepInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DispatchEvent {
-    /// Plan compiled and validated; UI should render the full chip row.
-    PlanReady { steps: Vec<PlanStepInfo> },
+    /// Plan compiled and validated; UI should render the chip row.
+    ///
+    /// `round` is 1 for the first plan of a dispatch and increments for each
+    /// continuation. A client that replaces its chip row on every event erases
+    /// the earlier rounds, so it has to append instead — and step events that
+    /// follow belong to the round of the most recent `PlanReady`, since one SSE
+    /// stream preserves ordering.
+    PlanReady {
+        steps: Vec<PlanStepInfo>,
+        round: usize,
+    },
     /// Compile step finished but produced a low-confidence plan. UI may
     /// flag the stepper as degraded so the user knows the answer should
     /// be checked. Fired post-compile, pre-execute.
