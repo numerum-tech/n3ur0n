@@ -283,6 +283,12 @@ impl PlanExecPlanner {
         let base_seq = state.next_seq() - 1;
         let db_hook = node.db().clone();
         let conv_id_hook = state.id.clone();
+        // Output blobs are indexed against the conversation's owner, otherwise
+        // they never surface in that user's Files panel.
+        let blob_owner = crate::blob_resolve::BlobOwner {
+            client_id: Some(state.client_id.clone()),
+            conversation_id: Some(state.id.clone()),
+        };
         let fallback_id = node.instance_id();
         let mut on_done = |idx: usize, entry: &TraceEntry| {
             let peer = n3ur0n_core::InstanceId::parse(&entry.peer_id)
@@ -304,8 +310,15 @@ impl PlanExecPlanner {
             }
         };
 
-        let run = match execute_plan_streaming(node, &plan, &catalog, events, Some(&mut on_done))
-            .await
+        let run = match execute_plan_streaming(
+            node,
+            &plan,
+            &catalog,
+            events,
+            Some(&mut on_done),
+            &blob_owner,
+        )
+        .await
         {
             Ok(r) => r,
             Err(e) => {

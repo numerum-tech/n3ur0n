@@ -119,32 +119,52 @@ fn record_outbound_upload(
     blobs::upsert(node.db(), &row).map_err(|e| e.to_string())
 }
 
+/// Who a downloaded output blob belongs to.
+///
+/// Output blobs used to be indexed with no owner at all, while the Files
+/// panel selects on `local_user_id = ? OR client_id = ?` — so every capability
+/// result was invisible to the user who asked for it. Carrying the
+/// conversation's owner down to the index is what makes the "Inbound" category
+/// non-empty.
+#[derive(Debug, Clone, Default)]
+pub struct BlobOwner {
+    /// Browser client that owns the conversation (see `ConversationState`).
+    pub client_id: Option<String>,
+    /// Conversation the blob was produced for.
+    pub conversation_id: Option<String>,
+}
+
 fn record_inbound_output(
     node: &Node,
     blob: &BlobRef,
-    path: &std::path::Path,
-    local_user_id: Option<i64>,
-    client_id: Option<&str>,
+    storage_path: &std::path::Path,
+    capability: &str,
+    owner: &BlobOwner,
 ) -> Result<(), String> {
     let class = classify_inbound_output();
     let now = node.clock().now().unix_timestamp();
     let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Output) as i64;
+    // The producer never sends a name, so we assign a provisional one. It is
+    // meant to be renamed; it only has to be unambiguous and sortable.
+    let path = n3ur0n_core::sanitize_blob_path(&n3ur0n_core::derive_output_path(
+        capability, &blob.mime, now,
+    ));
     let row = BlobInsert {
         hash: blob.hash.clone(),
-        path: None,
+        path,
         size: blob.size as i64,
         mime: blob.mime.clone(),
         expires_at: expires,
-        storage_path: path.display().to_string(),
+        storage_path: storage_path.display().to_string(),
         provenance: "inbound".into(),
         role: "output".into(),
         anchor_kind: "user_session".into(),
         processing_status: "ready".into(),
-        local_user_id,
-        client_id: client_id.map(String::from),
-        conversation_id: None,
+        local_user_id: None,
+        client_id: owner.client_id.clone(),
+        conversation_id: owner.conversation_id.clone(),
         dispatch_id: None,
-        capability: None,
+        capability: Some(capability.to_string()),
         remote_sender_id: None,
         ticket_nonce: None,
         invoke_id: None,
@@ -204,6 +224,8 @@ pub async fn fetch_output_blobs(
     node: &Node,
     http: &Client,
     endpoint: &str,
+    capability: &str,
+    owner: &BlobOwner,
     value: Value,
 ) -> Result<Value, String> {
     let refs = collect_blob_refs(&value);
@@ -232,7 +254,7 @@ pub async fn fetch_output_blobs(
         std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
         let path = root.join(&br.hash);
         std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-        record_inbound_output(node, &br, &path, None, None)?;
+        record_inbound_output(node, &br, &path, capability, owner)?;
         strip_fetch_url(&mut out, &br.hash);
     }
     Ok(out)

@@ -283,3 +283,64 @@ pub fn record_to_json(rec: &BlobRecord) -> Value {
         "created_at": rec.created_at,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(hash: &str, client_id: Option<&str>, path: Option<&str>) -> BlobInsert {
+        BlobInsert {
+            hash: hash.into(),
+            size: 3,
+            mime: "text/plain".into(),
+            path: path.map(Into::into),
+            expires_at: 4_102_444_800,
+            storage_path: format!("/tmp/{hash}"),
+            provenance: "inbound".into(),
+            role: "output".into(),
+            anchor_kind: "user_session".into(),
+            processing_status: "ready".into(),
+            local_user_id: None,
+            client_id: client_id.map(Into::into),
+            conversation_id: None,
+            dispatch_id: None,
+            capability: Some("translate".into()),
+            remote_sender_id: None,
+            ticket_nonce: None,
+            invoke_id: None,
+            user_visible: true,
+            user_deletable: true,
+            uploader_id: None,
+            recipients_whitelist: None,
+        }
+    }
+
+    /// The Files panel selects on `local_user_id = ?1 OR client_id = ?2`, so a
+    /// user_visible blob carrying neither is unreachable: it exists, counts
+    /// against the GC, and nobody can ever see it. Capability outputs used to
+    /// be inserted exactly like that.
+    #[test]
+    fn user_visible_blob_without_owner_is_unreachable() {
+        let db = crate::open_in_memory().unwrap();
+        upsert(&db, &row("sha256:orphan", None, None)).unwrap();
+        upsert(
+            &db,
+            &row("sha256:owned", Some("client-a"), Some("translate/x.txt")),
+        )
+        .unwrap();
+
+        let listed = list_user_visible(&db, Some(1), Some("client-a"), 50).unwrap();
+        let hashes: Vec<_> = listed.iter().map(|r| r.hash.as_str()).collect();
+        assert_eq!(hashes, vec!["sha256:owned"]);
+        assert_eq!(listed[0].path.as_deref(), Some("translate/x.txt"));
+    }
+
+    #[test]
+    fn path_survives_round_trip_and_first_one_wins() {
+        let db = crate::open_in_memory().unwrap();
+        upsert(&db, &row("sha256:x", Some("c"), Some("first.txt"))).unwrap();
+        upsert(&db, &row("sha256:x", Some("c"), Some("second.txt"))).unwrap();
+        let rec = get(&db, "sha256:x").unwrap().unwrap();
+        assert_eq!(rec.path.as_deref(), Some("first.txt"));
+    }
+}

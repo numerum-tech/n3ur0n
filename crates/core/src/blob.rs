@@ -308,6 +308,98 @@ pub fn sanitize_blob_path(raw: &str) -> Option<String> {
     Some(out)
 }
 
+/// File extension to use for a blob of the given MIME type.
+///
+/// The table covers what capabilities actually return; anything else falls
+/// back to the subtype (`application/x-foo` → `x-foo`), and to `bin` when even
+/// that is unusable. This is cosmetic — the MIME stays authoritative.
+fn extension_for_mime(mime: &str) -> String {
+    let mime = mime.split(';').next().unwrap_or("").trim().to_lowercase();
+    let known = match mime.as_str() {
+        "text/plain" => Some("txt"),
+        "text/markdown" => Some("md"),
+        "text/csv" => Some("csv"),
+        "text/html" => Some("html"),
+        "application/json" => Some("json"),
+        "application/pdf" => Some("pdf"),
+        "application/zip" => Some("zip"),
+        "image/jpeg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/svg+xml" => Some("svg"),
+        "audio/mpeg" => Some("mp3"),
+        "audio/wav" => Some("wav"),
+        "video/mp4" => Some("mp4"),
+        _ => None,
+    };
+    if let Some(ext) = known {
+        return ext.to_string();
+    }
+    let subtype = mime.rsplit('/').next().unwrap_or("");
+    let subtype = subtype.split('+').next().unwrap_or("");
+    let cleaned: String = subtype
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    if cleaned.is_empty() {
+        "bin".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Provisional path for a blob produced by a capability.
+///
+/// Outputs arrive nameless: the producer returns `{hash, size, mime}` and a
+/// name is never accepted from the wire. The consumer therefore assigns one,
+/// shaped `<capability>/<YYYY-MM-DD-HHMMSS>.<ext>`, so results group by the
+/// capability that made them and sort chronologically.
+///
+/// It is deliberately provisional — the user renames it when it matters. Two
+/// outputs of the same capability within the same second collide, which is
+/// fine: a path is not a key, the hash is.
+#[must_use]
+pub fn derive_output_path(capability: &str, mime: &str, unix_ts: i64) -> String {
+    let cap: String = capability
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(64)
+        .collect();
+    let cap = cap.trim_matches(['.', '-', '_']).to_string();
+    let cap = if cap.is_empty() {
+        "output".to_string()
+    } else {
+        cap
+    };
+
+    let stamp = time::OffsetDateTime::from_unix_timestamp(unix_ts)
+        .ok()
+        .map_or_else(
+            || "unknown".to_string(),
+            |t| {
+                format!(
+                    "{:04}-{:02}-{:02}-{:02}{:02}{:02}",
+                    t.year(),
+                    u8::from(t.month()),
+                    t.day(),
+                    t.hour(),
+                    t.minute(),
+                    t.second()
+                )
+            },
+        );
+
+    format!("{cap}/{stamp}.{}", extension_for_mime(mime))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,5 +482,46 @@ mod tests {
             out.chars()
                 .all(|c| c == 'é' || c == '.' || c == 'p' || c == 'd' || c == 'f')
         );
+    }
+
+    #[test]
+    fn derives_output_path_from_cap_and_mime() {
+        // 2026-09-12T15:30:12Z
+        let p = derive_output_path("translate", "text/plain", 1_789_227_012);
+        assert_eq!(p, "translate/2026-09-12-153012.txt");
+    }
+
+    #[test]
+    fn derives_output_path_stamp_is_utc() {
+        assert_eq!(
+            derive_output_path("sum", "application/pdf", 0),
+            "sum/1970-01-01-000000.pdf"
+        );
+    }
+
+    #[test]
+    fn derives_output_path_sanitizes_capability() {
+        assert_eq!(
+            derive_output_path("../weird cap", "application/json", 0),
+            "weird-cap/1970-01-01-000000.json"
+        );
+        assert_eq!(
+            derive_output_path("", "text/csv", 0),
+            "output/1970-01-01-000000.csv"
+        );
+    }
+
+    #[test]
+    fn extension_falls_back_to_subtype() {
+        assert_eq!(extension_for_mime("application/x-tar"), "xtar");
+        assert_eq!(extension_for_mime("text/plain; charset=utf-8"), "txt");
+        assert_eq!(extension_for_mime("application/vnd.oasis+xml"), "vndoasis");
+        assert_eq!(extension_for_mime(""), "bin");
+    }
+
+    #[test]
+    fn derived_output_path_survives_sanitize() {
+        let p = derive_output_path("translate", "text/plain", 0);
+        assert_eq!(sanitize_blob_path(&p).as_deref(), Some(p.as_str()));
     }
 }

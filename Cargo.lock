@@ -2583,6 +2583,7 @@ dependencies = [
  "n3ur0n-core",
  "n3ur0n-node",
  "n3ur0n-storage",
+ "reqwest 0.12.28",
  "rust-embed",
  "semver",
  "serde",

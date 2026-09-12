@@ -28,8 +28,8 @@ pub use blob::{
     AnchorKind, BLOB_HASH_PREFIX, BLOB_TICKET_HEADER, BlobClassification, BlobOperation,
     BlobProvenance, BlobPurpose, BlobRef, BlobRole, BlobTicketPayload, MAX_BLOB_PATH_LEN,
     ProcessingStatus, classify_cap_staging, classify_inbound_output, classify_local_cache,
-    classify_outbound_upload, decode_ticket_wire, default_ttl_secs, encode_ticket_wire, hash_bytes,
-    sanitize_blob_path, validate_hash,
+    classify_outbound_upload, decode_ticket_wire, default_ttl_secs, derive_output_path,
+    encode_ticket_wire, hash_bytes, sanitize_blob_path, validate_hash,
 };
 pub use capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 pub use error::{CoreError, CoreResult};

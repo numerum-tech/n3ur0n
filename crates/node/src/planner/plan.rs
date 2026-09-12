@@ -20,6 +20,7 @@ use tokio::sync::Semaphore;
 /// from saturating when a plan fans out widely.
 const MAX_CONCURRENT_STEPS: usize = 4;
 
+use crate::blob_resolve::BlobOwner;
 use crate::client as peer_client;
 use crate::error::{NodeError, NodeResult};
 use crate::node::Node;
@@ -502,7 +503,7 @@ fn value_to_text(v: Value) -> String {
 
 /// Execute the plan sequentially in topological order.
 pub async fn execute_plan(node: &Node, plan: &Plan, catalog: &Catalog) -> NodeResult<PlanRun> {
-    execute_plan_streaming(node, plan, catalog, None, None).await
+    execute_plan_streaming(node, plan, catalog, None, None, &BlobOwner::default()).await
 }
 
 /// Execute the plan with maximum safe parallelism: every step whose
@@ -530,6 +531,7 @@ pub async fn execute_plan_streaming(
     catalog: &Catalog,
     events: Option<&EventSender>,
     mut on_step_done: Option<&mut (dyn FnMut(usize, &TraceEntry) + Send)>,
+    owner: &BlobOwner,
 ) -> NodeResult<PlanRun> {
     use futures::FutureExt;
     use futures::stream::{FuturesUnordered, StreamExt};
@@ -724,6 +726,7 @@ use raw refs only, let the downstream tool combine values)",
         let sem = step_sem.clone();
         let evt_tx = events.cloned();
         let node_exec = node_for_steps.clone();
+        let owner_exec = owner.clone();
 
         in_flight.push(
             async move {
@@ -774,6 +777,8 @@ use raw refs only, let the downstream tool combine values)",
                                 &node_exec,
                                 &http_client,
                                 ep,
+                                &cap_name,
+                                &owner_exec,
                                 raw,
                             )
                             .await
@@ -1393,7 +1398,8 @@ mod tests {
 
         // Kill the run mid-execution: s3 blocks forever, so the timeout drops
         // the future after s1 and s2 have completed + persisted.
-        let fut = execute_plan_streaming(&node, &plan, &cat, None, Some(&mut on_done));
+        let owner = BlobOwner::default();
+        let fut = execute_plan_streaming(&node, &plan, &cat, None, Some(&mut on_done), &owner);
         let killed = tokio::time::timeout(std::time::Duration::from_millis(200), fut).await;
         assert!(killed.is_err(), "run should have been killed by timeout");
 
