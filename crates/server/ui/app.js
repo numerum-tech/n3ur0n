@@ -1212,12 +1212,25 @@ function renderMentionPopover() {
         cap: t("mention.section.caps"),
         lobe: t("mention.section.lobes"),
     };
+    // Show the prefix each section writes. It is the only place the syntax is
+    // taught: a user who has only ever picked from the list otherwise never
+    // learns that typing `@cap:` filters straight to skills. Read off the
+    // token rather than the kind, so the `@peer:<id>/` descent — whose entries
+    // are capabilities but whose prefix is `@peer:` — announces what it builds.
+    const tokenPrefix = (token) => {
+        const i = token.indexOf(":");
+        return i < 0 ? token : token.slice(0, i + 1);
+    };
     let html = "";
-    let lastKind = null;
+    let lastSection = null;
     items.forEach((it, i) => {
-        if (it.kind !== lastKind) {
-            html += `<div class="mention-section">${escapeHtml(sectionLabel[it.kind])}</div>`;
-            lastKind = it.kind;
+        const section = `${it.kind}|${tokenPrefix(it.token)}`;
+        if (section !== lastSection) {
+            html += `<div class="mention-section">
+                <span>${escapeHtml(sectionLabel[it.kind] || it.kind)}</span>
+                <code class="mention-section-prefix">${escapeHtml(tokenPrefix(it.token))}</code>
+            </div>`;
+            lastSection = section;
         }
         html += `<button type="button" class="mention-item${i === active ? " active" : ""}" role="option" data-idx="${i}">
             <span class="mention-item-label">${escapeHtml(it.label)}</span>
