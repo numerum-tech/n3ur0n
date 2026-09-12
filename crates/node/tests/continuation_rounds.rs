@@ -170,3 +170,101 @@ async fn a_failed_step_triggers_a_second_round() {
         "at most one continuation plan may be journalled with MAX_PLAN_ROUNDS=2"
     );
 }
+
+/// The other trigger: a plan as deep as a round is allowed to be.
+///
+/// The four utility capabilities chain naturally — take the time, reverse that
+/// string, count the characters — which is three dependent steps and exactly
+/// the per-round cap. Nothing fails here, so this isolates the depth trigger
+/// from the failure one.
+///
+/// The assertion is deliberately weak on the model's choices and strong on the
+/// mechanism: a 7B may or may not produce the full chain, so the test asserts
+/// the *relationship* between the depth it actually produced and the number of
+/// rounds, which is the rule under test.
+#[tokio::test]
+#[ignore = "needs a running LLM endpoint; run with --ignored"]
+async fn a_deep_plan_triggers_a_second_round() {
+    let base_url =
+        std::env::var("PLANNER_EVAL_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".into());
+    let model = std::env::var("PLANNER_EVAL_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into());
+
+    let db = open_in_memory().unwrap();
+    let backend = Arc::new(UtilityBackend);
+    let registry = CapabilityRegistry::from_decls(
+        <UtilityBackend as n3ur0n_adapters::Backend>::describe(&UtilityBackend)
+            .await
+            .unwrap(),
+    );
+    let node = Node::new(
+        n3ur0n_core::Keypair::generate(),
+        db,
+        backend,
+        registry,
+        NodeConfig::default(),
+    );
+
+    let llm = Arc::new(
+        OpenAIBackend::new(OpenAIConfig {
+            base_url,
+            default_model: model.clone(),
+            api_key: None,
+            description: None,
+            allow_model_override: true,
+        })
+        .expect("build LLM backend"),
+    );
+    let planner = PlanExecPlanner::new(llm, Some(model));
+
+    let conv_id = "conv_depth_test";
+    n3ur0n_storage::conversations::insert(
+        node.db(),
+        &n3ur0n_storage::conversations::ConversationRecord {
+            id: conv_id.into(),
+            client_id: "client-test".into(),
+            title: None,
+            created_at: 0,
+            updated_at: 0,
+        },
+    )
+    .unwrap();
+    let mut state = ConversationState::new(conv_id.into(), "client-test".into(), None);
+
+    let outcome = planner
+        .dispatch(
+            &node,
+            &mut state,
+            "Take the current server time, reverse that string, then count how many \
+             characters the reversed string has."
+                .into(),
+            DispatchMode::Auto,
+            DispatchOptions::default(),
+        )
+        .await
+        .expect("dispatch");
+
+    let rows = n3ur0n_storage::plan_runs::list_for_conversation(node.db(), conv_id, 10)
+        .expect("list plan runs");
+    let first: n3ur0n_node::planner::plan::Plan =
+        serde_json::from_str(&rows[0].plan_json).expect("parse first plan");
+    let depth = n3ur0n_node::planner::plan::plan_depth(&first);
+
+    println!(
+        "first-plan depth: {depth} · compile rounds: {} · steps: {} · reply: {}",
+        outcome.rounds,
+        outcome.trace.len(),
+        outcome.reply
+    );
+
+    if depth >= 3 {
+        assert_eq!(
+            outcome.rounds, 2,
+            "a plan at the per-round depth cap must get a continuation"
+        );
+    } else {
+        assert_eq!(
+            outcome.rounds, 1,
+            "a plan below the cap that did not fail must not continue (depth {depth})"
+        );
+    }
+}
