@@ -174,6 +174,7 @@ fn insert_blob_record(
         .map(|v| serde_json::to_string(v).unwrap_or_default());
 
     let row = BlobInsert {
+        path: None,
         hash: hash.to_string(),
         size,
         mime: mime.to_string(),

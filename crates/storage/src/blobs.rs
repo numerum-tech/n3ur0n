@@ -11,6 +11,8 @@ pub struct BlobRecord {
     pub hash: String,
     pub size: i64,
     pub mime: String,
+    /// Human-readable local path. Not unique, not an identifier.
+    pub path: Option<String>,
     pub expires_at: i64,
     pub storage_path: String,
     pub provenance: String,
@@ -39,6 +41,8 @@ pub struct BlobInsert {
     pub hash: String,
     pub size: i64,
     pub mime: String,
+    /// Human-readable local path, already sanitized by the caller.
+    pub path: Option<String>,
     pub expires_at: i64,
     pub storage_path: String,
     pub provenance: String,
@@ -64,31 +68,32 @@ fn row_from_query(row: &rusqlite::Row<'_>) -> rusqlite::Result<BlobRecord> {
         hash: row.get(0)?,
         size: row.get(1)?,
         mime: row.get(2)?,
-        expires_at: row.get(3)?,
-        storage_path: row.get(4)?,
-        provenance: row.get(5)?,
-        role: row.get(6)?,
-        anchor_kind: row.get(7)?,
-        processing_status: row.get(8)?,
-        local_user_id: row.get(9)?,
-        client_id: row.get(10)?,
-        conversation_id: row.get(11)?,
-        dispatch_id: row.get(12)?,
-        capability: row.get(13)?,
-        remote_sender_id: row.get(14)?,
-        ticket_nonce: row.get(15)?,
-        invoke_id: row.get(16)?,
-        user_visible: row.get::<_, i64>(17)? != 0,
-        user_deletable: row.get::<_, i64>(18)? != 0,
-        uploader_id: row.get(19)?,
-        recipients_whitelist: row.get(20)?,
-        created_at: row.get(21)?,
-        last_access_at: row.get(22)?,
+        path: row.get(3)?,
+        expires_at: row.get(4)?,
+        storage_path: row.get(5)?,
+        provenance: row.get(6)?,
+        role: row.get(7)?,
+        anchor_kind: row.get(8)?,
+        processing_status: row.get(9)?,
+        local_user_id: row.get(10)?,
+        client_id: row.get(11)?,
+        conversation_id: row.get(12)?,
+        dispatch_id: row.get(13)?,
+        capability: row.get(14)?,
+        remote_sender_id: row.get(15)?,
+        ticket_nonce: row.get(16)?,
+        invoke_id: row.get(17)?,
+        user_visible: row.get::<_, i64>(18)? != 0,
+        user_deletable: row.get::<_, i64>(19)? != 0,
+        uploader_id: row.get(20)?,
+        recipients_whitelist: row.get(21)?,
+        created_at: row.get(22)?,
+        last_access_at: row.get(23)?,
     })
 }
 
 const SELECT_COLS: &str = "\
-    hash, size, mime, expires_at, storage_path,
+    hash, size, mime, path, expires_at, storage_path,
     provenance, role, anchor_kind, processing_status,
     local_user_id, client_id, conversation_id, dispatch_id,
     capability, remote_sender_id, ticket_nonce, invoke_id,
@@ -100,21 +105,24 @@ pub fn upsert(pool: &Db, row: &BlobInsert) -> StorageResult<()> {
     let conn = pool.get()?;
     conn.execute(
         "INSERT INTO blobs (
-            hash, size, mime, expires_at, storage_path,
+            hash, size, mime, path, expires_at, storage_path,
             provenance, role, anchor_kind, processing_status,
             local_user_id, client_id, conversation_id, dispatch_id,
             capability, remote_sender_id, ticket_nonce, invoke_id,
             user_visible, user_deletable, uploader_id, recipients_whitelist
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5,
-            ?6, ?7, ?8, ?9,
-            ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17,
-            ?18, ?19, ?20, ?21
+            ?1, ?2, ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, ?14,
+            ?15, ?16, ?17, ?18,
+            ?19, ?20, ?21, ?22
         )
         ON CONFLICT(hash) DO UPDATE SET
             size = excluded.size,
             mime = excluded.mime,
+            -- same bytes re-uploaded under a new name: keep the first path we
+            -- were given rather than letting a later upload rewrite it.
+            path = COALESCE(blobs.path, excluded.path),
             expires_at = excluded.expires_at,
             storage_path = excluded.storage_path,
             processing_status = excluded.processing_status,
@@ -123,6 +131,7 @@ pub fn upsert(pool: &Db, row: &BlobInsert) -> StorageResult<()> {
             row.hash,
             row.size,
             row.mime,
+            row.path,
             row.expires_at,
             row.storage_path,
             row.provenance,
@@ -259,6 +268,7 @@ pub fn record_to_json(rec: &BlobRecord) -> Value {
         "hash": rec.hash,
         "size": rec.size,
         "mime": rec.mime,
+        "path": rec.path,
         "expires_at": OffsetDateTime::from_unix_timestamp(rec.expires_at)
             .ok()
             .and_then(|t| t.format(&time::format_description::well_known::Rfc3339).ok()),

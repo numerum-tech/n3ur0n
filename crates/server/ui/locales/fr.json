@@ -39,7 +39,7 @@
   "sidebar.tab.network": "Réseau",
   "sidebar.tab.skills": "Compétences",
   "sidebar.tab.files": "Fichiers",
-  "sidebar.files.filter": "filtrer fichiers · mime / hash…",
+  "sidebar.files.filter": "filtrer fichiers · nom / mime / hash…",
   "sidebar.files.upload": "Envoyer",
   "sidebar.files.stats": "{count} fichiers",
   "sidebar.files.empty": "aucun fichier — envoyez pour préparer un invoke",

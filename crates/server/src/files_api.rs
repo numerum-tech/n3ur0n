@@ -23,6 +23,36 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/cap-jobs/blobs", get(list_cap_job_blobs))
 }
 
+/// Header carrying the original file name, percent-encoded by the client.
+///
+/// HTTP header values are latin-1, so a UTF-8 file name ("rapport été.pdf")
+/// cannot be sent raw. The browser sends `encodeURIComponent(file.name)` and
+/// we decode it here before sanitizing.
+const FILENAME_HEADER: &str = "x-n3ur0n-path";
+
+/// Decode `%XX` escapes into UTF-8. Invalid escapes are left verbatim; the
+/// result is sanitized by the caller, so a malformed value degrades to a
+/// harmless name rather than an error.
+fn percent_decode(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 async fn upload_file(
     State(state): State<AppState>,
     Extension(user): Extension<AuthedUser>,
@@ -53,22 +83,39 @@ async fn upload_file(
         .trim()
         .to_string();
     let client_id = client_id_from_cookie(&headers);
+    let path = headers
+        .get(FILENAME_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+        .and_then(|raw| n3ur0n_core::sanitize_blob_path(&raw));
     match n3ur0n_node::blob_resolve::store_local_cache(
         &state.node,
         &body,
         &mime,
+        path.as_deref(),
         Some(user.id),
         client_id.as_deref(),
     ) {
-        Ok(blob_ref) => (
-            StatusCode::CREATED,
-            axum::Json(json!({
-                "hash": blob_ref.hash,
-                "size": blob_ref.size,
-                "mime": blob_ref.mime,
-            })),
-        )
-            .into_response(),
+        Ok(blob_ref) => {
+            // Re-read the stored path rather than echoing what was submitted:
+            // these bytes may already be indexed under an earlier name, and
+            // the first path wins. Reporting the submitted one would tell the
+            // client a name the store does not hold.
+            let stored = blobs::get(state.node.db(), &blob_ref.hash)
+                .ok()
+                .flatten()
+                .and_then(|rec| rec.path);
+            (
+                StatusCode::CREATED,
+                axum::Json(json!({
+                    "hash": blob_ref.hash,
+                    "size": blob_ref.size,
+                    "mime": blob_ref.mime,
+                    "path": stored,
+                })),
+            )
+                .into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             axum::Json(json!({"error": e})),
@@ -288,4 +335,27 @@ fn owns_record(record: &blobs::BlobRecord, user_id: i64, client_id: Option<&str>
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percent_decode;
+
+    #[test]
+    fn decodes_utf8_escapes() {
+        assert_eq!(
+            percent_decode("rapport%20%C3%A9t%C3%A9.pdf"),
+            "rapport été.pdf"
+        );
+    }
+
+    #[test]
+    fn leaves_plain_text_untouched() {
+        assert_eq!(percent_decode("notes.txt"), "notes.txt");
+    }
+
+    #[test]
+    fn tolerates_malformed_escapes() {
+        assert_eq!(percent_decode("a%zz%2"), "a%zz%2");
+    }
 }

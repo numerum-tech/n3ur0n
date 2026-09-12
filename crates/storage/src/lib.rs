@@ -31,6 +31,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0003_users_sessions.sql"),
     include_str!("../migrations/0004_blobs.sql"),
     include_str!("../migrations/0005_plan_runs.sql"),
+    include_str!("../migrations/0006_blob_path.sql"),
 ];
 
 pub fn open<P: AsRef<Path>>(path: P) -> StorageResult<Db> {

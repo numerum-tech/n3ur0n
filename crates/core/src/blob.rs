@@ -252,6 +252,62 @@ pub fn decode_ticket_wire(header: &str) -> CoreResult<crate::message::SignedMess
     serde_json::from_slice(&bytes).map_err(CoreError::Serde)
 }
 
+/// Maximum length of a sanitized blob path, in bytes.
+pub const MAX_BLOB_PATH_LEN: usize = 255;
+
+/// Normalize a user-supplied blob path into something safe to store and display.
+///
+/// A blob path is a *local petname*: it never travels on the wire and is never
+/// accepted from a remote peer. It is purely a display/lookup convenience over
+/// the content hash, which stays the canonical identifier.
+///
+/// The rules exist because the raw input comes from a browser file picker (and
+/// later from a rename box), so it must not be trusted as a filesystem path:
+///
+/// - backslashes are folded to `/` so Windows names keep their structure;
+/// - `.` and `..` segments are dropped, which removes path traversal;
+/// - leading/trailing and repeated separators collapse;
+/// - control characters are stripped (they corrupt terminals and UI labels);
+/// - the result is truncated to [`MAX_BLOB_PATH_LEN`] bytes on a char boundary.
+///
+/// Returns `None` when nothing usable remains, so callers can store SQL NULL
+/// rather than an empty string.
+#[must_use]
+pub fn sanitize_blob_path(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| if c == '\\' { '/' } else { c })
+        .filter(|c| !c.is_control())
+        .collect();
+
+    let mut segments: Vec<&str> = Vec::new();
+    for seg in cleaned.split('/') {
+        let seg = seg.trim();
+        if seg.is_empty() || seg == "." || seg == ".." {
+            continue;
+        }
+        segments.push(seg);
+    }
+    if segments.is_empty() {
+        return None;
+    }
+
+    let mut out = segments.join("/");
+    if out.len() > MAX_BLOB_PATH_LEN {
+        let mut cut = MAX_BLOB_PATH_LEN;
+        while cut > 0 && !out.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        out.truncate(cut);
+        let trimmed = out.trim_end_matches('/').trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        out = trimmed.to_string();
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +323,72 @@ mod tests {
     fn rejects_bad_hash() {
         assert!(validate_hash("sha256:ZZ").is_err());
         assert!(validate_hash("md5:abc").is_err());
+    }
+
+    #[test]
+    fn sanitize_path_keeps_plain_name() {
+        assert_eq!(
+            sanitize_blob_path("rapport.pdf").as_deref(),
+            Some("rapport.pdf")
+        );
+    }
+
+    #[test]
+    fn sanitize_path_keeps_folders() {
+        assert_eq!(
+            sanitize_blob_path("contrats/2026/bail.pdf").as_deref(),
+            Some("contrats/2026/bail.pdf")
+        );
+    }
+
+    #[test]
+    fn sanitize_path_strips_traversal() {
+        assert_eq!(
+            sanitize_blob_path("../../keys.json").as_deref(),
+            Some("keys.json")
+        );
+        assert_eq!(
+            sanitize_blob_path("/etc/passwd").as_deref(),
+            Some("etc/passwd")
+        );
+        assert_eq!(
+            sanitize_blob_path("a/./b/../c.txt").as_deref(),
+            Some("a/b/c.txt")
+        );
+    }
+
+    #[test]
+    fn sanitize_path_folds_backslashes() {
+        assert_eq!(
+            sanitize_blob_path("C:\\Users\\me\\note.txt").as_deref(),
+            Some("C:/Users/me/note.txt")
+        );
+    }
+
+    #[test]
+    fn sanitize_path_strips_control_chars() {
+        assert_eq!(
+            sanitize_blob_path("rap\u{0}po\u{7}rt.pdf").as_deref(),
+            Some("rapport.pdf")
+        );
+    }
+
+    #[test]
+    fn sanitize_path_rejects_empty() {
+        assert!(sanitize_blob_path("").is_none());
+        assert!(sanitize_blob_path("   ").is_none());
+        assert!(sanitize_blob_path("../..").is_none());
+        assert!(sanitize_blob_path("///").is_none());
+    }
+
+    #[test]
+    fn sanitize_path_truncates_on_char_boundary() {
+        let long = format!("{}.pdf", "é".repeat(400));
+        let out = sanitize_blob_path(&long).unwrap();
+        assert!(out.len() <= MAX_BLOB_PATH_LEN);
+        assert!(
+            out.chars()
+                .all(|c| c == 'é' || c == '.' || c == 'p' || c == 'd' || c == 'f')
+        );
     }
 }

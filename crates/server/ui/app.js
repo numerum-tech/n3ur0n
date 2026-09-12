@@ -1622,11 +1622,11 @@ function fileCard(f) {
         <article class="card" data-hash="${escapeHtml(f.hash)}">
             <div class="card-head">
                 <div class="card-icon">${iconHtml(mimeIcon(mime), { size: 18 })}</div>
-                <span class="card-title">${escapeHtml(mime)}</span>
+                <span class="card-title">${escapeHtml(f.path || mime)}</span>
                 <span class="card-kind">${escapeHtml(formatBytes(f.size || 0))}</span>
             </div>
             <div class="card-meta">
-                <code>${escapeHtml(short)}</code>
+                ${f.path ? `${escapeHtml(mime)} · ` : ""}<code>${escapeHtml(short)}</code>
             </div>
             <div class="card-meta strong">
                 ${escapeHtml(formatBlobClass(f))} · ${escapeHtml(status)}
@@ -1651,8 +1651,8 @@ function renderFilesList() {
         if (!matchesFileCategory(f, _filesCategory)) return false;
         if (!filter) return true;
         const hay = [
-            f.hash, f.mime, f.provenance, f.role, f.processing_status || "",
-            f.capability || "", f.expires_at || "",
+            f.path || "", f.hash, f.mime, f.provenance, f.role,
+            f.processing_status || "", f.capability || "", f.expires_at || "",
         ].join(" ").toLowerCase();
         return hay.includes(filter);
     });
@@ -1717,16 +1717,22 @@ async function downloadFile(hash) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = hash.replace(/^sha256:/, "").slice(0, 16);
+    const known = _filesCache.find(f => f.hash === hash);
+    a.download = known?.path?.split("/").pop() || hash.replace(/^sha256:/, "").slice(0, 16);
     a.click();
     URL.revokeObjectURL(url);
 }
 
 async function uploadFileBlob(file) {
+    // Header values are latin-1, so the name travels percent-encoded and the
+    // server decodes + sanitizes it. The hash stays the identifier; this is
+    // only the human-readable label.
+    const headers = { "content-type": file.type || "application/octet-stream" };
+    if (file.name) headers["x-n3ur0n-path"] = encodeURIComponent(file.name);
     const res = await fetch("/api/v0/files", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "content-type": file.type || "application/octet-stream" },
+        headers,
         body: file,
     });
     if (!res.ok) {

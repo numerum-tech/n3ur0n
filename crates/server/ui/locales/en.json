@@ -39,7 +39,7 @@
   "sidebar.tab.network": "Network",
   "sidebar.tab.skills": "Skills",
   "sidebar.tab.files": "Files",
-  "sidebar.files.filter": "filter files · mime / hash…",
+  "sidebar.files.filter": "filter files · name / mime / hash…",
   "sidebar.files.upload": "Upload",
   "sidebar.files.stats": "{count} files",
   "sidebar.files.empty": "no files yet — upload to stage for invoke",

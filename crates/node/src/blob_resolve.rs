@@ -94,6 +94,7 @@ fn record_outbound_upload(
     let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Input) as i64;
     let row = BlobInsert {
         hash: hash.to_string(),
+        path: None,
         size,
         mime: mime.to_string(),
         expires_at: expires,
@@ -130,6 +131,7 @@ fn record_inbound_output(
     let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Output) as i64;
     let row = BlobInsert {
         hash: blob.hash.clone(),
+        path: None,
         size: blob.size as i64,
         mime: blob.mime.clone(),
         expires_at: expires,
@@ -261,6 +263,7 @@ pub fn store_local_cache(
     node: &Node,
     bytes: &[u8],
     mime: &str,
+    path: Option<&str>,
     local_user_id: Option<i64>,
     client_id: Option<&str>,
 ) -> Result<BlobRef, String> {
@@ -269,18 +272,19 @@ pub fn store_local_cache(
         return Err("blobs_dir not configured".into());
     };
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    let path = root.join(&hash);
-    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    let storage_path = root.join(&hash);
+    std::fs::write(&storage_path, bytes).map_err(|e| e.to_string())?;
 
     let class = classify_local_cache();
     let now = node.clock().now().unix_timestamp();
     let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Input) as i64;
     let row = BlobInsert {
         hash: hash.clone(),
+        path: path.map(str::to_string),
         size: bytes.len() as i64,
         mime: mime.to_string(),
         expires_at: expires,
-        storage_path: path.display().to_string(),
+        storage_path: storage_path.display().to_string(),
         provenance: "outbound".into(),
         role: "input".into(),
         anchor_kind: "local_cache".into(),
