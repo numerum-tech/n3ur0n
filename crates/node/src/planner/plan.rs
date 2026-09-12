@@ -501,6 +501,44 @@ fn value_to_text(v: Value) -> String {
 // Execution
 // ---------------------------------------------------------------------------
 
+/// Longest chain of dependent steps in the plan.
+///
+/// This is the plan's *depth*, not its size: five independent steps have a
+/// depth of 1 because nothing waits on anything. Depth is what a round has to
+/// bound — width costs nothing, since independent steps already run
+/// concurrently. A plan that reaches the per-round depth cap may have been cut
+/// short, which is the signal to compile a continuation.
+///
+/// Dependencies come from `depends_on` and from `${step.field}` references,
+/// which is how `topological_order` sees them too. A cyclic plan (already
+/// rejected by validation) returns 0 rather than looping.
+#[must_use]
+pub fn plan_depth(plan: &Plan) -> usize {
+    let Ok(order) = topological_order(plan) else {
+        return 0;
+    };
+    let by_id: HashMap<&str, &PlanStep> = plan.plan.iter().map(|s| (s.id.as_str(), s)).collect();
+    let mut level: HashMap<&str, usize> = HashMap::new();
+    let mut deepest = 0;
+    for id in order {
+        let Some(step) = by_id.get(id.as_str()) else {
+            continue;
+        };
+        let mut deps: HashSet<String> = step.depends_on.iter().cloned().collect();
+        collect_refs(&step.args, &mut deps);
+        let d = deps
+            .iter()
+            .filter(|dep| dep.as_str() != step.id)
+            .filter_map(|dep| level.get(dep.as_str()).copied())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        level.insert(step.id.as_str(), d);
+        deepest = deepest.max(d);
+    }
+    deepest
+}
+
 /// Execute the plan sequentially in topological order.
 pub async fn execute_plan(node: &Node, plan: &Plan, catalog: &Catalog) -> NodeResult<PlanRun> {
     execute_plan_streaming(node, plan, catalog, None, None, &BlobOwner::default()).await
@@ -1416,5 +1454,86 @@ mod tests {
             roles,
             vec!["tool_call", "tool_result", "tool_call", "tool_result"]
         );
+    }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+
+    fn step(id: &str, args: Value, depends_on: &[&str]) -> PlanStep {
+        PlanStep {
+            id: id.into(),
+            peer: "p".into(),
+            capability: "c".into(),
+            args,
+            depends_on: depends_on.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn depth_of_an_empty_plan_is_zero() {
+        assert_eq!(plan_depth(&Plan { plan: vec![] }), 0);
+    }
+
+    #[test]
+    fn width_does_not_count_as_depth() {
+        // Five independent steps: nothing waits, so the plan is one level deep.
+        let plan = Plan {
+            plan: (1..=5)
+                .map(|i| step(&format!("s{i}"), json!({}), &[]))
+                .collect(),
+        };
+        assert_eq!(plan_depth(&plan), 1);
+    }
+
+    #[test]
+    fn a_chain_counts_its_links() {
+        let plan = Plan {
+            plan: vec![
+                step("s1", json!({}), &[]),
+                step("s2", json!({}), &["s1"]),
+                step("s3", json!({}), &["s2"]),
+            ],
+        };
+        assert_eq!(plan_depth(&plan), 3);
+    }
+
+    #[test]
+    fn references_create_depth_without_depends_on() {
+        let plan = Plan {
+            plan: vec![
+                step("s1", json!({}), &[]),
+                step("s2", json!({"text": "${s1.value}"}), &[]),
+            ],
+        };
+        assert_eq!(plan_depth(&plan), 2);
+    }
+
+    #[test]
+    fn depth_is_the_longest_branch_not_the_step_count() {
+        // s1 feeds both s2 and s3; s4 waits on s3. Six steps, three levels.
+        let plan = Plan {
+            plan: vec![
+                step("s1", json!({}), &[]),
+                step("s2", json!({}), &["s1"]),
+                step("s3", json!({}), &["s1"]),
+                step("s4", json!({}), &["s3"]),
+                step("s5", json!({}), &[]),
+                step("s6", json!({}), &[]),
+            ],
+        };
+        assert_eq!(plan_depth(&plan), 3);
+    }
+
+    #[test]
+    fn a_cyclic_plan_returns_zero_rather_than_looping() {
+        let plan = Plan {
+            plan: vec![
+                step("s1", json!({}), &["s2"]),
+                step("s2", json!({}), &["s1"]),
+            ],
+        };
+        assert_eq!(plan_depth(&plan), 0);
     }
 }

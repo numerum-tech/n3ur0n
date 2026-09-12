@@ -69,6 +69,37 @@ pub fn get(db: &Db, id: &str) -> StorageResult<Option<PlanRunRecord>> {
     Ok(row)
 }
 
+/// Compiled plans for one conversation, oldest first.
+///
+/// One row per compiled plan, so a dispatch that needed a continuation leaves
+/// more than one. That makes the journal the place to answer both "did the
+/// planner round-trip?" and "how deep do real plans get?" — the second being
+/// what a per-round bound has to be sized against.
+pub fn list_for_conversation(
+    db: &Db,
+    conversation_id: &str,
+    limit: i64,
+) -> StorageResult<Vec<PlanRunRecord>> {
+    let conn = db.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, conversation_id, plan_json, status, created_at, finished_at
+         FROM plan_runs WHERE conversation_id = ?1
+         ORDER BY created_at ASC, rowid ASC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![conversation_id, limit], |row| {
+        Ok(PlanRunRecord {
+            id: row.get(0)?,
+            conversation_id: row.get(1)?,
+            plan_json: row.get(2)?,
+            status: row.get(3)?,
+            created_at: row.get(4)?,
+            finished_at: row.get(5)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

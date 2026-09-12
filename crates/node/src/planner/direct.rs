@@ -153,6 +153,8 @@ impl DirectChatPlanner {
 
         // Return outcome with empty trace
         Ok(DispatchOutcome {
+            // Direct chat is one LLM call; there is no plan to continue.
+            rounds: 1,
             reply: content,
             model: response_model,
             trace: vec![],

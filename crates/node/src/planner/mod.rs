@@ -55,6 +55,12 @@ pub struct DispatchOutcome {
     pub model: Option<String>,
     /// All tool calls executed during this dispatch (for UI trace panel).
     pub trace: Vec<TraceEntry>,
+    /// Compile rounds this dispatch used. `1` is a plan that needed no
+    /// continuation; more means the runtime observed a reason to keep going —
+    /// including a continuation that compiled to an empty plan, which is a
+    /// round that happened and cost a call. Surfaced because "did it
+    /// round-trip?" is otherwise only visible in logs.
+    pub rounds: usize,
 }
 
 #[derive(Debug, Clone)]

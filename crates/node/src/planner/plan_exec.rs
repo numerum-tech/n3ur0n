@@ -9,6 +9,7 @@
 //! Between the two, a deterministic executor walks the plan in
 //! topological order and substitutes `${step_id.path}` references.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -23,7 +24,7 @@ use crate::mention::MentionScope;
 use crate::node::Node;
 use crate::planner::catalog::{Catalog, ToolDef};
 use crate::planner::compiler::PlanCompiler;
-use crate::planner::plan::{Plan, execute_plan_streaming, validate_plan};
+use crate::planner::plan::{Plan, execute_plan_streaming, plan_depth, validate_plan};
 use crate::planner::retriever::Retriever;
 use crate::planner::{
     DispatchEvent, DispatchMode, DispatchOptions, DispatchOutcome, EventSender, MAX_CONTEXT_TURNS,
@@ -45,6 +46,24 @@ pub const REMOTE_TOP_K: usize = 20;
 /// one retry is not worth the latency: if the model cannot fix a plan
 /// given the exact error, another identical nudge rarely helps.
 const COMPILE_RETRY_LIMIT: usize = 1;
+
+/// Compile+execute rounds a single dispatch may use.
+///
+/// One round is today's behaviour: compile a plan, run it, reflect. A second
+/// round lets the planner react to what the first one produced — the cheapest
+/// form of adaptivity, and the only one that does not put an LLM call between
+/// every step.
+///
+/// The cost profile is the point: a request that compiles a complete plan pays
+/// exactly what it paid before. Only a dispatch that trips a trigger pays more.
+const MAX_PLAN_ROUNDS: usize = 2;
+
+/// Depth (longest chain of dependent steps) a single round may plan.
+///
+/// Depth, not size: independent steps already run concurrently, so width costs
+/// nothing and is left unbounded. A plan that reaches this depth may have been
+/// cut short by it, which is one of the two continuation triggers.
+const MAX_DEPTH_PER_ROUND: usize = 3;
 
 #[derive(Clone)]
 pub struct PlanExecPlanner {
@@ -243,7 +262,7 @@ impl PlanExecPlanner {
                     let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
                 }
                 return self
-                    .reflect_only(node, state, &planner_text, None, Vec::new(), events)
+                    .reflect_only(node, state, &planner_text, None, Vec::new(), 1, events)
                     .await;
             }
             PlanOutcome::Invalid(e) => {
@@ -252,7 +271,7 @@ impl PlanExecPlanner {
                     let _ = tx.send(DispatchEvent::PlanReady { steps: Vec::new() });
                 }
                 return self
-                    .reflect_only(node, state, &planner_text, None, Vec::new(), events)
+                    .reflect_only(node, state, &planner_text, None, Vec::new(), 1, events)
                     .await;
             }
             PlanOutcome::Valid(p) => p,
@@ -381,6 +400,171 @@ impl PlanExecPlanner {
             );
         }
 
+        // 5b. Continuation rounds.
+        //
+        // Two triggers, both structural — neither asks the model to judge its
+        // own completeness, which is the assessment a 7B is worst at:
+        //
+        //   - a step failed, so the plan cannot have done what it set out to;
+        //   - the plan reached the per-round depth cap, so it may have been
+        //     cut short by the bound rather than by having finished.
+        //
+        // The continuation itself is an ordinary compile against the same
+        // catalogue, with the blackboard in front of it. An empty plan ends the
+        // loop, which is the same signal the first round already uses.
+        let mut run = run;
+        let mut round = 1usize;
+        // Counts compile rounds, not executed plans: a continuation that
+        // compiles `{"plan": []}` did happen and cost an LLM call, and it is
+        // the only externally visible proof that the loop ran at all.
+        let mut rounds_used = 1usize;
+        let mut depth = plan_depth(&plan);
+        while round < MAX_PLAN_ROUNDS {
+            let Some(reason) = continuation_reason(&run.trace, depth) else {
+                break;
+            };
+            rounds_used += 1;
+            debug!(round, depth, %reason, "compiling a continuation round");
+
+            let msg = continuation_message(&planner_text, &run.blackboard_summary());
+            let compiled = match self.compiler.compile(&msg, &catalog).await {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!(error = %e, round, "continuation compile failed; keeping what we have");
+                    break;
+                }
+            };
+            let next = match resolve_plan(self.compiler.as_ref(), &msg, &catalog, compiled).await {
+                // Nothing left to do, or nothing valid to do: stop and reflect
+                // on what the earlier rounds produced.
+                PlanOutcome::Empty => break,
+                PlanOutcome::Invalid(e) => {
+                    warn!(error = %e, round, "continuation plan invalid; stopping rounds");
+                    break;
+                }
+                PlanOutcome::Valid(p) => p,
+            };
+
+            if plan_signature(&next) == plan_signature(&plan) {
+                warn!(
+                    round,
+                    "continuation re-proposed the same plan; stopping rather than \
+                     making the user wait twice for the same outcome"
+                );
+                break;
+            }
+
+            if let Some(tx) = events {
+                let steps: Vec<PlanStepInfo> = next
+                    .plan
+                    .iter()
+                    .map(|st| {
+                        let tool = catalog.find(&format!("{}::{}", st.peer, st.capability));
+                        PlanStepInfo {
+                            id: st.id.clone(),
+                            peer_id: tool
+                                .map(|t| t.peer_id.clone())
+                                .unwrap_or_else(|| st.peer.clone()),
+                            peer_short: st.peer.clone(),
+                            capability: st.capability.clone(),
+                        }
+                    })
+                    .collect();
+                let _ = tx.send(DispatchEvent::PlanReady { steps });
+            }
+
+            // One journal row per compiled plan, as the table documents.
+            let round_run_id = format!("run_{}", uuid::Uuid::new_v4().simple());
+            if let Ok(plan_json) = serde_json::to_string(&next) {
+                let _ = n3ur0n_storage::plan_runs::insert(
+                    node.db(),
+                    &n3ur0n_storage::plan_runs::PlanRunRecord {
+                        id: round_run_id.clone(),
+                        conversation_id: state.id.clone(),
+                        plan_json,
+                        status: "running".into(),
+                        created_at: OffsetDateTime::now_utc().unix_timestamp(),
+                        finished_at: None,
+                    },
+                );
+            }
+
+            // Tool turns of this round continue where the previous one stopped.
+            // `persist_tool_pair_at` derives its seq from `base_seq + 2*index`,
+            // so the offset belongs on the index, not on the base.
+            let index_offset = run.trace.len();
+            let db_hook2 = node.db().clone();
+            let conv_id_hook2 = state.id.clone();
+            let fallback2 = node.instance_id();
+            let mut on_done2 = |idx: usize, entry: &TraceEntry| {
+                let peer = n3ur0n_core::InstanceId::parse(&entry.peer_id)
+                    .unwrap_or_else(|_| fallback2.clone());
+                if let Err(e) = persist_tool_pair_at(
+                    &db_hook2,
+                    &conv_id_hook2,
+                    base_seq,
+                    idx + index_offset,
+                    &entry.call_id,
+                    &peer,
+                    &entry.capability,
+                    &entry.args,
+                    &entry.result,
+                    &entry.error,
+                    started_at,
+                ) {
+                    warn!(error = %e, step = idx, round, "failed to persist continuation tool turn");
+                }
+            };
+
+            let next_run = match execute_plan_streaming(
+                node,
+                &next,
+                &catalog,
+                events,
+                Some(&mut on_done2),
+                &blob_owner,
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!(error = %e, round, "continuation execution failed; keeping earlier rounds");
+                    break;
+                }
+            };
+            let finished = OffsetDateTime::now_utc().unix_timestamp();
+            let _ =
+                n3ur0n_storage::plan_runs::set_status(node.db(), &round_run_id, "done", finished);
+
+            for entry in &next_run.trace {
+                let pid = n3ur0n_core::InstanceId::parse(&entry.peer_id)
+                    .unwrap_or_else(|_| node.instance_id());
+                state.push_tool_call_with_id(
+                    entry.call_id.clone(),
+                    pid.clone(),
+                    entry.capability.clone(),
+                    entry.args.clone(),
+                );
+                state.push_tool_result(
+                    entry.call_id.clone(),
+                    pid,
+                    entry.capability.clone(),
+                    entry.result.clone(),
+                    entry.error.clone(),
+                );
+            }
+
+            // Merge into the accumulated run so reflect sees every round at
+            // once: the user asked one question and gets one answer.
+            depth = plan_depth(&next);
+            run.blackboard.extend(next_run.blackboard);
+            run.trace.extend(next_run.trace);
+            if next_run.last_step_id.is_some() {
+                run.last_step_id = next_run.last_step_id;
+            }
+            round += 1;
+        }
+
         // 6. Reflect.
         let outcome = self
             .reflect_only(
@@ -389,6 +573,7 @@ impl PlanExecPlanner {
                 &planner_text,
                 Some(&run.blackboard_summary()),
                 run.trace,
+                rounds_used,
                 events,
             )
             .await;
@@ -406,6 +591,8 @@ impl PlanExecPlanner {
 /// Helper: reflect on the original user prompt + (optional) blackboard
 /// summary, persist assistant turn, return outcome.
 impl PlanExecPlanner {
+    #[allow(clippy::too_many_arguments)] // every argument is a distinct input the
+    // reply depends on; bundling them into a struct would only move the list.
     async fn reflect_only(
         &self,
         node: &Node,
@@ -413,6 +600,7 @@ impl PlanExecPlanner {
         user_message: &str,
         blackboard_summary: Option<&str>,
         trace: Vec<TraceEntry>,
+        rounds: usize,
         events: Option<&EventSender>,
     ) -> NodeResult<DispatchOutcome> {
         if let Some(tx) = events {
@@ -474,6 +662,7 @@ impl PlanExecPlanner {
         }
 
         Ok(DispatchOutcome {
+            rounds,
             reply: content,
             model: model_used,
             trace,
@@ -625,6 +814,69 @@ pub async fn resolve_plan(
 /// as an accidental safety net, and a retry framed as "fix it" defeats
 /// that net. Reconsidering therefore comes first and correcting second,
 /// so the model is not anchored on producing a plan at any cost.
+/// Signature of a plan for "did the continuation actually propose anything new?".
+///
+/// A continuation that re-emits the same steps has nothing to add: executing it
+/// costs the user a second wait for an identical outcome. Measured against an
+/// unreachable peer, the model did exactly that — it read the failure in the
+/// blackboard as "no value yet" and tried again. The prompt asks it not to;
+/// this makes it impossible rather than discouraged.
+fn plan_signature(plan: &Plan) -> BTreeSet<String> {
+    plan.plan
+        .iter()
+        .map(|s| {
+            format!(
+                "{}::{}::{}",
+                s.peer,
+                s.capability,
+                serde_json::to_string(&s.args).unwrap_or_default()
+            )
+        })
+        .collect()
+}
+
+/// Why a dispatch should plan another round, or `None` to stop.
+///
+/// Both signals are observations the runtime makes on its own. Neither asks the
+/// model whether it is finished — that self-assessment is what a small model is
+/// worst at, and its dominant failure (over-planning) would bias it towards
+/// answering "not yet" every time.
+fn continuation_reason(trace: &[TraceEntry], depth: usize) -> Option<&'static str> {
+    if trace.iter().any(|e| e.error.is_some()) {
+        // A failed step means the plan did not do what it set out to; there is
+        // something left to attempt or to report.
+        return Some("a step failed");
+    }
+    if depth >= MAX_DEPTH_PER_ROUND {
+        // The plan is as deep as a round is allowed to be, so it may have been
+        // cut short by the bound rather than by having finished.
+        return Some("plan reached the per-round depth cap");
+    }
+    None
+}
+
+/// Prompt for a continuation round.
+///
+/// The model is not asked whether the work is finished — a self-assessment a
+/// small model is poor at. It is asked the same question as before, with what
+/// already ran in front of it, and `{"plan": []}` is the ordinary way to say
+/// there is nothing left to do.
+fn continuation_message(user_msg: &str, blackboard: &str) -> String {
+    format!(
+        "{user_msg}\n\n\
+         [steps already executed] These ran and produced:\n\
+         {blackboard}\n\
+         \n\
+         Plan ONLY what still has to happen, given those results. Do not repeat \
+         a step that already ran, and do not re-plan work whose result is above. \
+         A step that reports an error has already been attempted and will fail \
+         the same way again: do not retry it. Either plan a different route to \
+         the same goal, or stop. \
+         If the results are enough to answer the user, return {{\"plan\": []}} — \
+         that is the normal ending, not a failure."
+    )
+}
+
 fn compile_retry_message(user_msg: &str, error: &str) -> String {
     format!(
         "{user_msg}\n\n\
@@ -1242,5 +1494,89 @@ mod tests {
         let s = run.blackboard_summary();
         assert!(s.contains("\"sum\":42"), "small result altered: {s}");
         assert!(!s.contains("truncated"), "small result wrongly truncated");
+    }
+
+    fn failed_entry() -> TraceEntry {
+        TraceEntry {
+            error: Some("peer unreachable".into()),
+            result: None,
+            ..trace_entry("cap", json!({}))
+        }
+    }
+
+    #[test]
+    fn a_clean_shallow_run_does_not_continue() {
+        assert!(continuation_reason(&[trace_entry("cap", json!({}))], 1).is_none());
+        assert!(continuation_reason(&[], 0).is_none());
+    }
+
+    #[test]
+    fn a_failed_step_continues() {
+        assert_eq!(
+            continuation_reason(&[trace_entry("cap", json!({})), failed_entry()], 1),
+            Some("a step failed")
+        );
+    }
+
+    #[test]
+    fn hitting_the_depth_cap_continues() {
+        assert_eq!(
+            continuation_reason(&[trace_entry("cap", json!({}))], MAX_DEPTH_PER_ROUND),
+            Some("plan reached the per-round depth cap")
+        );
+        // One below the cap is a plan that stopped on its own.
+        assert!(
+            continuation_reason(&[trace_entry("cap", json!({}))], MAX_DEPTH_PER_ROUND - 1)
+                .is_none()
+        );
+    }
+
+    fn one_step_plan(cap: &str, args: Value) -> Plan {
+        Plan {
+            plan: vec![crate::planner::plan::PlanStep {
+                id: "s1".into(),
+                peer: "p1".into(),
+                capability: cap.into(),
+                args,
+                depends_on: vec![],
+            }],
+        }
+    }
+
+    #[test]
+    fn an_identical_continuation_is_recognised() {
+        let a = one_step_plan("fetch_url", json!({"url": "https://example.com"}));
+        let b = one_step_plan("fetch_url", json!({"url": "https://example.com"}));
+        assert_eq!(plan_signature(&a), plan_signature(&b));
+    }
+
+    #[test]
+    fn a_different_route_is_not_a_repeat() {
+        let a = one_step_plan("fetch_url", json!({"url": "https://example.com"}));
+        // Same goal, different capability.
+        let b = one_step_plan("web_search", json!({"url": "https://example.com"}));
+        assert_ne!(plan_signature(&a), plan_signature(&b));
+        // Same capability, different arguments.
+        let c = one_step_plan("fetch_url", json!({"url": "https://example.org"}));
+        assert_ne!(plan_signature(&a), plan_signature(&c));
+    }
+
+    #[test]
+    fn step_order_does_not_change_a_signature() {
+        let a = Plan {
+            plan: vec![
+                one_step_plan("x", json!({})).plan.remove(0),
+                crate::planner::plan::PlanStep {
+                    id: "s2".into(),
+                    peer: "p1".into(),
+                    capability: "y".into(),
+                    args: json!({}),
+                    depends_on: vec![],
+                },
+            ],
+        };
+        let mut reordered = a.clone();
+        reordered.plan.reverse();
+        assert_eq!(plan_signature(&a), plan_signature(&reordered));
     }
 }
