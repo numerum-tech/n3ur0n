@@ -115,23 +115,40 @@ pub fn delete(db: &Db, id: &str) -> StorageResult<()> {
 
 /// Append a turn within a transaction that also bumps `updated_at`.
 pub fn append_turn(db: &Db, turn: &TurnRecord, conv_updated_at: i64) -> StorageResult<()> {
+    append_turns(db, std::slice::from_ref(turn), conv_updated_at)
+}
+
+/// Append several turns in **one** transaction: either all of them land or
+/// none does.
+///
+/// Turns that only make sense together must be written together. A `ToolCall`
+/// persisted without its `ToolResult` is not a partial record, it is a corrupt
+/// one — reloading the conversation shows a call that never returned, and the
+/// planner's context gains a question with no answer. Writing them one at a
+/// time left exactly that gap open whenever the second insert failed.
+pub fn append_turns(db: &Db, turns: &[TurnRecord], conv_updated_at: i64) -> StorageResult<()> {
+    if turns.is_empty() {
+        return Ok(());
+    }
     let mut conn = db.get()?;
     let tx = conn.transaction()?;
-    tx.execute(
-        "INSERT INTO conversation_turns(conversation_id, seq, role, payload, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![
-            turn.conversation_id,
-            turn.seq,
-            turn.role,
-            turn.payload,
-            turn.created_at,
-        ],
-    )?;
-    tx.execute(
-        "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
-        rusqlite::params![conv_updated_at, turn.conversation_id],
-    )?;
+    for turn in turns {
+        tx.execute(
+            "INSERT INTO conversation_turns(conversation_id, seq, role, payload, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                turn.conversation_id,
+                turn.seq,
+                turn.role,
+                turn.payload,
+                turn.created_at,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![conv_updated_at, turn.conversation_id],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }

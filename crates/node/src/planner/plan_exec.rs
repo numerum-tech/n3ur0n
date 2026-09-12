@@ -468,6 +468,11 @@ impl PlanExecPlanner {
                 break;
             };
             rounds_used += 1;
+            // Stamp this round's rows with this round's clock. Reusing the
+            // dispatch's `started_at` dated round 2's work minutes before it
+            // happened, and disagreed with the in-memory turns, which are
+            // stamped when they are reconciled.
+            let round_started_at = OffsetDateTime::now_utc().unix_timestamp();
             debug!(round, depth, %reason, "compiling a continuation round");
 
             let msg = continuation_message(&planner_text, &run.blackboard_summary());
@@ -523,18 +528,29 @@ impl PlanExecPlanner {
 
             // One journal row per compiled plan, as the table documents.
             let round_run_id = format!("run_{}", uuid::Uuid::new_v4().simple());
-            if let Ok(plan_json) = serde_json::to_string(&next) {
-                let _ = n3ur0n_storage::plan_runs::insert(
+            let journalled = serde_json::to_string(&next).ok().and_then(|plan_json| {
+                n3ur0n_storage::plan_runs::insert(
                     node.db(),
                     &n3ur0n_storage::plan_runs::PlanRunRecord {
                         id: round_run_id.clone(),
                         conversation_id: state.id.clone(),
                         plan_json,
                         status: "running".into(),
-                        created_at: OffsetDateTime::now_utc().unix_timestamp(),
+                        created_at: round_started_at,
                         finished_at: None,
                     },
+                )
+                .ok()
+            });
+            if journalled.is_none() {
+                // Round 1 refuses to execute an unjournalled plan; round 2 used
+                // to execute one silently, so a crash could leave work with no
+                // trace of the plan that caused it.
+                warn!(
+                    round,
+                    "could not journal the continuation plan; not executing it"
                 );
+                break;
             }
 
             // Tool turns of this round continue where the previous one stopped.
@@ -558,7 +574,7 @@ impl PlanExecPlanner {
                     &entry.args,
                     &entry.result,
                     &entry.error,
-                    started_at,
+                    round_started_at,
                 ) {
                     warn!(error = %e, step = idx, round, "failed to persist continuation tool turn");
                 }

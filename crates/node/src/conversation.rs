@@ -541,20 +541,21 @@ pub fn persist_tool_pair_at(
         error: error.clone(),
         ts: updated_at,
     };
+    // One transaction for the pair. A call written without its result is a
+    // corrupt record, not a partial one: the reloaded conversation shows an
+    // invocation that never returned, and the planner's context gains a
+    // question with no answer.
+    let mut records = Vec::with_capacity(2);
     for (seq, turn) in [(call_seq, call), (result_seq, res)] {
-        let payload = serde_json::to_string(&turn)?;
-        conversations::append_turn(
-            db,
-            &TurnRecord {
-                conversation_id: conversation_id.to_string(),
-                seq,
-                role: turn.role_label().to_string(),
-                payload,
-                created_at: updated_at,
-            },
-            updated_at,
-        )?;
+        records.push(TurnRecord {
+            conversation_id: conversation_id.to_string(),
+            seq,
+            role: turn.role_label().to_string(),
+            payload: serde_json::to_string(&turn)?,
+            created_at: updated_at,
+        });
     }
+    conversations::append_turns(db, &records, updated_at)?;
     Ok(())
 }
 
@@ -673,5 +674,92 @@ mod tests {
         // Short part = 12 chars max.
         let prefix = name.split("::").next().unwrap();
         assert!(prefix.len() <= 12);
+    }
+
+    /// The pair is written in one transaction, so a collision on the result's
+    /// seq must roll the call back too. Before this, the call landed and the
+    /// result did not: the reloaded conversation showed an invocation that
+    /// never returned, and the planner's context gained a question with no
+    /// answer.
+    #[test]
+    fn a_tool_pair_that_cannot_complete_writes_nothing() {
+        let db = open_in_memory().unwrap();
+        let mut state = create(&db, "alice", None).unwrap();
+        state.push_user("go");
+        persist_last(&db, &state).unwrap();
+
+        let base_seq = state.next_seq() - 1;
+        let result_seq = base_seq + 2; // what plan_index 0's result would claim
+
+        // Squat the result's slot so the second insert of the pair must fail.
+        n3ur0n_storage::conversations::append_turn(
+            &db,
+            &TurnRecord {
+                conversation_id: state.id.clone(),
+                seq: result_seq,
+                role: "system".into(),
+                payload: "{}".into(),
+                created_at: 0,
+            },
+            0,
+        )
+        .unwrap();
+
+        let before = n3ur0n_storage::conversations::load_turns(&db, &state.id)
+            .unwrap()
+            .len();
+
+        let err = persist_tool_pair_at(
+            &db,
+            &state.id,
+            base_seq,
+            0,
+            "call-1",
+            &id(),
+            "reverse",
+            &json!({"text": "abc"}),
+            &Some(json!({"reversed": "cba"})),
+            &None,
+            0,
+        );
+        assert!(err.is_err(), "the collision must surface, not be swallowed");
+
+        let after = n3ur0n_storage::conversations::load_turns(&db, &state.id).unwrap();
+        assert_eq!(
+            after.len(),
+            before,
+            "a failed pair must leave no half-written call behind"
+        );
+        assert!(
+            !after.iter().any(|t| t.role == "tool_call"),
+            "the call was rolled back with its result"
+        );
+    }
+
+    #[test]
+    fn a_tool_pair_that_completes_writes_both_turns() {
+        let db = open_in_memory().unwrap();
+        let mut state = create(&db, "alice", None).unwrap();
+        state.push_user("go");
+        persist_last(&db, &state).unwrap();
+
+        persist_tool_pair_at(
+            &db,
+            &state.id,
+            state.next_seq() - 1,
+            0,
+            "call-1",
+            &id(),
+            "reverse",
+            &json!({"text": "abc"}),
+            &Some(json!({"reversed": "cba"})),
+            &None,
+            0,
+        )
+        .unwrap();
+
+        let turns = n3ur0n_storage::conversations::load_turns(&db, &state.id).unwrap();
+        assert_eq!(turns.iter().filter(|t| t.role == "tool_call").count(), 1);
+        assert_eq!(turns.iter().filter(|t| t.role == "tool_result").count(), 1);
     }
 }
