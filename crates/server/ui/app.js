@@ -1157,13 +1157,14 @@ function mentionCandidates(frag) {
             // alias, else the endpoint host. Both are strings the peer asserts
             // about itself, which is fine for a label — the id stays visible
             // underneath and remains the only thing that routes.
-            const host = hostOf(p.endpoint);
-            const readable = p.alias || host;
+            const readable = p.alias || hostOf(p.endpoint);
             out.push({
                 kind: "peer",
                 token: `@peer:${quoteMentionValue(short)}`,
                 label: readable || short,
-                sub: readable ? short : (p.endpoint || ""),
+                // The token carries the id, which is unreadable; the name a
+                // human recognises belongs beside it, not instead of it.
+                sub: readable || p.endpoint || "",
             });
         }
     }
@@ -1212,28 +1213,19 @@ function renderMentionPopover() {
         cap: t("mention.section.caps"),
         lobe: t("mention.section.lobes"),
     };
-    // Show the prefix each section writes. It is the only place the syntax is
-    // taught: a user who has only ever picked from the list otherwise never
-    // learns that typing `@cap:` filters straight to skills. Read off the
-    // token rather than the kind, so the `@peer:<id>/` descent — whose entries
-    // are capabilities but whose prefix is `@peer:` — announces what it builds.
-    const tokenPrefix = (token) => {
-        const i = token.indexOf(":");
-        return i < 0 ? token : token.slice(0, i + 1);
-    };
+    // Entries show the whole token they insert, not a friendly name: that is
+    // what teaches the syntax. Seeing `@cap:random_int` tells the user they can
+    // type `@cap:` to filter, and — more useful — how to write a name the list
+    // does not contain. The human-readable side moves to the sub-label.
     let html = "";
-    let lastSection = null;
+    let lastKind = null;
     items.forEach((it, i) => {
-        const section = `${it.kind}|${tokenPrefix(it.token)}`;
-        if (section !== lastSection) {
-            html += `<div class="mention-section">
-                <span>${escapeHtml(sectionLabel[it.kind] || it.kind)}</span>
-                <code class="mention-section-prefix">${escapeHtml(tokenPrefix(it.token))}</code>
-            </div>`;
-            lastSection = section;
+        if (it.kind !== lastKind) {
+            html += `<div class="mention-section">${escapeHtml(sectionLabel[it.kind] || it.kind)}</div>`;
+            lastKind = it.kind;
         }
         html += `<button type="button" class="mention-item${i === active ? " active" : ""}" role="option" data-idx="${i}">
-            <span class="mention-item-label">${escapeHtml(it.label)}</span>
+            <span class="mention-item-label">${escapeHtml(it.token)}</span>
             <span class="mention-item-sub">${escapeHtml(it.sub || "")}</span>
         </button>`;
     });

@@ -1667,21 +1667,11 @@ button.secondary:hover,
 }
 .mention-popover.hidden { display: none; }
 .mention-section {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
     padding: 6px 10px 2px;
     font-size: var(--fs-xs);
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--muted);
-}
-/* The token this section writes — how the syntax gets learned. */
-.mention-section-prefix {
-    text-transform: none;
-    letter-spacing: 0;
-    color: var(--accent);
-    opacity: 0.75;
 }
 .mention-item {
     display: flex;
@@ -1705,6 +1695,7 @@ button.secondary:hover,
 }
 .mention-item-label {
     flex: 0 1 auto;
+    color: var(--accent);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
