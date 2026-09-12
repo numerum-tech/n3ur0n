@@ -1723,11 +1723,6 @@ button.secondary:hover,
     line-height: 1.4;
     white-space: nowrap;
 }
-.mention-chip::before {
-    content: "@";
-    opacity: 0.55;
-    font-weight: 600;
-}
 .mention-chip-file {
     border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
     color: var(--accent);
@@ -1735,6 +1730,10 @@ button.secondary:hover,
 .mention-chip-peer {
     border-color: color-mix(in srgb, var(--warn) 35%, var(--border));
     color: var(--warn);
+}
+.mention-chip-cap {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    color: var(--accent);
 }
 .mention-chip-lobe {
     border-style: dashed;

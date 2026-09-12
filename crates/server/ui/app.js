@@ -609,7 +609,7 @@ function toggleStepDetails(wrap, call, result, chipEl) {
 /// the user sees badged is exactly what the planner scoped on. Anything that
 /// does not parse stays plain text, which is the point — an unresolved `@foo`
 /// must not look like it did something.
-const MENTION_RE = /(^|\s)@(file|peer|lobe):("[^"]*"|[^\s]+)/g;
+const MENTION_RE = /(^|\s)@(file|peer|cap|lobe):("[^"]*"|[^\s]+)/g;
 
 function renderTextWithMentions(text) {
     const frag = document.createDocumentFragment();
@@ -626,7 +626,12 @@ function renderTextWithMentions(text) {
         if (start > last) frag.appendChild(document.createTextNode(text.slice(last, start)));
         const chip = document.createElement("span");
         chip.className = `mention-chip mention-chip-${m[2]}`;
-        chip.textContent = raw.startsWith('"') ? raw.slice(1, -1) : raw;
+        // Show the whole token, prefix included. A chip reading just the value
+        // hides which namespace was addressed — `@peer:ivyrzhjrvx25` and
+        // `@cap:chat` are different claims and have to look different. Quotes
+        // are dropped for reading; the tooltip keeps the exact text.
+        const value = raw.startsWith('"') ? raw.slice(1, -1) : raw;
+        chip.textContent = `@${m[2]}:${value}`;
         chip.title = full;
         chip.dataset.kind = m[2];
         frag.appendChild(chip);
