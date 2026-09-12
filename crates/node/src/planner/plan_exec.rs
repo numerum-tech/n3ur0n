@@ -445,11 +445,12 @@ impl PlanExecPlanner {
                 PlanOutcome::Valid(p) => p,
             };
 
-            if plan_signature(&next) == plan_signature(&plan) {
+            if adds_nothing(&next, &run.trace, &catalog) {
                 warn!(
                     round,
-                    "continuation re-proposed the same plan; stopping rather than \
-                     making the user wait twice for the same outcome"
+                    "continuation only re-proposed capabilities that already ran; \
+                     stopping rather than duplicating work and polluting the \
+                     blackboard the reply is composed from"
                 );
                 break;
             }
@@ -814,25 +815,53 @@ pub async fn resolve_plan(
 /// as an accidental safety net, and a retry framed as "fix it" defeats
 /// that net. Reconsidering therefore comes first and correcting second,
 /// so the model is not anchored on producing a plan at any cost.
-/// Signature of a plan for "did the continuation actually propose anything new?".
+/// Capabilities a plan intends to call, as `peer::capability`.
 ///
-/// A continuation that re-emits the same steps has nothing to add: executing it
-/// costs the user a second wait for an identical outcome. Measured against an
-/// unreachable peer, the model did exactly that — it read the failure in the
-/// blackboard as "no value yet" and tried again. The prompt asks it not to;
-/// this makes it impossible rather than discouraged.
-fn plan_signature(plan: &Plan) -> BTreeSet<String> {
+/// Deliberately coarser than the arguments: a continuation's args are literals
+/// copied out of the blackboard, while the first plan's were `${refs}` resolved
+/// at execution, so comparing them never matches even when the work is
+/// identical.
+fn plan_targets(plan: &Plan) -> BTreeSet<String> {
     plan.plan
         .iter()
-        .map(|s| {
-            format!(
-                "{}::{}::{}",
-                s.peer,
-                s.capability,
-                serde_json::to_string(&s.args).unwrap_or_default()
-            )
+        .map(|s| format!("{}::{}", s.peer, s.capability))
+        .collect()
+}
+
+/// Capabilities already executed in this dispatch, in the same spelling.
+fn executed_targets(trace: &[TraceEntry], catalog: &Catalog) -> BTreeSet<String> {
+    trace
+        .iter()
+        .map(|e| {
+            // The trace carries full peer ids; plans carry the short form the
+            // catalogue advertises. Translate so both sides compare.
+            let short = catalog
+                .tools
+                .iter()
+                .find(|t| t.peer_id == e.peer_id)
+                .map(|t| catalog.tool_name(t))
+                .and_then(|full| full.split_once("::").map(|(p, _)| p.to_string()))
+                .unwrap_or_else(|| e.peer_id.clone());
+            format!("{}::{}", short, e.capability)
         })
         .collect()
+}
+
+/// True when a continuation would only redo work that already ran.
+///
+/// The first guard compared whole plans for equality and let a *subset*
+/// through: measured on a three-step chain, the continuation re-emitted the
+/// last two steps, so `reverse` and `string_length` ran twice and the reflect
+/// step composed its reply from a blackboard holding each result twice.
+///
+/// The trade-off is deliberate. This also blocks a legitimate second use of the
+/// same capability on new data — summarise document A, then document B — which
+/// is a real loss. It is accepted because the failure it prevents was measured
+/// and the one it causes is hypothetical, and because with `MAX_PLAN_ROUNDS = 2`
+/// the blast radius either way is a single round.
+fn adds_nothing(next: &Plan, trace: &[TraceEntry], catalog: &Catalog) -> bool {
+    let already = executed_targets(trace, catalog);
+    !already.is_empty() && plan_targets(next).is_subset(&already)
 }
 
 /// Why a dispatch should plan another round, or `None` to stop.
@@ -872,6 +901,8 @@ fn continuation_message(user_msg: &str, blackboard: &str) -> String {
          A step that reports an error has already been attempted and will fail \
          the same way again: do not retry it. Either plan a different route to \
          the same goal, or stop. \
+         Every capability listed above has already run; calling it again \
+         recomputes a value you already have. \
          If the results are enough to answer the user, return {{\"plan\": []}} — \
          that is the normal ending, not a failure."
     )
@@ -1531,52 +1562,88 @@ mod tests {
         );
     }
 
-    fn one_step_plan(cap: &str, args: Value) -> Plan {
-        Plan {
-            plan: vec![crate::planner::plan::PlanStep {
-                id: "s1".into(),
-                peer: "p1".into(),
-                capability: cap.into(),
-                args,
-                depends_on: vec![],
+    fn ran(cap: &str) -> TraceEntry {
+        TraceEntry {
+            peer_id: "n3:p1".into(),
+            ..trace_entry(cap, json!({}))
+        }
+    }
+
+    /// Plans carry the short peer form, the trace carries full ids; without a
+    /// catalogue to translate, nothing would ever match.
+    fn catalog_with(peer_id: &str) -> Catalog {
+        Catalog {
+            tools: vec![ToolDef {
+                peer_id: peer_id.into(),
+                peer_endpoint: None,
+                cap: n3ur0n_core::capability::CapabilityDecl {
+                    name: "any".into(),
+                    description: String::new(),
+                    schema_in: json!({}),
+                    schema_out: json!({}),
+                    mode: n3ur0n_core::capability::AccessMode::Free,
+                    pricing: None,
+                    tags: vec![],
+                    lobe_ids: vec![],
+                    examples: vec![],
+                    disambiguation: None,
+                    negative_examples: vec![],
+                    output_semantic: None,
+                    version: "0.0.0".into(),
+                    languages: vec![],
+                    countries: vec![],
+                },
             }],
         }
     }
 
     #[test]
-    fn an_identical_continuation_is_recognised() {
-        let a = one_step_plan("fetch_url", json!({"url": "https://example.com"}));
-        let b = one_step_plan("fetch_url", json!({"url": "https://example.com"}));
-        assert_eq!(plan_signature(&a), plan_signature(&b));
-    }
-
-    #[test]
-    fn a_different_route_is_not_a_repeat() {
-        let a = one_step_plan("fetch_url", json!({"url": "https://example.com"}));
-        // Same goal, different capability.
-        let b = one_step_plan("web_search", json!({"url": "https://example.com"}));
-        assert_ne!(plan_signature(&a), plan_signature(&b));
-        // Same capability, different arguments.
-        let c = one_step_plan("fetch_url", json!({"url": "https://example.org"}));
-        assert_ne!(plan_signature(&a), plan_signature(&c));
-    }
-
-    #[test]
-    fn step_order_does_not_change_a_signature() {
-        let a = Plan {
-            plan: vec![
-                one_step_plan("x", json!({})).plan.remove(0),
-                crate::planner::plan::PlanStep {
-                    id: "s2".into(),
-                    peer: "p1".into(),
-                    capability: "y".into(),
-                    args: json!({}),
-                    depends_on: vec![],
-                },
-            ],
+    fn a_continuation_repeating_every_step_adds_nothing() {
+        let cat = catalog_with("n3:p1");
+        let short = catalog_targets_peer(&cat);
+        let next = Plan {
+            plan: vec![step_on(&short, "reverse"), step_on(&short, "string_length")],
         };
-        let mut reordered = a.clone();
-        reordered.plan.reverse();
-        assert_eq!(plan_signature(&a), plan_signature(&reordered));
+        let trace = vec![ran("time"), ran("reverse"), ran("string_length")];
+        // The observed failure: a strict subset of what already ran.
+        assert!(adds_nothing(&next, &trace, &cat));
+    }
+
+    #[test]
+    fn a_continuation_with_one_new_capability_runs() {
+        let cat = catalog_with("n3:p1");
+        let short = catalog_targets_peer(&cat);
+        let next = Plan {
+            plan: vec![step_on(&short, "reverse"), step_on(&short, "translate")],
+        };
+        let trace = vec![ran("reverse")];
+        assert!(!adds_nothing(&next, &trace, &cat));
+    }
+
+    #[test]
+    fn nothing_executed_yet_never_blocks() {
+        let cat = catalog_with("n3:p1");
+        let short = catalog_targets_peer(&cat);
+        let next = Plan {
+            plan: vec![step_on(&short, "reverse")],
+        };
+        assert!(!adds_nothing(&next, &[], &cat));
+    }
+
+    fn catalog_targets_peer(cat: &Catalog) -> String {
+        cat.tool_name(&cat.tools[0])
+            .split_once("::")
+            .map(|(p, _)| p.to_string())
+            .unwrap()
+    }
+
+    fn step_on(peer: &str, cap: &str) -> crate::planner::plan::PlanStep {
+        crate::planner::plan::PlanStep {
+            id: format!("s_{cap}"),
+            peer: peer.into(),
+            capability: cap.into(),
+            args: json!({}),
+            depends_on: vec![],
+        }
     }
 }

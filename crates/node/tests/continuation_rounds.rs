@@ -250,11 +250,21 @@ async fn a_deep_plan_triggers_a_second_round() {
     let depth = n3ur0n_node::planner::plan::plan_depth(&first);
 
     println!(
-        "first-plan depth: {depth} · compile rounds: {} · steps: {} · reply: {}",
-        outcome.rounds,
-        outcome.trace.len(),
-        outcome.reply
+        "first-plan depth: {depth} · compile rounds: {}",
+        outcome.rounds
     );
+    for e in &outcome.trace {
+        println!(
+            "  [{}] args={} -> result={}",
+            e.capability,
+            e.args,
+            e.result
+                .as_ref()
+                .map(std::string::ToString::to_string)
+                .unwrap_or_else(|| format!("ERR {:?}", e.error))
+        );
+    }
+    println!("  reply: {}", outcome.reply);
 
     if depth >= 3 {
         assert_eq!(
