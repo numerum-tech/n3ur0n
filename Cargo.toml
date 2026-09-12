@@ -111,4 +111,19 @@ panic = "abort"
 
 [profile.dev]
 opt-level = 0
+debug = "line-tables-only"   # symboles complets → seulement les tables de lignes (gros gain, backtraces conservées)
+incremental = false          # supprime entièrement le cache incremental/ (~14 GB observés)
+
+# Les dépendances ne sont jamais debuggées pas-à-pas : aucune debuginfo pour elles.
+# C'est le poste le plus lourd de target/debug/deps (rlib + binaires de test statiques).
+[profile.dev.package."*"]
+debug = false
+
+# Build scripts et proc-macros : idem, jamais debuggés.
+[profile.dev.build-override]
+debug = false
+
+[profile.debugging]          # opt-in : cargo build --profile debugging
+inherits = "dev"
 debug = true
+incremental = true

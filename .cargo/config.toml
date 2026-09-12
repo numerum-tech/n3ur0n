@@ -1,0 +1,8 @@
+# Cargo local config — hygiène du cache de compilation.
+# Voir aussi [profile.dev*] dans Cargo.toml (debuginfo + incremental).
+
+[cache]
+# GC automatique du cache global ~/.cargo (registry téléchargé, sources dépaquetées).
+# C'est le défaut de Cargo depuis 1.88 ; explicité ici pour ne pas dépendre
+# d'une config utilisateur globale qui le désactiverait.
+auto-clean-frequency = "1 day"
