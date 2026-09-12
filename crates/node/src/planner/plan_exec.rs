@@ -233,21 +233,37 @@ impl PlanExecPlanner {
         // 2b. Explicit `@` mentions narrow the catalogue before ranking: when
         //     the user already said where to go, there is nothing to rank.
         let scope = MentionScope::from_text(&input.text);
+        let mut resolved_scope = ResolvedScope::default();
         let catalog = if scope.is_empty() {
             catalog
         } else {
-            let peer_ids = resolve_mentioned_peers(node, &scope.peers);
-            let before = catalog.tools.len();
-            let catalog = catalog.scoped_to(&peer_ids, &scope.lobes, &scope.capabilities);
-            debug!(
-                peers = ?scope.peers,
-                lobes = ?scope.lobes,
-                capabilities = ?scope.capabilities,
-                tools_before = before,
-                tools_after = catalog.tools.len(),
-                "catalogue scoped by explicit mentions"
-            );
-            catalog
+            resolved_scope = resolve_scope(node, &catalog, &scope);
+            if resolved_scope.narrows() {
+                let before = catalog.tools.len();
+                let scoped = catalog.scoped_to(
+                    &resolved_scope.peer_ids,
+                    &resolved_scope.lobes,
+                    &resolved_scope.capabilities,
+                );
+                debug!(
+                    peers = ?resolved_scope.peer_ids,
+                    lobes = ?resolved_scope.lobes,
+                    capabilities = ?resolved_scope.capabilities,
+                    unresolved = ?resolved_scope.unresolved,
+                    tools_before = before,
+                    tools_after = scoped.tools.len(),
+                    "catalogue scoped by explicit mentions"
+                );
+                scoped
+            } else {
+                // Nothing resolved: the catalogue is left whole rather than
+                // emptied, and the reply will say what could not be found.
+                debug!(
+                    unresolved = ?resolved_scope.unresolved,
+                    "every mention was unresolved; catalogue left unscoped"
+                );
+                catalog
+            }
         };
 
         let scores = self.retriever.score(&catalog.tools, &planner_text).await;
@@ -290,6 +306,7 @@ impl PlanExecPlanner {
                         &planner_text,
                         None,
                         None,
+                        &resolved_scope.unresolved,
                         Vec::new(),
                         1,
                         events,
@@ -311,6 +328,7 @@ impl PlanExecPlanner {
                         &planner_text,
                         None,
                         None,
+                        &resolved_scope.unresolved,
                         Vec::new(),
                         1,
                         events,
@@ -653,6 +671,7 @@ impl PlanExecPlanner {
                 &planner_text,
                 Some(&run.blackboard_summary()),
                 Some(&run.blackboard),
+                &resolved_scope.unresolved,
                 run.trace,
                 rounds_used,
                 events,
@@ -681,6 +700,7 @@ impl PlanExecPlanner {
         user_message: &str,
         blackboard_summary: Option<&str>,
         blackboard: Option<&HashMap<String, Value>>,
+        unresolved: &[String],
         trace: Vec<TraceEntry>,
         rounds: usize,
         events: Option<&EventSender>,
@@ -707,6 +727,21 @@ impl PlanExecPlanner {
             messages.push(json!({
                 "role": "system",
                 "content": format!("Blackboard from this dispatch:\n{summary}{quoting}")
+            }));
+        }
+        // A mention that matched nothing is the user's own words coming back
+        // unanswered. Saying so is the whole point of not having silently
+        // ignored it or emptied the catalogue over it.
+        if !unresolved.is_empty() {
+            messages.push(json!({
+                "role": "system",
+                "content": format!(
+                    "These mentions in the user's message matched nothing known to this \
+                     node: {}. Say so plainly, in their language, before answering with \
+                     whatever you could do. Do not pretend they exist, and do not \
+                     silently substitute something else for them.",
+                    unresolved.join(", ")
+                )
             }));
         }
         // A message made only of mentions scopes the catalogue without asking
@@ -1312,48 +1347,87 @@ fn extract_first_json_object(s: &str) -> Option<String> {
     None
 }
 
-/// Resolve mentioned peer entities to canonical `n3:` ids.
+/// What an `@` mention could be matched to, and what it could not.
 ///
-/// Accepted spellings are the full `n3:` id and the short form the UI shows
-/// (the id without its prefix, truncated). Self-declared aliases are
-/// deliberately **not** accepted: an alias is a vanity string a peer asserts
-/// about itself, so routing on it would let the first squatter of a name
-/// capture everyone's mentions. Local petnames will be the answer; until they
-/// exist, only the self-verifying id routes.
+/// A mention states an intention; it does not assert the thing exists. So an
+/// entity that matches nothing must neither narrow the catalogue to nothing nor
+/// vanish in silence — the first refuses to help over a typo, the second lets
+/// the user believe they scoped something when they did not. Both decide on
+/// their behalf without telling them.
 ///
-/// An entity that resolves to nothing is dropped rather than emptying the
-/// catalogue — a mention that cannot be resolved is not a mention.
-fn resolve_mentioned_peers(node: &Node, entities: &[String]) -> Vec<String> {
-    if entities.is_empty() {
-        return Vec::new();
+/// Only what resolved narrows the catalogue. What did not is carried to the
+/// reply, so the answer can say plainly that there is no such peer, lobe or
+/// capability. The unresolved name still reaches retrieval through the message
+/// text, which is where it belongs: a hint, not a filter.
+#[derive(Debug, Default)]
+struct ResolvedScope {
+    peer_ids: Vec<String>,
+    lobes: Vec<String>,
+    capabilities: Vec<String>,
+    /// Mentions that matched nothing, rendered as the user wrote them.
+    unresolved: Vec<String>,
+}
+
+impl ResolvedScope {
+    fn narrows(&self) -> bool {
+        !self.peer_ids.is_empty() || !self.lobes.is_empty() || !self.capabilities.is_empty()
     }
-    let known = match n3ur0n_storage::peers::list(node.db(), 500) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!(error = %e, "peer directory unavailable; ignoring peer mentions");
-            return Vec::new();
+}
+
+/// Match a parsed scope against the peer directory and the catalogue.
+///
+/// Peers resolve by canonical `n3:` id or by the short form the UI shows —
+/// never by self-declared alias, which is a claim a peer makes about itself and
+/// would hand every mention of a name to its first squatter.
+fn resolve_scope(node: &Node, catalog: &Catalog, scope: &MentionScope) -> ResolvedScope {
+    let mut out = ResolvedScope::default();
+
+    if !scope.peers.is_empty() {
+        let known = n3ur0n_storage::peers::list(node.db(), 500).unwrap_or_else(|e| {
+            warn!(error = %e, "peer directory unavailable; peer mentions cannot resolve");
+            Vec::new()
+        });
+        let self_id = node.instance_id().to_string();
+        for entity in &scope.peers {
+            let hit = known
+                .iter()
+                .map(|p| p.id.clone())
+                .chain(std::iter::once(self_id.clone()))
+                .find(|id| {
+                    id == entity
+                        || id.strip_prefix("n3:").is_some_and(|short| {
+                            entity.len() >= 8 && short.starts_with(entity.as_str())
+                        })
+                });
+            match hit {
+                Some(id) if !out.peer_ids.contains(&id) => out.peer_ids.push(id),
+                Some(_) => {}
+                None => out.unresolved.push(format!("@peer:{entity}")),
+            }
         }
-    };
-    let self_id = node.instance_id().to_string();
-    let mut ids: Vec<String> = Vec::new();
-    for entity in entities {
-        let candidate = known
+    }
+
+    for lobe in &scope.lobes {
+        if catalog
+            .tools
             .iter()
-            .map(|p| p.id.clone())
-            .chain(std::iter::once(self_id.clone()))
-            .find(|id| {
-                id == entity
-                    || id
-                        .strip_prefix("n3:")
-                        .is_some_and(|s| s.starts_with(entity.as_str()) && entity.len() >= 8)
-            });
-        match candidate {
-            Some(id) if !ids.contains(&id) => ids.push(id),
-            Some(_) => {}
-            None => debug!(entity = %entity, "unknown peer mention; left as literal text"),
+            .any(|t| t.cap.lobe_ids.iter().any(|l| l == lobe))
+        {
+            out.lobes.push(lobe.clone());
+        } else {
+            out.unresolved.push(format!("@lobe:{lobe}"));
         }
     }
-    ids
+
+    for cap in &scope.capabilities {
+        if catalog.tools.iter().any(|t| &t.cap.name == cap) {
+            out.capabilities.push(cap.clone());
+        } else {
+            out.unresolved.push(format!("@cap:{cap}"));
+        }
+    }
+
+    out
 }
 
 #[cfg(test)]
@@ -1978,5 +2052,86 @@ mod tests {
         let rendered = referenceable_values(&merged);
         assert!(rendered.contains("${s1.now}"), "{rendered}");
         assert!(rendered.contains("${s1_r2.now}"), "{rendered}");
+    }
+
+    fn scope_catalog() -> Catalog {
+        let mut summarize = tool_def("n3:p1", "summarize");
+        summarize.cap.lobe_ids = vec!["medical".into()];
+        Catalog {
+            tools: vec![summarize, tool_def("n3:p2", "translate")],
+        }
+    }
+
+    fn node_for_scope() -> Node {
+        Node::new(
+            n3ur0n_core::Keypair::generate(),
+            n3ur0n_storage::open_in_memory().unwrap(),
+            std::sync::Arc::new(n3ur0n_adapters::echo::EchoBackend),
+            crate::registry::CapabilityRegistry::from_decls(vec![]),
+            crate::node::NodeConfig::default(),
+        )
+    }
+
+    #[test]
+    fn a_known_capability_narrows_the_catalogue() {
+        let node = node_for_scope();
+        let cat = scope_catalog();
+        let r = resolve_scope(&node, &cat, &MentionScope::from_text("@cap:summarize"));
+        assert_eq!(r.capabilities, vec!["summarize"]);
+        assert!(r.unresolved.is_empty());
+        assert!(r.narrows());
+    }
+
+    /// The correction that matters: naming a capability is not claiming it
+    /// exists. An unknown one must not empty the catalogue, and must not be
+    /// swallowed either — the user has to learn it was not found.
+    #[test]
+    fn an_unknown_capability_neither_narrows_nor_disappears() {
+        let node = node_for_scope();
+        let cat = scope_catalog();
+        let r = resolve_scope(&node, &cat, &MentionScope::from_text("@cap:transcribe"));
+        assert!(r.capabilities.is_empty());
+        assert!(
+            !r.narrows(),
+            "an unknown name must not scope the catalogue to nothing"
+        );
+        assert_eq!(r.unresolved, vec!["@cap:transcribe"]);
+    }
+
+    #[test]
+    fn an_unknown_lobe_is_reported_instead_of_emptying_the_catalogue() {
+        let node = node_for_scope();
+        let cat = scope_catalog();
+        let r = resolve_scope(&node, &cat, &MentionScope::from_text("@lobe:finance"));
+        assert!(!r.narrows());
+        assert_eq!(r.unresolved, vec!["@lobe:finance"]);
+
+        // A lobe something actually carries still scopes.
+        let known = resolve_scope(&node, &cat, &MentionScope::from_text("@lobe:medical"));
+        assert_eq!(known.lobes, vec!["medical"]);
+        assert!(known.unresolved.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_peer_is_reported_instead_of_being_dropped() {
+        let node = node_for_scope();
+        let cat = scope_catalog();
+        let r = resolve_scope(&node, &cat, &MentionScope::from_text("@peer:nosuchpeer00"));
+        assert!(r.peer_ids.is_empty());
+        assert_eq!(r.unresolved, vec!["@peer:nosuchpeer00"]);
+    }
+
+    #[test]
+    fn what_resolves_still_narrows_beside_what_does_not() {
+        let node = node_for_scope();
+        let cat = scope_catalog();
+        let r = resolve_scope(
+            &node,
+            &cat,
+            &MentionScope::from_text("@cap:summarize @cap:transcribe"),
+        );
+        assert_eq!(r.capabilities, vec!["summarize"]);
+        assert_eq!(r.unresolved, vec!["@cap:transcribe"]);
+        assert!(r.narrows(), "one bad name must not cancel a good one");
     }
 }

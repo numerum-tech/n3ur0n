@@ -280,5 +280,7 @@
   "mention.section.lobes": "Lobes",
   "mention.empty": "Nothing to mention yet",
   "mention.lobe.caps": "{count} skills",
-  "stepper.round": "round {round}"
+  "stepper.round": "round {round}",
+  "mention.section.caps": "Skills",
+  "mention.cap.providers": "on {count} peer(s)"
 }

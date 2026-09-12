@@ -280,5 +280,7 @@
   "mention.section.lobes": "Lobes",
   "mention.empty": "Rien à mentionner pour l'instant",
   "mention.lobe.caps": "{count} compétences",
-  "stepper.round": "tour {round}"
+  "stepper.round": "tour {round}",
+  "mention.section.caps": "Compétences",
+  "mention.cap.providers": "sur {count} peer(s)"
 }

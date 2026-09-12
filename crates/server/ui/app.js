@@ -1082,16 +1082,56 @@ function quoteMentionValue(value) {
         : value;
 }
 
+/// Every capability the node knows about, local ones and peers' alike, as
+/// `{name, peers: [{short, label}]}`. The Skills panel builds the same union;
+/// this is the picker's view of it.
+function knownCaps() {
+    const byName = new Map();
+    for (const p of _peersCache.peers) {
+        for (const c of (p.capabilities || [])) {
+            if (!c.name) continue;
+            if (!byName.has(c.name)) byName.set(c.name, { name: c.name, peers: [] });
+            byName.get(c.name).peers.push({
+                short: shortId(p.instance_id),
+                label: p.alias || hostOf(p.endpoint) || shortId(p.instance_id),
+                description: c.description || "",
+            });
+        }
+    }
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function mentionCandidates(frag) {
     const lower = frag.toLowerCase().replace(/"/g, "");
     const [maybeKind, ...restParts] = lower.split(":");
-    const kinds = ["file", "peer", "lobe"];
+    const kinds = ["file", "peer", "lobe", "cap"];
     const scoped = kinds.includes(maybeKind);
     const kind = scoped ? maybeKind : null;
     const needle = scoped ? restParts.join(":") : lower;
 
     const out = [];
     const want = (k) => !kind || kind === k;
+
+    // `@peer:<id>/` descends into that peer's capabilities. Without this the
+    // list went empty the moment the slash was typed, and the capability name
+    // had to be guessed blind.
+    if (kind === "peer" && needle.includes("/")) {
+        const [peerPart, capPart] = needle.split("/");
+        for (const p of _peersCache.peers) {
+            const short = shortId(p.instance_id);
+            if (!`${p.alias || ""} ${p.instance_id}`.toLowerCase().includes(peerPart)) continue;
+            for (const c of (p.capabilities || [])) {
+                if (capPart && !c.name.toLowerCase().includes(capPart)) continue;
+                out.push({
+                    kind: "cap",
+                    token: `@peer:${quoteMentionValue(`${short}/${c.name}`)}`,
+                    label: c.name,
+                    sub: `${p.alias || hostOf(p.endpoint) || short} · ${c.description || ""}`.trim(),
+                });
+            }
+        }
+        return out.slice(0, 40);
+    }
 
     if (want("file")) {
         for (const f of _filesCache) {
@@ -1127,6 +1167,20 @@ function mentionCandidates(frag) {
             });
         }
     }
+    if (want("cap")) {
+        for (const c of knownCaps()) {
+            const hay = `${c.name} ${c.peers.map(p => p.description).join(" ")}`.toLowerCase();
+            if (needle && !hay.includes(needle)) continue;
+            out.push({
+                kind: "cap",
+                // No peer in the token: naming a capability says what you want,
+                // not where it runs — the planner picks among the providers.
+                token: `@cap:${quoteMentionValue(c.name)}`,
+                label: c.name,
+                sub: t("mention.cap.providers", { count: c.peers.length }),
+            });
+        }
+    }
     if (want("lobe")) {
         for (const [lobe, count] of knownLobes()) {
             if (needle && !lobe.toLowerCase().includes(needle)) continue;
@@ -1152,7 +1206,12 @@ function renderMentionPopover() {
         mentionPopover.innerHTML = `<div class="mention-empty">${escapeHtml(t("mention.empty"))}</div>`;
         return;
     }
-    const sectionLabel = { file: t("mention.section.files"), peer: t("mention.section.peers"), lobe: t("mention.section.lobes") };
+    const sectionLabel = {
+        file: t("mention.section.files"),
+        peer: t("mention.section.peers"),
+        cap: t("mention.section.caps"),
+        lobe: t("mention.section.lobes"),
+    };
     let html = "";
     let lastKind = null;
     items.forEach((it, i) => {

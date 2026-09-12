@@ -12,6 +12,7 @@
 //! @peer:alice/summarize          one capability on one instance
 //! @lobe:medical                  a lobe
 //! @lobe:medical/summarize        that capability, anywhere in the lobe
+//! @cap:summarize                 a capability by name, wherever it lives
 //! @file:"Cahier des Charges.pdf" a value containing spaces
 //! ```
 //!
@@ -24,6 +25,13 @@
 //!   guesswork;
 //! - the mention stays in the text handed to the planner. It carries meaning
 //!   ("… la météo à Lomé"); only the *scope* is decided ahead of time.
+//!
+//! A mention states an intention; it does not assert that the thing exists. The
+//! user names what they want, and it is the system's job to say whether it has
+//! it. So a mention that does not resolve must neither narrow the catalogue to
+//! nothing nor be dropped in silence — both decide on the user's behalf without
+//! telling them. Resolution therefore reports what it could not find, and the
+//! reply says so. See `plan_exec::resolve_scope`.
 
 use std::fmt;
 
@@ -36,6 +44,8 @@ pub enum MentionKind {
     Peer,
     /// A lobe.
     Lobe,
+    /// A capability by name, on no particular peer.
+    Cap,
 }
 
 impl MentionKind {
@@ -44,6 +54,7 @@ impl MentionKind {
             "file" => Some(Self::File),
             "peer" => Some(Self::Peer),
             "lobe" => Some(Self::Lobe),
+            "cap" => Some(Self::Cap),
             _ => None,
         }
     }
@@ -55,6 +66,7 @@ impl MentionKind {
             Self::File => "file",
             Self::Peer => "peer",
             Self::Lobe => "lobe",
+            Self::Cap => "cap",
         }
     }
 }
@@ -168,7 +180,9 @@ pub fn parse_mentions(text: &str) -> Vec<Mention> {
         // is part of the path, and for a canonical `@file:sha256:…` there is
         // no tail at all.
         let (entity, capability) = match kind {
-            MentionKind::File => (value.to_string(), None),
+            // A file path and a capability name are both flat: a `/` inside
+            // them is part of the value, not a descent.
+            MentionKind::File | MentionKind::Cap => (value.to_string(), None),
             MentionKind::Peer | MentionKind::Lobe => match value.split_once('/') {
                 Some((e, cap)) if !e.is_empty() && !cap.is_empty() => {
                     (e.to_string(), Some(cap.to_string()))
@@ -254,6 +268,7 @@ impl MentionScope {
                 MentionKind::File => push_unique(&mut scope.files, m.entity),
                 MentionKind::Peer => push_unique(&mut scope.peers, m.entity),
                 MentionKind::Lobe => push_unique(&mut scope.lobes, m.entity),
+                MentionKind::Cap => push_unique(&mut scope.capabilities, m.entity),
             }
             if let Some(cap) = m.capability {
                 push_unique(&mut scope.capabilities, cap);
@@ -446,5 +461,27 @@ mod tests {
         // No mention at all is not "scope only" — it is an ordinary message.
         assert!(!is_scope_only("bonjour"));
         assert!(!is_scope_only(""));
+    }
+
+    #[test]
+    fn a_capability_can_be_named_on_its_own() {
+        assert_eq!(
+            kinds("@cap:summarize ce texte"),
+            vec![(MentionKind::Cap, "summarize".into(), None)]
+        );
+        let s = MentionScope::from_text("@cap:summarize");
+        assert_eq!(s.capabilities, vec!["summarize"]);
+        assert!(s.peers.is_empty() && s.lobes.is_empty());
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn a_capability_name_is_flat() {
+        // No descent: a slash belongs to the name, which keeps the grammar
+        // unambiguous when a name ever contains one.
+        assert_eq!(
+            kinds("@cap:docs/list"),
+            vec![(MentionKind::Cap, "docs/list".into(), None)]
+        );
     }
 }
