@@ -59,12 +59,30 @@ const COMPILE_RETRY_LIMIT: usize = 1;
 /// exactly what it paid before. Only a dispatch that trips a trigger pays more.
 const MAX_PLAN_ROUNDS: usize = 2;
 
-/// Depth (longest chain of dependent steps) a single round may plan.
+/// Depth (longest chain of dependent steps) above which a plan is *suspected*
+/// of having been cut short, and a continuation is offered.
 ///
-/// Depth, not size: independent steps already run concurrently, so width costs
-/// nothing and is left unbounded. A plan that reaches this depth may have been
-/// cut short by it, which is one of the two continuation triggers.
-const MAX_DEPTH_PER_ROUND: usize = 3;
+/// Named as a threshold rather than a cap because it is one: nothing rejects a
+/// deeper plan. `validate_plan`, the grammar and the compile prompt are all
+/// silent about depth, so a plan of depth 8 is accepted and executed in full —
+/// it merely also earns a continuation round. The only enforced bound on plan
+/// size is `MAX_PLAN_STEPS`.
+const CONTINUATION_DEPTH_THRESHOLD: usize = 3;
+
+/// Tool invocations a whole dispatch may execute, across every round.
+///
+/// `MAX_PLAN_STEPS` bounds one plan; without this, two rounds of eight steps
+/// meant sixteen invocations, sixteen possible side effects and sixteen
+/// possible charges, with nothing naming that ceiling. Depth bounds neither.
+const MAX_TOTAL_STEPS: usize = 12;
+
+/// Wall-clock budget after which no further round starts.
+///
+/// Individual calls already time out (180 s per peer invoke, 120 s per LLM
+/// call), but nothing stopped those from accumulating across rounds and
+/// concurrency batches. This does not interrupt work in flight; it refuses to
+/// begin more.
+const DISPATCH_BUDGET_SECS: i64 = 300;
 
 #[derive(Clone)]
 pub struct PlanExecPlanner {
@@ -445,7 +463,8 @@ impl PlanExecPlanner {
         let mut rounds_used = 1usize;
         let mut depth = plan_depth(&plan);
         while round < MAX_PLAN_ROUNDS {
-            let Some(reason) = continuation_reason(&run.trace, depth) else {
+            let elapsed = OffsetDateTime::now_utc().unix_timestamp() - started_at;
+            let Some(reason) = continuation_reason(&run.trace, depth, elapsed) else {
                 break;
             };
             rounds_used += 1;
@@ -982,16 +1001,25 @@ fn adds_nothing(next: &Plan, trace: &[TraceEntry], catalog: &Catalog) -> bool {
 /// model whether it is finished — that self-assessment is what a small model is
 /// worst at, and its dominant failure (over-planning) would bias it towards
 /// answering "not yet" every time.
-fn continuation_reason(trace: &[TraceEntry], depth: usize) -> Option<&'static str> {
+fn continuation_reason(
+    trace: &[TraceEntry],
+    depth: usize,
+    elapsed_secs: i64,
+) -> Option<&'static str> {
+    // Budgets first: a reason to continue is worth nothing if there is no room
+    // left to do it in.
+    if trace.len() >= MAX_TOTAL_STEPS || elapsed_secs >= DISPATCH_BUDGET_SECS {
+        return None;
+    }
     if trace.iter().any(|e| e.error.is_some()) {
         // A failed step means the plan did not do what it set out to; there is
         // something left to attempt or to report.
         return Some("a step failed");
     }
-    if depth >= MAX_DEPTH_PER_ROUND {
-        // The plan is as deep as a round is allowed to be, so it may have been
-        // cut short by the bound rather than by having finished.
-        return Some("plan reached the per-round depth cap");
+    if depth >= CONTINUATION_DEPTH_THRESHOLD {
+        // Deep enough that the plan may have stopped short of the goal rather
+        // than at it.
+        return Some("plan is deep enough to suspect it stopped short");
     }
     None
 }
@@ -1649,28 +1677,57 @@ mod tests {
 
     #[test]
     fn a_clean_shallow_run_does_not_continue() {
-        assert!(continuation_reason(&[trace_entry("cap", json!({}))], 1).is_none());
-        assert!(continuation_reason(&[], 0).is_none());
+        assert!(continuation_reason(&[trace_entry("cap", json!({}))], 1, 0).is_none());
+        assert!(continuation_reason(&[], 0, 0).is_none());
     }
 
     #[test]
     fn a_failed_step_continues() {
         assert_eq!(
-            continuation_reason(&[trace_entry("cap", json!({})), failed_entry()], 1),
+            continuation_reason(&[trace_entry("cap", json!({})), failed_entry()], 1, 0),
             Some("a step failed")
         );
     }
 
     #[test]
-    fn hitting_the_depth_cap_continues() {
-        assert_eq!(
-            continuation_reason(&[trace_entry("cap", json!({}))], MAX_DEPTH_PER_ROUND),
-            Some("plan reached the per-round depth cap")
-        );
-        // One below the cap is a plan that stopped on its own.
+    fn a_deep_plan_continues() {
         assert!(
-            continuation_reason(&[trace_entry("cap", json!({}))], MAX_DEPTH_PER_ROUND - 1)
-                .is_none()
+            continuation_reason(
+                &[trace_entry("cap", json!({}))],
+                CONTINUATION_DEPTH_THRESHOLD,
+                0
+            )
+            .is_some()
+        );
+        // One below the threshold is a plan that stopped on its own.
+        assert!(
+            continuation_reason(
+                &[trace_entry("cap", json!({}))],
+                CONTINUATION_DEPTH_THRESHOLD - 1,
+                0
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn the_step_budget_outranks_every_reason_to_continue() {
+        let spent: Vec<TraceEntry> = (0..MAX_TOTAL_STEPS).map(|_| failed_entry()).collect();
+        assert!(
+            continuation_reason(&spent, CONTINUATION_DEPTH_THRESHOLD, 0).is_none(),
+            "a failed step and a deep plan must not buy a round there is no budget for"
+        );
+    }
+
+    #[test]
+    fn the_time_budget_outranks_every_reason_to_continue() {
+        assert!(
+            continuation_reason(
+                &[failed_entry()],
+                CONTINUATION_DEPTH_THRESHOLD,
+                DISPATCH_BUDGET_SECS
+            )
+            .is_none()
         );
     }
 

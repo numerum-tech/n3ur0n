@@ -100,6 +100,12 @@ fn load_cases() -> Vec<Case> {
 /// Set `PLANNER_EVAL_CATALOG=basic` to load only the utility caps, e.g.
 /// to reproduce a historical number.
 async fn build_catalog() -> Catalog {
+    build_catalog_with(std::env::var("PLANNER_EVAL_CATALOG").as_deref() == Ok("large")).await
+}
+
+/// `large` merges the adversarial corpus regardless of the environment, so a
+/// test that is meaningless without it cannot silently run without it.
+async fn build_catalog_with(large: bool) -> Catalog {
     const EVAL_PEER: &str = "n3:evalpeer000000000000000000000000";
     let decls = UtilityBackend
         .describe()
@@ -143,7 +149,7 @@ async fn build_catalog() -> Catalog {
     // `PLANNER_EVAL_CATALOG=large` merges the adversarial corpus on top. The
     // expected answers are unchanged — only the crowd around them grows, so
     // numbers stay directly comparable with the small catalogue.
-    if std::env::var("PLANNER_EVAL_CATALOG").as_deref() == Ok("large") {
+    if large {
         let path = format!(
             "{}/tests/fixtures/planner_caps_large.json",
             env!("CARGO_MANIFEST_DIR")
@@ -493,6 +499,13 @@ async fn planner_eval() {
 // hybrid arm against the lexical baseline.
 
 /// Capability names surviving the runtime's own ranking + bound.
+///
+/// Known limit: recall is computed on capability *names*, because `expect_tools`
+/// in the fixture carries no peer. One name — `chat` — exists on two peers and
+/// is expected by some cases, so retaining the wrong peer's copy counts as a
+/// hit here while the plan would still be wrong. Measuring that properly needs
+/// the fixture to name the expected peer; until then this number is an upper
+/// bound for those cases, not an exact one.
 fn retained(catalog: &Catalog, scores: &[f32], top_k: usize) -> BTreeSet<String> {
     catalog
         .clone()
@@ -506,7 +519,11 @@ fn retained(catalog: &Catalog, scores: &[f32], top_k: usize) -> BTreeSet<String>
 #[tokio::test]
 async fn retrieval_recall() {
     let cases = load_cases();
-    let catalog = build_catalog().await;
+    // The large corpus is mandatory here, not opt-in: with 13 capabilities and
+    // REMOTE_TOP_K = 20 the filter never drops anything and this test measures
+    // nothing at all. `PLANNER_EVAL_CATALOG` governs the *planner* suite; the
+    // retrieval one needs a catalogue bigger than the bound or it is theatre.
+    let catalog = build_catalog_with(true).await;
     let tool_cases: Vec<&Case> = cases.iter().filter(|c| !c.expect.is_empty()).collect();
     assert!(!tool_cases.is_empty(), "no tool cases to measure");
 
@@ -576,19 +593,45 @@ async fn retrieval_recall() {
                     ));
             }
         }
-        // What the retained catalogue actually costs in the compile prompt —
-        // the number that decides whether prompt size is a problem at all.
+        // What the retained catalogue costs in the compile prompt.
+        //
+        // Reported as a *marginal* figure: dividing the whole prompt by the cap
+        // count charges each capability a share of the fixed structural rules,
+        // which are paid once whatever the catalogue size. Subtracting the
+        // empty-catalogue prompt gives what one more capability actually costs.
         if let Some((case, s)) = scored.first() {
             let kept = catalog.clone().filter_with_scores(s, REMOTE_TOP_K);
-            let prompt = default_compile_system_prompt(&kept);
+            let total = default_compile_system_prompt(&kept).chars().count() / 4;
+            let fixed = default_compile_system_prompt(&Catalog::default())
+                .chars()
+                .count()
+                / 4;
+            let n = kept.tools.len().max(1);
             println!(
-                "    compile prompt at K={REMOTE_TOP_K}: ~{} tokens for {} caps ({} per cap) · sample query {:?}",
-                prompt.chars().count() / 4,
+                "    compile prompt at K={REMOTE_TOP_K}: ~{total} tokens for {} caps \
+                 ({fixed} fixed + ~{} marginal per cap) · sample query {:?}",
                 kept.tools.len(),
-                prompt.chars().count() / 4 / kept.tools.len().max(1),
+                total.saturating_sub(fixed) / n,
                 case.query.chars().take(40).collect::<String>()
             );
         }
+        // Regression gate on the lexical arm — the one that runs in CI with no
+        // endpoint. Measured at 96.4%; the floor sits below that so a real
+        // regression fails while a single case moving does not flap. Without an
+        // assertion this test printed a number nobody would notice going to 0.
+        if arm == "lexical" {
+            let hits = scored
+                .iter()
+                .filter(|(c, s)| c.expect.is_subset(&retained(&catalog, s, REMOTE_TOP_K)))
+                .count();
+            let recall = 100.0 * hits as f64 / tool_cases.len() as f64;
+            assert!(
+                recall >= 90.0,
+                "lexical recall@{REMOTE_TOP_K} fell to {recall:.1}% (floor 90%): the planner \
+                 cannot pick a capability it was never shown"
+            );
+        }
+
         if missed.is_empty() {
             println!("    at the production bound (K={REMOTE_TOP_K}): nothing lost");
         } else {
