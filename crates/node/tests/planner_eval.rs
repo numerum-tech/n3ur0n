@@ -139,6 +139,34 @@ async fn build_catalog() -> Catalog {
             cap,
         });
     }
+
+    // `PLANNER_EVAL_CATALOG=large` merges the adversarial corpus on top. The
+    // expected answers are unchanged — only the crowd around them grows, so
+    // numbers stay directly comparable with the small catalogue.
+    if std::env::var("PLANNER_EVAL_CATALOG").as_deref() == Ok("large") {
+        let path = format!(
+            "{}/tests/fixtures/planner_caps_large.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let raw = std::fs::read_to_string(&path).expect("read planner_caps_large.json");
+        let doc: Value = serde_json::from_str(&raw).expect("parse planner_caps_large.json");
+        let peers = doc["peers"].as_object().expect("`peers` map");
+        for entry in doc["caps"].as_array().expect("`caps` array") {
+            let alias = entry["peer"].as_str().expect("cap.peer");
+            let peer_id = peers
+                .get(alias)
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| panic!("unknown peer alias `{alias}` in large corpus"));
+            let cap = serde_json::from_value(entry["decl"].clone())
+                .unwrap_or_else(|e| panic!("large-corpus cap does not deserialize: {e}"));
+            tools.push(ToolDef {
+                peer_id: peer_id.to_string(),
+                peer_endpoint: Some(format!("http://{alias}.eval.local:4242")),
+                cap,
+            });
+        }
+    }
+
     Catalog { tools }
 }
 
@@ -442,4 +470,134 @@ async fn planner_eval() {
         tool_valid_pct >= 95.0,
         "tool-case plan-valid dropped to {tool_valid_pct:.0}% (<95%) — prompt/compile regression"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval recall — measured without the LLM
+// ---------------------------------------------------------------------------
+//
+// `planner_eval` grades the *plan*, which mixes two components: the retriever
+// may have dropped the right capability before the model ever saw it, or the
+// model may have picked wrongly from a catalogue that contained it. A failing
+// case does not say which.
+//
+// recall@K separates them. It asks one question: is every expected capability
+// still in the catalogue the planner is handed?
+//
+//   recall@K = 100%  → the retriever is not the problem; look at the planner.
+//   recall@K <  100% → no prompt work can recover a capability that is absent.
+//
+// It needs no LLM, so it runs in a few milliseconds against the real filtering
+// path — `Retriever::score` then `Catalog::filter_with_scores`, exactly what
+// `PlanExecPlanner` does. Set `PLANNER_EVAL_EMBED_MODEL` to also measure the
+// hybrid arm against the lexical baseline.
+
+/// Capability names surviving the runtime's own ranking + bound.
+fn retained(catalog: &Catalog, scores: &[f32], top_k: usize) -> BTreeSet<String> {
+    catalog
+        .clone()
+        .filter_with_scores(scores, top_k)
+        .tools
+        .iter()
+        .map(|t| t.cap.name.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn retrieval_recall() {
+    let cases = load_cases();
+    let catalog = build_catalog().await;
+    let tool_cases: Vec<&Case> = cases.iter().filter(|c| !c.expect.is_empty()).collect();
+    assert!(!tool_cases.is_empty(), "no tool cases to measure");
+
+    let mut arms: Vec<(String, Arc<Retriever>)> =
+        vec![("lexical".to_string(), Arc::new(Retriever::lexical()))];
+    if let Ok(model) = std::env::var("PLANNER_EVAL_EMBED_MODEL")
+        && !model.is_empty()
+    {
+        let client = EmbeddingClient::new(EmbeddingConfig {
+            base_url: std::env::var("PLANNER_EVAL_EMBED_BASE_URL")
+                .or_else(|_| std::env::var("PLANNER_EVAL_BASE_URL"))
+                .unwrap_or_else(|_| "http://localhost:11434".into()),
+            model: model.clone(),
+            api_key: std::env::var("PLANNER_EVAL_API_KEY").ok(),
+        })
+        .expect("build embedding client");
+        arms.push((
+            format!("hybrid/{model}"),
+            Arc::new(Retriever::hybrid(Arc::new(client))),
+        ));
+    }
+
+    const KS: [usize; 4] = [5, 10, 20, 50];
+    println!(
+        "\nretrieval recall · {} tool cases · {} caps in catalogue",
+        tool_cases.len(),
+        catalog.tools.len()
+    );
+
+    for (arm, retriever) in &arms {
+        // Score once per case, reuse across every K.
+        let mut scored: Vec<(&Case, Vec<f32>)> = Vec::with_capacity(tool_cases.len());
+        for case in &tool_cases {
+            scored.push((case, retriever.score(&catalog.tools, &case.query).await));
+        }
+
+        let mut line = format!("  {arm:<24}");
+        for k in KS {
+            let hits = scored
+                .iter()
+                .filter(|(c, s)| c.expect.is_subset(&retained(&catalog, s, k)))
+                .count();
+            line.push_str(&format!(
+                "  r@{k}={:>5.1}%",
+                100.0 * hits as f64 / tool_cases.len() as f64
+            ));
+        }
+        println!("{line}");
+
+        // Name what the production bound actually loses, per category — an
+        // aggregate hides which kind of request the retriever fails on.
+        let mut missed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (case, s) in &scored {
+            let kept = retained(&catalog, s, REMOTE_TOP_K);
+            let lost: Vec<&String> = case.expect.difference(&kept).collect();
+            if !lost.is_empty() {
+                missed
+                    .entry(case.category.clone())
+                    .or_default()
+                    .push(format!(
+                        "{} (lost {})",
+                        case.name,
+                        lost.iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+            }
+        }
+        // What the retained catalogue actually costs in the compile prompt —
+        // the number that decides whether prompt size is a problem at all.
+        if let Some((case, s)) = scored.first() {
+            let kept = catalog.clone().filter_with_scores(s, REMOTE_TOP_K);
+            let prompt = default_compile_system_prompt(&kept);
+            println!(
+                "    compile prompt at K={REMOTE_TOP_K}: ~{} tokens for {} caps ({} per cap) · sample query {:?}",
+                prompt.chars().count() / 4,
+                kept.tools.len(),
+                prompt.chars().count() / 4 / kept.tools.len().max(1),
+                case.query.chars().take(40).collect::<String>()
+            );
+        }
+        if missed.is_empty() {
+            println!("    at the production bound (K={REMOTE_TOP_K}): nothing lost");
+        } else {
+            for (cat, names) in &missed {
+                println!(
+                    "    lost at K={REMOTE_TOP_K} · {cat}: {}",
+                    names.join(" · ")
+                );
+            }
+        }
+    }
 }

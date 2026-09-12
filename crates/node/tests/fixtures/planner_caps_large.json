@@ -1,0 +1,6677 @@
+{
+  "_comment": [
+    "GENERATED — do not hand-edit. Source: scripts/gen-planner-caps-large.py",
+    "",
+    "Adversarial corpus that makes REMOTE_TOP_K actually filter, so that",
+    "recall@K measures the retriever instead of being trivially 100%.",
+    "",
+    "  88 near-miss caps crowding the 13 real ones, sharing their",
+    "    vocabulary while being the wrong answer.",
+    "  15 caps described in French — never an expected answer, so a",
+    "    retriever that over-weights them loses recall, and a lexical index",
+    "    built on an English catalogue is measurably blind to them.",
+    "  49 unrelated-domain caps. Easy negatives: they exercise the",
+    "    bound, not the ranking.",
+    "",
+    "Loaded by PLANNER_EVAL_CATALOG=large, merged on top of planner_caps.json",
+    "so the expected answers stay identical and numbers stay comparable."
+  ],
+  "peers": {
+    "noise01": "n3:evalnoise0100000000000000000000",
+    "noise02": "n3:evalnoise0200000000000000000000",
+    "noise03": "n3:evalnoise0300000000000000000000",
+    "noise04": "n3:evalnoise0400000000000000000000",
+    "noise05": "n3:evalnoise0500000000000000000000",
+    "noise06": "n3:evalnoise0600000000000000000000",
+    "noise07": "n3:evalnoise0700000000000000000000",
+    "noise08": "n3:evalnoise0800000000000000000000",
+    "noise09": "n3:evalnoise0900000000000000000000",
+    "noise10": "n3:evalnoise1000000000000000000000",
+    "noise11": "n3:evalnoise1100000000000000000000",
+    "noise12": "n3:evalnoise1200000000000000000000"
+  },
+  "caps": [
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "transliterate",
+        "description": "Convert text from one script to another (Cyrillic to Latin, Arabic to Latin) without translating the meaning.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "script"
+        ],
+        "examples": [
+          {
+            "user_intent": "Write this Russian name in the Latin alphabet.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: convert text from one script to another (cyrillic to latin, arabic to latin) without translating the meaning.",
+        "output_semantic": "The result of transliterate."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "detect_language",
+        "description": "Identify which natural language a piece of text is written in, with a confidence score.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "detect"
+        ],
+        "examples": [
+          {
+            "user_intent": "What language is this sentence in?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: identify which natural language a piece of text is written in, with a confidence score.",
+        "output_semantic": "The result of detect language."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "romanize",
+        "description": "Romanize Japanese, Korean or Chinese text into Latin characters following a standard scheme.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "script"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give me the romaji for this Japanese sentence.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: romanize japanese, korean or chinese text into latin characters following a standard scheme.",
+        "output_semantic": "The result of romanize."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "translate_subtitles",
+        "description": "Translate a subtitle file, preserving timing cues and line breaks.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "subtitles",
+          "video"
+        ],
+        "examples": [
+          {
+            "user_intent": "Translate this SRT subtitle file into Spanish.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: translate a subtitle file, preserving timing cues and line breaks.",
+        "output_semantic": "The result of translate subtitles."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "localize_ui_strings",
+        "description": "Translate an application's UI string catalogue, keeping placeholders and pluralisation rules intact.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "i18n",
+          "software"
+        ],
+        "examples": [
+          {
+            "user_intent": "Localise these interface strings into German.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: translate an application's ui string catalogue, keeping placeholders and pluralisation rules intact.",
+        "output_semantic": "The result of localize ui strings."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "glossary_lookup",
+        "description": "Look a term up in a bilingual domain glossary and return approved translations.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "terminology"
+        ],
+        "examples": [
+          {
+            "user_intent": "What is the approved French term for this legal expression?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: look a term up in a bilingual domain glossary and return approved translations.",
+        "output_semantic": "The result of glossary lookup."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "back_translate",
+        "description": "Translate a text into a pivot language and back, to expose meaning drift.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "quality"
+        ],
+        "examples": [
+          {
+            "user_intent": "Round-trip this paragraph through Japanese to check the wording.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: translate a text into a pivot language and back, to expose meaning drift.",
+        "output_semantic": "The result of back translate."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "translate_html",
+        "description": "Translate an HTML document while leaving tags, attributes and scripts untouched.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "html"
+        ],
+        "examples": [
+          {
+            "user_intent": "Translate this web page's text but keep the markup.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: translate an html document while leaving tags, attributes and scripts untouched.",
+        "output_semantic": "The result of translate html."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "language_pair_support",
+        "description": "Report which source and target language pairs a translation engine supports.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "language",
+          "capability"
+        ],
+        "examples": [
+          {
+            "user_intent": "Do you support Ewe to French?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: report which source and target language pairs a translation engine supports.",
+        "output_semantic": "The result of language pair support."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "summarize_meeting",
+        "description": "Turn a meeting transcript into minutes with decisions and action items.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "meeting"
+        ],
+        "examples": [
+          {
+            "user_intent": "Write up the minutes of this meeting recording.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: turn a meeting transcript into minutes with decisions and action items.",
+        "output_semantic": "The result of summarize meeting."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "headline_generate",
+        "description": "Write a single short headline capturing an article's angle.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "editorial"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give this article a headline.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: write a single short headline capturing an article's angle.",
+        "output_semantic": "The result of headline generate."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "bullet_digest",
+        "description": "Reduce a document to a bulleted digest of at most ten points.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "bullets"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give me the bullet points of this report.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: reduce a document to a bulleted digest of at most ten points.",
+        "output_semantic": "The result of bullet digest."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "tldr_thread",
+        "description": "Summarise a long discussion thread into one paragraph per participant position.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "discussion"
+        ],
+        "examples": [
+          {
+            "user_intent": "TL;DR this whole thread.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: summarise a long discussion thread into one paragraph per participant position.",
+        "output_semantic": "The result of tldr thread."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "extractive_sentences",
+        "description": "Select the most representative sentences verbatim, without rewriting.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "extractive"
+        ],
+        "examples": [
+          {
+            "user_intent": "Pull out the key sentences from this text, unchanged.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: select the most representative sentences verbatim, without rewriting.",
+        "output_semantic": "The result of extractive sentences."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "compress_prompt",
+        "description": "Shorten a prompt while preserving its instructions, for context-limited models.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "prompt"
+        ],
+        "examples": [
+          {
+            "user_intent": "Make this prompt shorter without losing instructions.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: shorten a prompt while preserving its instructions, for context-limited models.",
+        "output_semantic": "The result of compress prompt."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "chapter_outline",
+        "description": "Produce a hierarchical outline of a long document by section.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "outline"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give me the outline of this book chapter.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: produce a hierarchical outline of a long document by section.",
+        "output_semantic": "The result of chapter outline."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "executive_brief",
+        "description": "Write a one-page executive brief with risks and recommendations.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "business"
+        ],
+        "examples": [
+          {
+            "user_intent": "Turn this study into an executive brief.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: write a one-page executive brief with risks and recommendations.",
+        "output_semantic": "The result of executive brief."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "summarize_diff",
+        "description": "Describe what a code diff changes, in prose.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "code"
+        ],
+        "examples": [
+          {
+            "user_intent": "Explain what this pull request changes.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: describe what a code diff changes, in prose.",
+        "output_semantic": "The result of summarize diff."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "condense_transcript",
+        "description": "Condense an interview transcript, dropping filler and repetitions.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "summary",
+          "transcript"
+        ],
+        "examples": [
+          {
+            "user_intent": "Condense this interview transcript.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: condense an interview transcript, dropping filler and repetitions.",
+        "output_semantic": "The result of condense transcript."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "named_entities",
+        "description": "Extract people, organisations, locations and dates as typed entities.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "ner"
+        ],
+        "examples": [
+          {
+            "user_intent": "List the people and companies mentioned here.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: extract people, organisations, locations and dates as typed entities.",
+        "output_semantic": "The result of named entities."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "topic_model",
+        "description": "Cluster a corpus into latent topics with representative terms per topic.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "topics"
+        ],
+        "examples": [
+          {
+            "user_intent": "What topics run through this set of documents?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: cluster a corpus into latent topics with representative terms per topic.",
+        "output_semantic": "The result of topic model."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "tag_suggest",
+        "description": "Suggest publication tags for a piece of content from a controlled vocabulary.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "tags"
+        ],
+        "examples": [
+          {
+            "user_intent": "Suggest tags for this blog post.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: suggest publication tags for a piece of content from a controlled vocabulary.",
+        "output_semantic": "The result of tag suggest."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "extract_dates",
+        "description": "Find every date and time expression and normalise it to ISO 8601.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "dates"
+        ],
+        "examples": [
+          {
+            "user_intent": "Pull out all the dates in this contract.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: find every date and time expression and normalise it to iso 8601.",
+        "output_semantic": "The result of extract dates."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "extract_emails",
+        "description": "Find email addresses and phone numbers in unstructured text.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "contact"
+        ],
+        "examples": [
+          {
+            "user_intent": "Get the contact details out of this signature block.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: find email addresses and phone numbers in unstructured text.",
+        "output_semantic": "The result of extract emails."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "taxonomy_classify",
+        "description": "Assign a document to one or more nodes of a predefined taxonomy.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "classification"
+        ],
+        "examples": [
+          {
+            "user_intent": "Classify this document in our taxonomy.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: assign a document to one or more nodes of a predefined taxonomy.",
+        "output_semantic": "The result of taxonomy classify."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "keyphrase_rank",
+        "description": "Rank multi-word key phrases by salience rather than single terms.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "keyphrase"
+        ],
+        "examples": [
+          {
+            "user_intent": "What are the key phrases of this paper?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: rank multi-word key phrases by salience rather than single terms.",
+        "output_semantic": "The result of keyphrase rank."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "news_search",
+        "description": "Search recent news articles, filtered by date range and outlet.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "search",
+          "news"
+        ],
+        "examples": [
+          {
+            "user_intent": "Find news from last week about this company.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: search recent news articles, filtered by date range and outlet.",
+        "output_semantic": "The result of news search."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "image_search",
+        "description": "Search for images matching a description and return their URLs.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "search",
+          "images"
+        ],
+        "examples": [
+          {
+            "user_intent": "Find pictures of this monument.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: search for images matching a description and return their urls.",
+        "output_semantic": "The result of image search."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "academic_search",
+        "description": "Search scholarly literature and return papers with citation counts.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "search",
+          "academic"
+        ],
+        "examples": [
+          {
+            "user_intent": "Find papers on this subject.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: search scholarly literature and return papers with citation counts.",
+        "output_semantic": "The result of academic search."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "site_search",
+        "description": "Search within one specific website's indexed pages.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "search",
+          "site"
+        ],
+        "examples": [
+          {
+            "user_intent": "Search this documentation site for that function.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: search within one specific website's indexed pages.",
+        "output_semantic": "The result of site search."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "search_trends",
+        "description": "Report how search interest in a term evolved over time.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "search",
+          "trends"
+        ],
+        "examples": [
+          {
+            "user_intent": "Is interest in this topic rising?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: report how search interest in a term evolved over time.",
+        "output_semantic": "The result of search trends."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "patent_search",
+        "description": "Search patent databases by claim text and classification.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "search",
+          "patents"
+        ],
+        "examples": [
+          {
+            "user_intent": "Find patents covering this mechanism.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: search patent databases by claim text and classification.",
+        "output_semantic": "The result of patent search."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "autocomplete_suggest",
+        "description": "Return the query completions a search engine would propose.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "search",
+          "suggest"
+        ],
+        "examples": [
+          {
+            "user_intent": "What do people search for after typing this?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: return the query completions a search engine would propose.",
+        "output_semantic": "The result of autocomplete suggest."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "screenshot_url",
+        "description": "Render a URL in a headless browser and return a PNG screenshot.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "web",
+          "render"
+        ],
+        "examples": [
+          {
+            "user_intent": "Take a screenshot of this page.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: render a url in a headless browser and return a png screenshot.",
+        "output_semantic": "The result of screenshot url."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "url_metadata",
+        "description": "Return a URL's Open Graph and meta tags without its body text.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "web",
+          "metadata"
+        ],
+        "examples": [
+          {
+            "user_intent": "What are the meta tags of this page?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: return a url's open graph and meta tags without its body text.",
+        "output_semantic": "The result of url metadata."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "check_link_status",
+        "description": "Check whether a list of URLs still resolve, reporting redirects.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "web",
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Are these links still alive?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: check whether a list of urls still resolve, reporting redirects.",
+        "output_semantic": "The result of check link status."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "extract_main_article",
+        "description": "Strip navigation and ads from a page, returning only the article body.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "web",
+          "readability"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give me just the article text from this page.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: strip navigation and ads from a page, returning only the article body.",
+        "output_semantic": "The result of extract main article."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "rss_fetch",
+        "description": "Fetch and parse an RSS or Atom feed into structured entries.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "web",
+          "feed"
+        ],
+        "examples": [
+          {
+            "user_intent": "Get the latest entries from this feed.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: fetch and parse an rss or atom feed into structured entries.",
+        "output_semantic": "The result of rss fetch."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "archive_snapshot",
+        "description": "Retrieve an archived snapshot of a URL at a past date.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "web",
+          "archive"
+        ],
+        "examples": [
+          {
+            "user_intent": "What did this page look like last year?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: retrieve an archived snapshot of a url at a past date.",
+        "output_semantic": "The result of archive snapshot."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "download_document",
+        "description": "Download a linked document and report its media type and size.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "web",
+          "download"
+        ],
+        "examples": [
+          {
+            "user_intent": "Download the PDF behind this link.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: download a linked document and report its media type and size.",
+        "output_semantic": "The result of download document."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "unit_convert",
+        "description": "Convert between physical units of length, mass, volume or temperature.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "conversion",
+          "units"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many kilometres is 12 miles?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: convert between physical units of length, mass, volume or temperature.",
+        "output_semantic": "The result of unit convert."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "timezone_convert",
+        "description": "Convert a timestamp from one time zone to another.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "conversion",
+          "time"
+        ],
+        "examples": [
+          {
+            "user_intent": "What is 3pm Paris time in Tokyo?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: convert a timestamp from one time zone to another.",
+        "output_semantic": "The result of timezone convert."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "number_base_convert",
+        "description": "Convert an integer between binary, octal, decimal and hexadecimal.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "conversion",
+          "numbers"
+        ],
+        "examples": [
+          {
+            "user_intent": "What is 255 in hexadecimal?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: convert an integer between binary, octal, decimal and hexadecimal.",
+        "output_semantic": "The result of number base convert."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "historical_fx_rate",
+        "description": "Return the exchange rate between two currencies on a past date.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "conversion",
+          "finance",
+          "history"
+        ],
+        "examples": [
+          {
+            "user_intent": "What was the euro-dollar rate in March 2020?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: return the exchange rate between two currencies on a past date.",
+        "output_semantic": "The result of historical fx rate."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "crypto_price",
+        "description": "Return the current price of a crypto asset in a fiat currency.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance",
+          "crypto"
+        ],
+        "examples": [
+          {
+            "user_intent": "What is bitcoin worth right now?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: return the current price of a crypto asset in a fiat currency.",
+        "output_semantic": "The result of crypto price."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "vat_calculate",
+        "description": "Compute value-added tax for an amount given a jurisdiction.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance",
+          "tax"
+        ],
+        "examples": [
+          {
+            "user_intent": "What is the VAT on this amount in France?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: compute value-added tax for an amount given a jurisdiction.",
+        "output_semantic": "The result of vat calculate."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "format_money",
+        "description": "Format a monetary amount according to a locale's conventions.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance",
+          "format"
+        ],
+        "examples": [
+          {
+            "user_intent": "Format this amount the French way.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: format a monetary amount according to a locale's conventions.",
+        "output_semantic": "The result of format money."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "air_quality",
+        "description": "Current air quality index and pollutant breakdown for a location.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "environment",
+          "air"
+        ],
+        "examples": [
+          {
+            "user_intent": "How is the air quality in this city?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: current air quality index and pollutant breakdown for a location.",
+        "output_semantic": "The result of air quality."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "marine_forecast",
+        "description": "Sea state, wave height and wind forecast for a coastal area.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "weather",
+          "marine"
+        ],
+        "examples": [
+          {
+            "user_intent": "What is the sea like off this coast tomorrow?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: sea state, wave height and wind forecast for a coastal area.",
+        "output_semantic": "The result of marine forecast."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "pollen_index",
+        "description": "Pollen concentration and allergy risk for a location.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "environment",
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Is the pollen bad there today?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: pollen concentration and allergy risk for a location.",
+        "output_semantic": "The result of pollen index."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "uv_index",
+        "description": "Ultraviolet index and recommended exposure limits.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "environment",
+          "sun"
+        ],
+        "examples": [
+          {
+            "user_intent": "How strong is the sun there right now?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: ultraviolet index and recommended exposure limits.",
+        "output_semantic": "The result of uv index."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "historical_weather",
+        "description": "Observed weather for a location on a past date.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "weather",
+          "history"
+        ],
+        "examples": [
+          {
+            "user_intent": "What was the weather there last Christmas?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: observed weather for a location on a past date.",
+        "output_semantic": "The result of historical weather."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "storm_alerts",
+        "description": "Active severe weather warnings issued for a region.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "weather",
+          "alerts"
+        ],
+        "examples": [
+          {
+            "user_intent": "Are there any storm warnings for that region?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: active severe weather warnings issued for a region.",
+        "output_semantic": "The result of storm alerts."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "sunrise_sunset",
+        "description": "Sunrise, sunset and civil twilight times for a location and date.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "astronomy",
+          "time"
+        ],
+        "examples": [
+          {
+            "user_intent": "What time does the sun set there?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: sunrise, sunset and civil twilight times for a location and date.",
+        "output_semantic": "The result of sunrise sunset."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "code_assistant",
+        "description": "Write, explain or debug source code in a named programming language.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "code"
+        ],
+        "examples": [
+          {
+            "user_intent": "Why does this function throw an exception?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: write, explain or debug source code in a named programming language.",
+        "output_semantic": "The result of code assistant."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "rewrite_tone",
+        "description": "Rewrite a text in a different register, keeping its content.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "writing"
+        ],
+        "examples": [
+          {
+            "user_intent": "Make this email sound more formal.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: rewrite a text in a different register, keeping its content.",
+        "output_semantic": "The result of rewrite tone."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "grammar_check",
+        "description": "Correct spelling, grammar and agreement without changing the style.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "proofreading"
+        ],
+        "examples": [
+          {
+            "user_intent": "Fix the mistakes in this paragraph.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: correct spelling, grammar and agreement without changing the style.",
+        "output_semantic": "The result of grammar check."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "brainstorm_ideas",
+        "description": "Produce a divergent list of ideas around a theme.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "ideation"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give me ideas for a product launch.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: produce a divergent list of ideas around a theme.",
+        "output_semantic": "The result of brainstorm ideas."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "sentiment_analysis",
+        "description": "Classify a text's sentiment as positive, negative or neutral with a score.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "classification"
+        ],
+        "examples": [
+          {
+            "user_intent": "Is this customer review positive or negative?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: classify a text's sentiment as positive, negative or neutral with a score.",
+        "output_semantic": "The result of sentiment analysis."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "classify_intent",
+        "description": "Map a user utterance to one of a fixed set of intents.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "classification"
+        ],
+        "examples": [
+          {
+            "user_intent": "Which intent does this support ticket belong to?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: map a user utterance to one of a fixed set of intents.",
+        "output_semantic": "The result of classify intent."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "answer_from_docs",
+        "description": "Answer a question using only a supplied document set, citing passages.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "rag"
+        ],
+        "examples": [
+          {
+            "user_intent": "Answer this using only the attached handbook.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: answer a question using only a supplied document set, citing passages.",
+        "output_semantic": "The result of answer from docs."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "roleplay_persona",
+        "description": "Hold a conversation in a defined persona and register.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "llm",
+          "persona"
+        ],
+        "examples": [
+          {
+            "user_intent": "Reply as a medieval chronicler would.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: hold a conversation in a defined persona and register.",
+        "output_semantic": "The result of roleplay persona."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "date_diff",
+        "description": "Compute the elapsed time between two dates in chosen units.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "time",
+          "arithmetic"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many days between these two dates?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: compute the elapsed time between two dates in chosen units.",
+        "output_semantic": "The result of date diff."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "format_date",
+        "description": "Format a timestamp according to a locale and pattern.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "time",
+          "format"
+        ],
+        "examples": [
+          {
+            "user_intent": "Write this date the British way.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: format a timestamp according to a locale and pattern.",
+        "output_semantic": "The result of format date."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "cron_next_run",
+        "description": "Compute the next execution times of a cron expression.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "time",
+          "scheduling"
+        ],
+        "examples": [
+          {
+            "user_intent": "When does this cron expression next fire?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: compute the next execution times of a cron expression.",
+        "output_semantic": "The result of cron next run."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "business_days",
+        "description": "Count working days between two dates for a given country's calendar.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "time",
+          "calendar"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many working days are left this month here?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: count working days between two dates for a given country's calendar.",
+        "output_semantic": "The result of business days."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "epoch_convert",
+        "description": "Convert between Unix epoch seconds and a human-readable date.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "time",
+          "conversion"
+        ],
+        "examples": [
+          {
+            "user_intent": "What date is this epoch timestamp?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: convert between unix epoch seconds and a human-readable date.",
+        "output_semantic": "The result of epoch convert."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "timezone_list",
+        "description": "List IANA time zones and their current UTC offsets.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "time",
+          "zones"
+        ],
+        "examples": [
+          {
+            "user_intent": "Which time zone is that city in?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: list iana time zones and their current utc offsets.",
+        "output_semantic": "The result of timezone list."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "random_uuid",
+        "description": "Generate a version 4 UUID.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "random",
+          "identifier"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give me a UUID.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: generate a version 4 uuid.",
+        "output_semantic": "The result of random uuid."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "random_choice",
+        "description": "Pick one element uniformly at random from a supplied list.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "random",
+          "selection"
+        ],
+        "examples": [
+          {
+            "user_intent": "Pick one of these options for me.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: pick one element uniformly at random from a supplied list.",
+        "output_semantic": "The result of random choice."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "shuffle_list",
+        "description": "Return a supplied list in random order.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "random",
+          "ordering"
+        ],
+        "examples": [
+          {
+            "user_intent": "Shuffle these names.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: return a supplied list in random order.",
+        "output_semantic": "The result of shuffle list."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "dice_roll",
+        "description": "Roll dice in standard notation and return the total and each die.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "random",
+          "games"
+        ],
+        "examples": [
+          {
+            "user_intent": "Roll two six-sided dice.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: roll dice in standard notation and return the total and each die.",
+        "output_semantic": "The result of dice roll."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "random_password",
+        "description": "Generate a password of a given length and character policy.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "random",
+          "security"
+        ],
+        "examples": [
+          {
+            "user_intent": "Generate a strong password.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: generate a password of a given length and character policy.",
+        "output_semantic": "The result of random password."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "random_float",
+        "description": "Draw a random real number from a uniform or normal distribution.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "random",
+          "statistics"
+        ],
+        "examples": [
+          {
+            "user_intent": "Give me a random number between zero and one.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: draw a random real number from a uniform or normal distribution.",
+        "output_semantic": "The result of random float."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "reverse_words",
+        "description": "Reverse the order of words in a sentence, keeping each word intact.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "string",
+          "order"
+        ],
+        "examples": [
+          {
+            "user_intent": "Put the words of this sentence in reverse order.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: reverse the order of words in a sentence, keeping each word intact.",
+        "output_semantic": "The result of reverse words."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "palindrome_check",
+        "description": "Report whether a string reads the same backwards, ignoring case and punctuation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "string",
+          "test"
+        ],
+        "examples": [
+          {
+            "user_intent": "Is this word a palindrome?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: report whether a string reads the same backwards, ignoring case and punctuation.",
+        "output_semantic": "The result of palindrome check."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "rot13",
+        "description": "Apply the ROT13 substitution cipher to a string.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "string",
+          "cipher"
+        ],
+        "examples": [
+          {
+            "user_intent": "Encode this with ROT13.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: apply the rot13 substitution cipher to a string.",
+        "output_semantic": "The result of rot13."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "string_replace",
+        "description": "Replace every occurrence of a pattern in a string.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "string",
+          "edit"
+        ],
+        "examples": [
+          {
+            "user_intent": "Replace all the commas here with semicolons.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: replace every occurrence of a pattern in a string.",
+        "output_semantic": "The result of string replace."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "slugify",
+        "description": "Turn a title into a URL-safe slug.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "string",
+          "url"
+        ],
+        "examples": [
+          {
+            "user_intent": "Make a URL slug out of this title.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: turn a title into a url-safe slug.",
+        "output_semantic": "The result of slugify."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "split_string",
+        "description": "Split a string on a separator and return the parts.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "string",
+          "split"
+        ],
+        "examples": [
+          {
+            "user_intent": "Split this line on the tabs.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: split a string on a separator and return the parts.",
+        "output_semantic": "The result of split string."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "to_uppercase",
+        "description": "Convert a string to upper case, locale-aware.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "string",
+          "case"
+        ],
+        "examples": [
+          {
+            "user_intent": "Put this in capitals.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: convert a string to upper case, locale-aware.",
+        "output_semantic": "The result of to uppercase."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "word_count",
+        "description": "Count the words in a text.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "text",
+          "count"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many words is this?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: count the words in a text.",
+        "output_semantic": "The result of word count."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "token_count",
+        "description": "Count how many model tokens a text occupies for a given tokeniser.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "text",
+          "tokens"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many tokens will this prompt cost?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: count how many model tokens a text occupies for a given tokeniser.",
+        "output_semantic": "The result of token count."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "byte_size",
+        "description": "Report a string's size in bytes under a given encoding.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "text",
+          "encoding"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many bytes is this in UTF-8?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: report a string's size in bytes under a given encoding.",
+        "output_semantic": "The result of byte size."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "line_count",
+        "description": "Count lines, optionally ignoring blank ones.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "text",
+          "count"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many lines does this file have?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: count lines, optionally ignoring blank ones.",
+        "output_semantic": "The result of line count."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "readability_score",
+        "description": "Compute readability indices such as Flesch-Kincaid.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "text",
+          "readability"
+        ],
+        "examples": [
+          {
+            "user_intent": "How hard is this text to read?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: compute readability indices such as flesch-kincaid.",
+        "output_semantic": "The result of readability score."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "char_frequency",
+        "description": "Return the frequency of each character in a string.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "text",
+          "statistics"
+        ],
+        "examples": [
+          {
+            "user_intent": "Which letter appears most in this text?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: return the frequency of each character in a string.",
+        "output_semantic": "The result of char frequency."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "sentence_count",
+        "description": "Count sentences, handling abbreviations.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "text",
+          "count"
+        ],
+        "examples": [
+          {
+            "user_intent": "How many sentences are in this paragraph?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: count sentences, handling abbreviations.",
+        "output_semantic": "The result of sentence count."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "resumer_document",
+        "description": "Résume un document long en conservant les points principaux et la structure.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "résumé",
+          "document"
+        ],
+        "examples": [
+          {
+            "user_intent": "Fais-moi un résumé de ce document.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: résume un document long en conservant les points principaux et la structure.",
+        "output_semantic": "The result of resumer document."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "traduire_texte",
+        "description": "Traduit un texte vers une langue cible en respectant le registre.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "traduction",
+          "langue"
+        ],
+        "examples": [
+          {
+            "user_intent": "Traduis ce texte en anglais.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: traduit un texte vers une langue cible en respectant le registre.",
+        "output_semantic": "The result of traduire texte."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "compter_caracteres",
+        "description": "Compte les caractères, mots et lignes d'un texte.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "texte",
+          "comptage"
+        ],
+        "examples": [
+          {
+            "user_intent": "Combien de caractères dans cette phrase ?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: compte les caractères, mots et lignes d'un texte.",
+        "output_semantic": "The result of compter caracteres."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "heure_actuelle",
+        "description": "Donne l'heure courante dans un fuseau horaire donné.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "temps",
+          "fuseau"
+        ],
+        "examples": [
+          {
+            "user_intent": "Quelle heure est-il à Lomé ?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: donne l'heure courante dans un fuseau horaire donné.",
+        "output_semantic": "The result of heure actuelle."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "meteo_ville",
+        "description": "Prévisions météorologiques pour une ville sur plusieurs jours.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "météo",
+          "ville"
+        ],
+        "examples": [
+          {
+            "user_intent": "Quel temps fera-t-il demain à Dakar ?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: prévisions météorologiques pour une ville sur plusieurs jours.",
+        "output_semantic": "The result of meteo ville."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "convertir_devise",
+        "description": "Convertit un montant d'une devise vers une autre au taux du jour.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance",
+          "devise"
+        ],
+        "examples": [
+          {
+            "user_intent": "Convertis 100 euros en francs CFA.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: convertit un montant d'une devise vers une autre au taux du jour.",
+        "output_semantic": "The result of convertir devise."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "rechercher_web",
+        "description": "Recherche sur le web public et renvoie des résultats classés.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "recherche",
+          "web"
+        ],
+        "examples": [
+          {
+            "user_intent": "Cherche des articles sur ce sujet.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: recherche sur le web public et renvoie des résultats classés.",
+        "output_semantic": "The result of rechercher web."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "extraire_mots_cles",
+        "description": "Extrait les termes saillants d'un texte sous forme de liste classée.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "extraction",
+          "mots-clés"
+        ],
+        "examples": [
+          {
+            "user_intent": "Quels sont les mots-clés de ce texte ?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: extrait les termes saillants d'un texte sous forme de liste classée.",
+        "output_semantic": "The result of extraire mots cles."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "inverser_chaine",
+        "description": "Inverse l'ordre des caractères d'une chaîne.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "chaîne",
+          "ordre"
+        ],
+        "examples": [
+          {
+            "user_intent": "Inverse cette chaîne de caractères.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: inverse l'ordre des caractères d'une chaîne.",
+        "output_semantic": "The result of inverser chaine."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "nombre_aleatoire",
+        "description": "Tire un entier aléatoire dans un intervalle donné.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "aléatoire",
+          "nombre"
+        ],
+        "examples": [
+          {
+            "user_intent": "Donne-moi un nombre au hasard entre 1 et 100.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: tire un entier aléatoire dans un intervalle donné.",
+        "output_semantic": "The result of nombre aleatoire."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "analyser_sentiment",
+        "description": "Analyse la tonalité d'un texte et renvoie un score.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "analyse",
+          "sentiment"
+        ],
+        "examples": [
+          {
+            "user_intent": "Cet avis client est-il positif ?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: analyse la tonalité d'un texte et renvoie un score.",
+        "output_semantic": "The result of analyser sentiment."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "corriger_orthographe",
+        "description": "Corrige l'orthographe et la grammaire sans changer le style.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "correction",
+          "langue"
+        ],
+        "examples": [
+          {
+            "user_intent": "Corrige les fautes de ce paragraphe.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: corrige l'orthographe et la grammaire sans changer le style.",
+        "output_semantic": "The result of corriger orthographe."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "generer_slug",
+        "description": "Transforme un titre en identifiant d'URL.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "url",
+          "chaîne"
+        ],
+        "examples": [
+          {
+            "user_intent": "Fais un slug à partir de ce titre.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: transforme un titre en identifiant d'url.",
+        "output_semantic": "The result of generer slug."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "fuseaux_horaires",
+        "description": "Liste les fuseaux horaires et leur décalage courant.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "temps",
+          "fuseau"
+        ],
+        "examples": [
+          {
+            "user_intent": "Dans quel fuseau se trouve cette ville ?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: liste les fuseaux horaires et leur décalage courant.",
+        "output_semantic": "The result of fuseaux horaires."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "qualite_air",
+        "description": "Indice de qualité de l'air et polluants pour une localité.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "environnement",
+          "air"
+        ],
+        "examples": [
+          {
+            "user_intent": "La qualité de l'air est-elle bonne là-bas ?",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: indice de qualité de l'air et polluants pour une localité.",
+        "output_semantic": "The result of qualite air."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "deploy_service",
+        "description": "Deploy service — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please deploy service.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: deploy service — devops operation.",
+        "output_semantic": "The result of deploy service."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "rollback_release",
+        "description": "Rollback release — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please rollback release.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: rollback release — devops operation.",
+        "output_semantic": "The result of rollback release."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "scale_replicas",
+        "description": "Scale replicas — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please scale replicas.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: scale replicas — devops operation.",
+        "output_semantic": "The result of scale replicas."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "tail_logs",
+        "description": "Tail logs — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please tail logs.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: tail logs — devops operation.",
+        "output_semantic": "The result of tail logs."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "restart_pod",
+        "description": "Restart pod — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please restart pod.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: restart pod — devops operation.",
+        "output_semantic": "The result of restart pod."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "check_certificate",
+        "description": "Check certificate — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please check certificate.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: check certificate — devops operation.",
+        "output_semantic": "The result of check certificate."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "rotate_secret",
+        "description": "Rotate secret — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please rotate secret.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: rotate secret — devops operation.",
+        "output_semantic": "The result of rotate secret."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "run_migration",
+        "description": "Run migration — devops operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "devops"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please run migration.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: run migration — devops operation.",
+        "output_semantic": "The result of run migration."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "invoice_create",
+        "description": "Invoice create — finance operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please invoice create.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: invoice create — finance operation.",
+        "output_semantic": "The result of invoice create."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "expense_categorise",
+        "description": "Expense categorise — finance operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please expense categorise.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: expense categorise — finance operation.",
+        "output_semantic": "The result of expense categorise."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "payroll_run",
+        "description": "Payroll run — finance operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please payroll run.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: payroll run — finance operation.",
+        "output_semantic": "The result of payroll run."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "ledger_reconcile",
+        "description": "Ledger reconcile — finance operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please ledger reconcile.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: ledger reconcile — finance operation.",
+        "output_semantic": "The result of ledger reconcile."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "budget_forecast",
+        "description": "Budget forecast — finance operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please budget forecast.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: budget forecast — finance operation.",
+        "output_semantic": "The result of budget forecast."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "tax_bracket",
+        "description": "Tax bracket — finance operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please tax bracket.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: tax bracket — finance operation.",
+        "output_semantic": "The result of tax bracket."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "loan_schedule",
+        "description": "Loan schedule — finance operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "finance"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please loan schedule.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: loan schedule — finance operation.",
+        "output_semantic": "The result of loan schedule."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "bmi_compute",
+        "description": "Bmi compute — health operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please bmi compute.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: bmi compute — health operation.",
+        "output_semantic": "The result of bmi compute."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "dose_convert",
+        "description": "Dose convert — health operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please dose convert.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: dose convert — health operation.",
+        "output_semantic": "The result of dose convert."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "symptom_triage",
+        "description": "Symptom triage — health operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please symptom triage.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: symptom triage — health operation.",
+        "output_semantic": "The result of symptom triage."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "appointment_slots",
+        "description": "Appointment slots — health operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please appointment slots.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: appointment slots — health operation.",
+        "output_semantic": "The result of appointment slots."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "vaccine_schedule",
+        "description": "Vaccine schedule — health operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please vaccine schedule.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: vaccine schedule — health operation.",
+        "output_semantic": "The result of vaccine schedule."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "calorie_lookup",
+        "description": "Calorie lookup — health operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "health"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please calorie lookup.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: calorie lookup — health operation.",
+        "output_semantic": "The result of calorie lookup."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "clause_compare",
+        "description": "Clause compare — legal operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "legal"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please clause compare.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: clause compare — legal operation.",
+        "output_semantic": "The result of clause compare."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "jurisdiction_lookup",
+        "description": "Jurisdiction lookup — legal operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "legal"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please jurisdiction lookup.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: jurisdiction lookup — legal operation.",
+        "output_semantic": "The result of jurisdiction lookup."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "deadline_compute",
+        "description": "Deadline compute — legal operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "legal"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please deadline compute.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: deadline compute — legal operation.",
+        "output_semantic": "The result of deadline compute."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "citation_format",
+        "description": "Citation format — legal operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "legal"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please citation format.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: citation format — legal operation.",
+        "output_semantic": "The result of citation format."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "redline_diff",
+        "description": "Redline diff — legal operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "legal"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please redline diff.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: redline diff — legal operation.",
+        "output_semantic": "The result of redline diff."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "entity_register",
+        "description": "Entity register — legal operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "legal"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please entity register.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: entity register — legal operation.",
+        "output_semantic": "The result of entity register."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "geocode_address",
+        "description": "Geocode address — geo operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "geo"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please geocode address.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: geocode address — geo operation.",
+        "output_semantic": "The result of geocode address."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "reverse_geocode",
+        "description": "Reverse geocode — geo operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "geo"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please reverse geocode.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: reverse geocode — geo operation.",
+        "output_semantic": "The result of reverse geocode."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "route_distance",
+        "description": "Route distance — geo operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "geo"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please route distance.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: route distance — geo operation.",
+        "output_semantic": "The result of route distance."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "timezone_at_point",
+        "description": "Timezone at point — geo operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "geo"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please timezone at point.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: timezone at point — geo operation.",
+        "output_semantic": "The result of timezone at point."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "elevation_at_point",
+        "description": "Elevation at point — geo operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "geo"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please elevation at point.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: elevation at point — geo operation.",
+        "output_semantic": "The result of elevation at point."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "bounding_box",
+        "description": "Bounding box — geo operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "geo"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please bounding box.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: bounding box — geo operation.",
+        "output_semantic": "The result of bounding box."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "transcode_video",
+        "description": "Transcode video — media operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "media"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please transcode video.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: transcode video — media operation.",
+        "output_semantic": "The result of transcode video."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "extract_audio",
+        "description": "Extract audio — media operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "media"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please extract audio.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: extract audio — media operation.",
+        "output_semantic": "The result of extract audio."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "resize_image",
+        "description": "Resize image — media operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "media"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please resize image.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: resize image — media operation.",
+        "output_semantic": "The result of resize image."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "strip_exif",
+        "description": "Strip exif — media operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "media"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please strip exif.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: strip exif — media operation.",
+        "output_semantic": "The result of strip exif."
+      }
+    },
+    {
+      "peer": "noise09",
+      "decl": {
+        "name": "waveform_render",
+        "description": "Waveform render — media operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "media"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please waveform render.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: waveform render — media operation.",
+        "output_semantic": "The result of waveform render."
+      }
+    },
+    {
+      "peer": "noise10",
+      "decl": {
+        "name": "thumbnail_grid",
+        "description": "Thumbnail grid — media operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "media"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please thumbnail grid.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: thumbnail grid — media operation.",
+        "output_semantic": "The result of thumbnail grid."
+      }
+    },
+    {
+      "peer": "noise11",
+      "decl": {
+        "name": "read_sensor",
+        "description": "Read sensor — iot operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "iot"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please read sensor.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: read sensor — iot operation.",
+        "output_semantic": "The result of read sensor."
+      }
+    },
+    {
+      "peer": "noise12",
+      "decl": {
+        "name": "set_thermostat",
+        "description": "Set thermostat — iot operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "iot"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please set thermostat.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: set thermostat — iot operation.",
+        "output_semantic": "The result of set thermostat."
+      }
+    },
+    {
+      "peer": "noise01",
+      "decl": {
+        "name": "device_inventory",
+        "description": "Device inventory — iot operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "iot"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please device inventory.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: device inventory — iot operation.",
+        "output_semantic": "The result of device inventory."
+      }
+    },
+    {
+      "peer": "noise02",
+      "decl": {
+        "name": "firmware_version",
+        "description": "Firmware version — iot operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "iot"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please firmware version.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: firmware version — iot operation.",
+        "output_semantic": "The result of firmware version."
+      }
+    },
+    {
+      "peer": "noise03",
+      "decl": {
+        "name": "power_usage",
+        "description": "Power usage — iot operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "iot"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please power usage.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: power usage — iot operation.",
+        "output_semantic": "The result of power usage."
+      }
+    },
+    {
+      "peer": "noise04",
+      "decl": {
+        "name": "quiz_generate",
+        "description": "Quiz generate — education operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "education"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please quiz generate.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: quiz generate — education operation.",
+        "output_semantic": "The result of quiz generate."
+      }
+    },
+    {
+      "peer": "noise05",
+      "decl": {
+        "name": "grade_answer",
+        "description": "Grade answer — education operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "education"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please grade answer.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: grade answer — education operation.",
+        "output_semantic": "The result of grade answer."
+      }
+    },
+    {
+      "peer": "noise06",
+      "decl": {
+        "name": "curriculum_align",
+        "description": "Curriculum align — education operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "education"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please curriculum align.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: curriculum align — education operation.",
+        "output_semantic": "The result of curriculum align."
+      }
+    },
+    {
+      "peer": "noise07",
+      "decl": {
+        "name": "flashcard_build",
+        "description": "Flashcard build — education operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "education"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please flashcard build.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: flashcard build — education operation.",
+        "output_semantic": "The result of flashcard build."
+      }
+    },
+    {
+      "peer": "noise08",
+      "decl": {
+        "name": "reading_level",
+        "description": "Reading level — education operation.",
+        "schema_in": {
+          "type": "object",
+          "required": [
+            "input"
+          ],
+          "properties": {
+            "input": {
+              "type": "string"
+            }
+          }
+        },
+        "schema_out": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string"
+            }
+          }
+        },
+        "mode": "free",
+        "tags": [
+          "education"
+        ],
+        "examples": [
+          {
+            "user_intent": "Please reading level.",
+            "args": {
+              "input": "..."
+            },
+            "expected_output": {
+              "result": "..."
+            }
+          }
+        ],
+        "disambiguation": "Use only for: reading level — education operation.",
+        "output_semantic": "The result of reading level."
+      }
+    }
+  ]
+}
