@@ -12,6 +12,7 @@
 //! @peer:alice/summarize          one capability on one instance
 //! @lobe:medical                  a lobe
 //! @lobe:medical/summarize        that capability, anywhere in the lobe
+//! @file:"Cahier des Charges.pdf" a value containing spaces
 //! ```
 //!
 //! Three rules make this safe to parse out of prose:
@@ -82,10 +83,27 @@ impl Mention {
     /// Re-render the mention exactly as it should appear in the composer.
     #[must_use]
     pub fn to_token(&self) -> String {
-        match &self.capability {
-            Some(cap) => format!("@{}:{}/{}", self.kind, self.entity, cap),
-            None => format!("@{}:{}", self.kind, self.entity),
-        }
+        let value = match &self.capability {
+            Some(cap) => format!("{}/{}", self.entity, cap),
+            None => self.entity.clone(),
+        };
+        format!("@{}:{}", self.kind, quote_if_needed(&value))
+    }
+}
+
+/// Wrap a mention value in quotes when it could not be parsed back bare.
+///
+/// A value is quoted when it contains whitespace, or when it ends in sentence
+/// punctuation that the parser would otherwise strip off.
+#[must_use]
+pub fn quote_if_needed(value: &str) -> String {
+    let needs = value.chars().any(char::is_whitespace)
+        || value.ends_with(TRAILING_PUNCTUATION)
+        || value.is_empty();
+    if needs {
+        format!("\"{value}\"")
+    } else {
+        value.to_string()
     }
 }
 
@@ -113,24 +131,38 @@ pub fn parse_mentions(text: &str) -> Vec<Mention> {
             }
         }
 
-        // Token runs to the next whitespace.
+        // The prefix runs to the `:` that types the mention.
         let rest = &text[at + 1..];
-        let end_rel = rest.find(char::is_whitespace).unwrap_or(rest.len());
-        let raw = &rest[..end_rel];
-        let raw = raw.trim_end_matches(TRAILING_PUNCTUATION);
-        if raw.is_empty() {
-            continue;
-        }
-
-        let Some((prefix, value)) = raw.split_once(':') else {
+        let Some(colon) = rest.find(':') else {
             continue;
         };
-        let Some(kind) = MentionKind::from_prefix(prefix) else {
+        let Some(kind) = MentionKind::from_prefix(&rest[..colon]) else {
             continue;
+        };
+        let after_colon = &rest[colon + 1..];
+
+        // A quoted value runs to its closing quote, which is how a file name
+        // with spaces stays one token: `@file:"Cahier des Charges.pdf"`. The
+        // picker writes the quotes; a user rarely types them. Unquoted values
+        // still end at the first whitespace.
+        let (value, consumed) = if let Some(body) = after_colon.strip_prefix('"') {
+            match body.find('"') {
+                // A name containing a `"` cannot be spelled this way; the
+                // canonical `@file:sha256:…` form always can.
+                Some(close) => (&body[..close], colon + 1 + close + 2),
+                None => continue,
+            }
+        } else {
+            let end = after_colon
+                .find(char::is_whitespace)
+                .unwrap_or(after_colon.len());
+            let unquoted = after_colon[..end].trim_end_matches(TRAILING_PUNCTUATION);
+            (unquoted, colon + 1 + unquoted.len())
         };
         if value.is_empty() {
             continue;
         }
+        let raw_len = consumed;
 
         // `/` splits entity from capability for peers and lobes. For files it
         // is part of the path, and for a canonical `@file:sha256:…` there is
@@ -148,7 +180,7 @@ pub fn parse_mentions(text: &str) -> Vec<Mention> {
             },
         };
 
-        let span_end = at + 1 + raw.len();
+        let span_end = at + 1 + raw_len;
         out.push(Mention {
             kind,
             entity,
@@ -321,5 +353,50 @@ mod tests {
         let s = MentionScope::from_text("résume @file:a.pdf et @file:b.pdf");
         assert_eq!(s.files, vec!["a.pdf", "b.pdf"]);
         assert!(s.is_empty(), "a file is data, not a tool scope");
+    }
+
+    #[test]
+    fn quoted_values_keep_their_spaces() {
+        assert_eq!(
+            kinds("résume @file:\"Cahier des Charges — GovActu.pdf\" stp"),
+            vec![(
+                MentionKind::File,
+                "Cahier des Charges — GovActu.pdf".into(),
+                None
+            )]
+        );
+    }
+
+    #[test]
+    fn a_quoted_mention_spans_its_closing_quote() {
+        let text = "voici @file:\"deux mots.pdf\" ok";
+        let m = &parse_mentions(text)[0];
+        assert_eq!(&text[m.span.0..m.span.1], "@file:\"deux mots.pdf\"");
+        assert_eq!(m.to_token(), "@file:\"deux mots.pdf\"");
+    }
+
+    #[test]
+    fn an_unterminated_quote_is_not_a_mention() {
+        assert!(parse_mentions("@file:\"jamais fermé").is_empty());
+    }
+
+    #[test]
+    fn quoting_only_kicks_in_when_needed() {
+        assert_eq!(quote_if_needed("rapport.pdf"), "rapport.pdf");
+        assert_eq!(quote_if_needed("deux mots.pdf"), "\"deux mots.pdf\"");
+        // A name ending in punctuation would lose it to sentence trimming.
+        assert_eq!(quote_if_needed("note."), "\"note.\"");
+    }
+
+    #[test]
+    fn a_quoted_peer_mention_still_splits_its_capability() {
+        assert_eq!(
+            kinds("@peer:\"alice bis/summarize\""),
+            vec![(
+                MentionKind::Peer,
+                "alice bis".into(),
+                Some("summarize".into())
+            )]
+        );
     }
 }

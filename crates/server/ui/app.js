@@ -604,6 +604,38 @@ function toggleStepDetails(wrap, call, result, chipEl) {
     wrap.appendChild(panel);
 }
 
+/// Mirror of `mention::parse_mentions` for display: same three rules (the `@`
+/// opens a token, the type prefix is mandatory, quotes hold spaces), so what
+/// the user sees badged is exactly what the planner scoped on. Anything that
+/// does not parse stays plain text, which is the point — an unresolved `@foo`
+/// must not look like it did something.
+const MENTION_RE = /(^|\s)@(file|peer|lobe):("[^"]*"|[^\s]+)/g;
+
+function renderTextWithMentions(text) {
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const m of text.matchAll(MENTION_RE)) {
+        const lead = m[1];
+        const start = m.index + lead.length;
+        let raw = m[3];
+        // Sentence punctuation after a bare value belongs to the sentence.
+        if (!raw.startsWith('"')) raw = raw.replace(/[.,;:!?)\]}"']+$/, "");
+        if (!raw) continue;
+        const full = `@${m[2]}:${raw}`;
+
+        if (start > last) frag.appendChild(document.createTextNode(text.slice(last, start)));
+        const chip = document.createElement("span");
+        chip.className = `mention-chip mention-chip-${m[2]}`;
+        chip.textContent = raw.startsWith('"') ? raw.slice(1, -1) : raw;
+        chip.title = full;
+        chip.dataset.kind = m[2];
+        frag.appendChild(chip);
+        last = start + full.length;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    return frag;
+}
+
 function appendBubble(kind, who, text, attachments = []) {
     const div = document.createElement("div");
     div.className = `bubble ${kind}`;
@@ -614,9 +646,7 @@ function appendBubble(kind, who, text, attachments = []) {
         div.appendChild(w);
     }
     if (text) {
-        const body = document.createElement("span");
-        body.textContent = text;
-        div.appendChild(body);
+        div.appendChild(renderTextWithMentions(text));
     }
     appendAttachmentCards(div, attachments);
     conv.appendChild(div);
@@ -993,7 +1023,10 @@ function activeMentionFragment(el) {
     // Must open a token, otherwise an email address triggers the picker.
     if (at > 0 && !/\s/.test(upto[at - 1])) return null;
     const frag = upto.slice(at + 1);
-    if (/\s/.test(frag)) return null;
+    // Spaces normally end the token, except inside an unterminated quoted
+    // value — that is how `@file:"Cahier des Charges.pdf"` stays one mention.
+    const insideQuotes = (frag.match(/"/g) || []).length % 2 === 1;
+    if (!insideQuotes && /\s/.test(frag)) return null;
     return { start: at, frag };
 }
 
@@ -1011,8 +1044,25 @@ function knownLobes() {
     return [...seen.entries()].sort((a, b) => b[1] - a[1]);
 }
 
+/// Mirror of `mention::quote_if_needed` on the Rust side: a value is quoted
+/// when whitespace or trailing sentence punctuation would break it apart.
+function hostOf(endpoint) {
+    if (!endpoint) return "";
+    try {
+        return new URL(endpoint).hostname;
+    } catch {
+        return "";
+    }
+}
+
+function quoteMentionValue(value) {
+    return /\s/.test(value) || /[.,;:!?)\]}"']$/.test(value)
+        ? `"${value}"`
+        : value;
+}
+
 function mentionCandidates(frag) {
-    const lower = frag.toLowerCase();
+    const lower = frag.toLowerCase().replace(/"/g, "");
     const [maybeKind, ...restParts] = lower.split(":");
     const kinds = ["file", "peer", "lobe"];
     const scoped = kinds.includes(maybeKind);
@@ -1030,7 +1080,7 @@ function mentionCandidates(frag) {
             const value = path || f.hash;
             out.push({
                 kind: "file",
-                token: `@file:${value}`,
+                token: `@file:${quoteMentionValue(value)}`,
                 label: path || shortHash(f.hash),
                 sub: f.mime || "",
                 blob: f,
@@ -1042,13 +1092,17 @@ function mentionCandidates(frag) {
             const short = shortId(p.instance_id);
             const hay = `${p.alias || ""} ${p.instance_id} ${p.endpoint || ""}`.toLowerCase();
             if (needle && !hay.includes(needle)) continue;
+            // A bare id is unreadable, so lead with something human: the
+            // alias, else the endpoint host. Both are strings the peer asserts
+            // about itself, which is fine for a label — the id stays visible
+            // underneath and remains the only thing that routes.
+            const host = hostOf(p.endpoint);
+            const readable = p.alias || host;
             out.push({
                 kind: "peer",
-                // The token carries the id, never the self-declared alias: an
-                // alias is a claim, the id is self-verifying.
-                token: `@peer:${short}`,
-                label: p.alias || short,
-                sub: p.alias ? short : (p.endpoint || ""),
+                token: `@peer:${quoteMentionValue(short)}`,
+                label: readable || short,
+                sub: readable ? short : (p.endpoint || ""),
             });
         }
     }
@@ -1057,7 +1111,7 @@ function mentionCandidates(frag) {
             if (needle && !lobe.toLowerCase().includes(needle)) continue;
             out.push({
                 kind: "lobe",
-                token: `@lobe:${lobe}`,
+                token: `@lobe:${quoteMentionValue(lobe)}`,
                 label: lobe,
                 sub: t("mention.lobe.caps", { count }),
             });
