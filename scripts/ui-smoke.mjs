@@ -97,6 +97,8 @@ step("settings panel visible", await evaluate(
 step("page title", await evaluate(`document.getElementById('settings-page-title')?.textContent`));
 step("instance id shown", await evaluate(
     `/^n3:[a-z0-9]+$/.test(document.querySelector('#settings-page-body code')?.textContent?.trim() || '')`));
+step("lobe card title", await evaluate(
+    `[...document.querySelectorAll('#settings-page-body .card-title')].map(e => e.textContent.trim())`));
 step("empty state", await evaluate(`document.getElementById('lobes-chips')?.textContent?.trim()`));
 out.shots.push(await shot("01-lobes-empty"));
 

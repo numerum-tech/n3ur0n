@@ -76,7 +76,7 @@
   "settings.identity.subtitle": "What this instance is on the network: the id every signed call carries, and the federations it claims.",
   "settings.identity.instance_id": "Instance ID",
   "settings.identity.instance_id.help": "Your cryptographic identity — derived from your public key and used to sign every call you make. Anyone receiving a signed call from you sees this id. The private key lives in <code>keys.json</code> in the app config dir (file mode 0600); treat it like a password.",
-  "settings.lobes.current": "Membership",
+  "settings.lobes.current": "Lobes",
   "settings.lobes.empty": "This instance belongs to no lobe.",
   "settings.lobes.add.label": "Join a lobe",
   "settings.lobes.add.button": "Add",
