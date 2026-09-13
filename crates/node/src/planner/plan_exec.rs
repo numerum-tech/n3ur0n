@@ -724,8 +724,21 @@ impl PlanExecPlanner {
         }
         let mut messages: Vec<Value> = Vec::with_capacity(MAX_CONTEXT_TURNS + 2);
         messages.push(json!({"role": "system", "content": self.reflect_system_prompt()}));
-        // Include the conversation tail so the LLM has continuity.
-        messages.extend(state.to_chat_messages(MAX_CONTEXT_TURNS));
+        // Include the conversation tail so the LLM has continuity — minus the
+        // turn being answered. `dispatch_inner` records the user turn before
+        // compiling, so the tail already ends on it (or on the tool turns that
+        // followed it), and the re-statement below added a second copy. The
+        // model reads two identical consecutive requests as two requests and
+        // answers both: qwen2.5:7b replies "Hi to you!\n\nHi to you!" to a
+        // greeting, and "I tried ... twice, and it failed both times" when a
+        // step failed — reproduced A/B against the same model, 3 runs each.
+        // Tool results carry role `tool`, so the last `user` message is always
+        // the current turn.
+        let mut tail = state.to_chat_messages(MAX_CONTEXT_TURNS);
+        if let Some(pos) = tail.iter().rposition(|m| m["role"] == "user") {
+            tail.remove(pos);
+        }
+        messages.extend(tail);
         if let Some(summary) = blackboard_summary {
             let refs = blackboard.map(referenceable_values).unwrap_or_default();
             let quoting = if refs.is_empty() {
@@ -769,7 +782,10 @@ impl PlanExecPlanner {
             what they would like, in their language."
             }));
         }
-        // Re-state the user's request so the model anchors on it.
+        // The user's request goes last, after the blackboard and the tool
+        // turns, so the model answers the question rather than the results.
+        // This is `planner_text`, not the stored turn: it names the attached
+        // files, which the stored `content` does not.
         messages.push(json!({"role": "user", "content": user_message}));
 
         let mut args = json!({

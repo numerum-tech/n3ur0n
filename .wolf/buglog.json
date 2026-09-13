@@ -3555,6 +3555,27 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-09-13T11:37:29.503977Z"
+    },
+    {
+      "id": "bug-221",
+      "timestamp": "2026-09-13T13:58:33.223876Z",
+      "error_message": "The assistant answers the same message twice in one bubble: 'Hi to you!\\n\\nHi to you!'",
+      "file": "crates/node/src/planner/plan_exec.rs",
+      "root_cause": "reflect_only built its prompt as system + state.to_chat_messages(MAX_CONTEXT_TURNS) + [re-stated user message]. dispatch_inner records the user turn BEFORE compiling, so the tail already contains it; the re-statement (added so the question sits after the blackboard and the tool turns) therefore appended a second identical user message. The model reads two consecutive identical user turns as two requests and answers both. Proven by logging the real prompt through an HTTP proxy in front of Ollama, then A/B against qwen2.5:7b with the same system prompt and tail, 3 runs each: one copy -> 'I tried to say hi to @peer:consumer#ivyrzhjr but encountered an issue'; two copies -> 'I tried to say hi ... TWICE, but the tool failed BOTH TIMES'. DirectChatPlanner was never affected: it relies on the tail alone.",
+      "fix": "reflect_only drops the last role=='user' message from the tail before extending (tool results carry role 'tool', so the last user message is always the turn being answered), then re-states it once at the end. Regression test crates/node/tests/reflect_prompt.rs asserts the reflect prompt's user messages with a recording Backend, no LLM required; it fails without the fix with left: ['Hi to you!', 'Hi to you!']. Verified live through the proxy: reflect now carries one user message, both with an empty plan and with a tool step.",
+      "tags": [
+        "planner",
+        "reflect",
+        "prompt",
+        "context-contamination",
+        "rs"
+      ],
+      "related_bugs": [
+        "bug-211",
+        "bug-215"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T13:58:33.223876Z"
     }
   ],
   "version": 1
