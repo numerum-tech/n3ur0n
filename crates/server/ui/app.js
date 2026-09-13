@@ -866,7 +866,10 @@ function appendStepper(isDirect = false) {
             chip.onclick = () => toggleStepDetails(wrap, call, res, chip);
         },
         reflecting() {
-            setStatus(t("stepper.composing"));
+            // Direct mode has no plan to reflect on: the node sends this event
+            // for stream symmetry, and overwriting the status with the plan
+            // wording put "composing reply…" where the mode's own line was.
+            setStatus(isDirect ? t("composer.direct.status") : t("stepper.composing"));
         },
         markLowConfidence(confidence) {
             wrap.classList.add("degraded");
@@ -880,6 +883,11 @@ function appendStepper(isDirect = false) {
             if (reply) {
                 appendBubble("assistant", model ? `assistant · ${model}` : "assistant", reply);
             }
+            // Direct mode leaves nothing behind worth a row: no steps to
+            // inspect, and the bubble header already names the model. The
+            // empty "done · model" band was the plan widget outliving the
+            // plan. It stays on error, which is the one thing it still says.
+            if (isDirect) wrap.remove();
         },
         markError(msg, unresolved = []) {
             // An unknown reference is not a failure to explain in prose: it is
