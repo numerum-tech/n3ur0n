@@ -293,6 +293,11 @@ n3ur0n invoke <peer> <capability> [--args ...]
   - Consumer (sans listener) → publisher : aller-retour propre.
 - `cargo-fuzz` sur le parser de message, parser JCS, decoder Base32.
 - Playwright (web) + tauri-driver (desktop) — smoke test sur chat / peers / config.
+  En attendant, `bash scripts/ui-smoke.sh` pilote l'UI embarquée dans un vrai Chrome
+  via CDP (aucune dépendance npm : Node 22 a `WebSocket`, Chrome parle le protocole),
+  assert sur le DOM **et** capture des PNG dans `target/ui-smoke/`. Il démarre le
+  binaire **debug** exprès : en release les assets sont figés au build, la page servie
+  serait périmée.
 
 ## Questions ouvertes bloquantes (archi §11)
 
