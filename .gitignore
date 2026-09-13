@@ -65,9 +65,26 @@ logs/
 tmp/
 .tmp/
 
-# ---- Personal dev tooling (local-only) ----
-.wolf/
-.claude/
+# ---- Agent tooling ----
+# .wolf/ is committed by design (OpenWolf 2.5): team-shared, reviewed project
+# state travels with git. Its own .wolf/.gitignore excludes the machine-local
+# half — hooks/, cache/, backups/, the token ledger, daemon files and the
+# dashboard token.
+# .claude/ stays local by default: settings.json hardcodes absolute paths from
+# one machine. Only the OpenWolf contract files CLAUDE.md points at are tracked.
+.claude/*
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/handoff.md
+!.claude/rules/
+.claude/rules/*
+!.claude/rules/openwolf.md
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/openwolf/
+# Same rule for the other agents' hook wiring: it hardcodes one machine's
+# absolute paths, so it is regenerated locally by `openwolf update`.
+.codex/hooks.json
 
 # ---- Internal session notes (kept local; public tracker is ROADMAP.md) ----
 SESSION_STATE.md
