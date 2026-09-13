@@ -2006,6 +2006,13 @@ button.secondary:hover,
     align-items: center;
     gap: 8px;
 }
+/* These chips are the card's content, not an annotation inside a sentence
+   the way the composer's are, so they carry the body size instead of the
+   0.92em the inline badge uses. */
+.lobe-row .mention-chip {
+    font-size: 1.05em;
+    padding: 3px 10px;
+}
 .lobe-row .mention-chip .lobe-drop {
     padding: 0 2px;
     margin: 0;
