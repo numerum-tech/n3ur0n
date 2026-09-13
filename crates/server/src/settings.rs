@@ -12,6 +12,8 @@
 //!   GET    /api/v0/caps/manifests/:name    — fetch raw cap.toml
 //!   DELETE /api/v0/caps/manifests/:name    — remove a cap.toml
 //!
+//!   GET    /api/v0/settings/alias          — this instance's human alias
+//!   PUT    /api/v0/settings/alias          — rename it (instance.toml)
 //!   GET    /api/v0/settings/lobes          — lobes this instance belongs to
 //!   PUT    /api/v0/settings/lobes          — replace them (instance.toml)
 //!
@@ -89,10 +91,12 @@ pub fn router(
     // Lobe membership. Reading is part of reading what this instance offers;
     // writing changes what the network sees, so it rides with CAPS_WRITE.
     let lobes_read = Router::new()
+        .route("/settings/alias", get(get_alias))
         .route("/settings/lobes", get(get_lobes))
         .route_layer(require_perm!(perm::CAPS_READ))
         .with_state(state.clone());
     let lobes_write = Router::new()
+        .route("/settings/alias", axum::routing::put(put_alias))
         .route("/settings/lobes", axum::routing::put(put_lobes))
         .route_layer(require_perm!(perm::CAPS_WRITE))
         .with_state(state);
@@ -109,6 +113,50 @@ pub fn router(
 // ---------------------------------------------------------------------------
 // Lobe membership
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct PutAliasRequest {
+    /// `null` or an empty string clears the alias.
+    #[serde(default)]
+    alias: Option<String>,
+}
+
+async fn get_alias(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
+    Json(json!({
+        "alias": state.node.alias(),
+        "instance_id": state.node.instance_id().as_str(),
+        "max_len": n3ur0n_core::ALIAS_MAX_LEN,
+    }))
+}
+
+/// Rename the instance: validate, persist to `instance.toml`, swap the live
+/// value. Peers see it at their next refresh — an alias travels in
+/// `describe_self` and nothing pushes it.
+async fn put_alias(
+    AxumState(state): AxumState<SettingsState>,
+    Json(req): Json<PutAliasRequest>,
+) -> impl IntoResponse {
+    let alias = req
+        .alias
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty());
+    if let Some(a) = alias.as_deref()
+        && let Err(e) = n3ur0n_core::validate_alias(a)
+    {
+        return settings_error(StatusCode::BAD_REQUEST, &e.to_string());
+    }
+
+    // Keep the lobes: this route owns the alias, not the whole file.
+    let mut cfg = crate::instance_config::load_instance_user_config(&state.config_dir)
+        .unwrap_or_default();
+    cfg.alias = alias.clone();
+    if let Err(e) = crate::instance_config::save_instance_user_config(&state.config_dir, &cfg) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    state.node.set_alias(alias);
+
+    Json(json!({ "ok": true, "alias": state.node.alias() })).into_response()
+}
 
 #[derive(Debug, Deserialize)]
 struct PutLobesRequest {
@@ -140,7 +188,10 @@ async fn put_lobes(
         return settings_error(StatusCode::BAD_REQUEST, &e.to_string());
     }
 
+    // Preserve the alias: this route owns the lobe set, not the whole file.
     let cfg = crate::instance_config::InstanceUserConfig {
+        alias: crate::instance_config::load_instance_user_config(&state.config_dir)
+            .and_then(|c| c.alias),
         lobe_ids: lobe_ids.clone(),
     };
     if let Err(e) = crate::instance_config::save_instance_user_config(&state.config_dir, &cfg) {

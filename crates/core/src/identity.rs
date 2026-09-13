@@ -149,6 +149,49 @@ mod verifying_key_bytes {
     }
 }
 
+/// Longest accepted instance alias.
+pub const ALIAS_MAX_LEN: usize = 32;
+
+/// Validate a human-readable instance alias.
+///
+/// An alias is a **label, never an identifier**: it is chosen by the instance
+/// it names, travels unauthenticated in `describe_self`, and nothing makes it
+/// unique — two instances may claim the same one. Only the `n3:` id binds. The
+/// rules below exist to keep it readable and unambiguous, not to make it
+/// trustworthy:
+///
+/// - 1 to [`ALIAS_MAX_LEN`] characters, so it stays shorter than the id it is
+///   meant to spare the reader;
+/// - letters, digits, `-`, `_` and `.` only — the `@peer:` mention grammar
+///   ends a token at whitespace, so a spaced alias could not be typed as a
+///   mention without quoting;
+/// - never starting with `n3:`, so an alias cannot pose as a canonical id in a
+///   list where both appear.
+pub fn validate_alias(alias: &str) -> CoreResult<()> {
+    let n = alias.chars().count();
+    if n == 0 {
+        return Err(CoreError::InvalidIdentifier("alias is empty".into()));
+    }
+    if n > ALIAS_MAX_LEN {
+        return Err(CoreError::InvalidIdentifier(format!(
+            "alias is longer than {ALIAS_MAX_LEN} characters"
+        )));
+    }
+    if alias.starts_with(ID_PREFIX) {
+        return Err(CoreError::InvalidIdentifier(format!(
+            "alias must not start with `{ID_PREFIX}`: an alias is a label, not an id"
+        )));
+    }
+    for c in alias.chars() {
+        if !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+            return Err(CoreError::InvalidIdentifier(format!(
+                "alias contains `{c}`; allowed: letters, digits, `-`, `_`, `.`"
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +225,23 @@ mod tests {
     fn rejects_bad_prefix() {
         assert!(InstanceId::parse("xx:abcd").is_err());
         assert!(InstanceId::parse("").is_err());
+    }
+
+    #[test]
+    fn alias_accepts_readable_labels() {
+        validate_alias("node-b").unwrap();
+        validate_alias("Alice_2").unwrap();
+        validate_alias("edge.paris").unwrap();
+    }
+
+    #[test]
+    fn alias_rejects_what_would_confuse_a_reader() {
+        assert!(validate_alias("").is_err());
+        assert!(validate_alias(&"a".repeat(ALIAS_MAX_LEN + 1)).is_err());
+        // Would need quoting to be typed as `@peer:…`.
+        assert!(validate_alias("node b").is_err());
+        // Must not pose as a canonical id.
+        assert!(validate_alias("n3:4hzrfkoz").is_err());
     }
 
     #[test]

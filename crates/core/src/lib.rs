@@ -35,7 +35,7 @@ pub use blob::{
 };
 pub use capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 pub use error::{CoreError, CoreResult};
-pub use identity::{InstanceId, Keypair, PublicKey};
+pub use identity::{ALIAS_MAX_LEN, InstanceId, Keypair, PublicKey, validate_alias};
 pub use lobe::{
     LOBE_ID_MAX_LEN, LOBE_ID_MIN_LEN, MAX_LOBES_PER_INSTANCE, unclaimable_lobes,
     validate_instance_lobes, validate_lobe_id,

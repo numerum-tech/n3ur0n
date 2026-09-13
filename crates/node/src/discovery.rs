@@ -225,6 +225,15 @@ pub async fn refresh_peer(
     )
     .await
     .map_err(|e| NodeError::InvalidPayload(format!("describe_self {endpoint}: {e}")))?;
+    // An instance is never its own peer. The transitive walk already skips
+    // itself; this path did not, so pointing a refresh at one's own endpoint —
+    // which a crawl over "every node in the cluster" naturally does — filed the
+    // instance in its own directory, where the planner would then see its local
+    // capabilities a second time as a remote peer's.
+    if descriptor.instance_id == node.instance_id() {
+        return Ok(descriptor);
+    }
+
     let now = node.clock().now().unix_timestamp();
     let cached = serde_json::to_string(&descriptor)?;
     let record = PeerRecord {

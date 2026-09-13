@@ -145,7 +145,7 @@ fn describe_self(node: &Node, now: OffsetDateTime) -> NodeResult<Value> {
     let body = DescribeSelfResponse {
         instance_id: node.instance_id(),
         endpoint: node.config().endpoint.clone(),
-        alias: node.config().alias.clone(),
+        alias: node.alias(),
         protocol_version: PROTOCOL_VERSION.into(),
         updated_at: now
             .format(&time::format_description::well_known::Rfc3339)

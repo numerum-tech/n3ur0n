@@ -20,6 +20,10 @@ const ENV_LOBES: &str = "N3UR0N_LOBES";
 /// The `[instance]` table of `instance.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstanceUserConfig {
+    /// Human-readable name this instance advertises. A label, not an
+    /// identifier: unauthenticated, not unique, and only the `n3:` id binds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
     /// Lobes this instance claims membership of.
     #[serde(default)]
     pub lobe_ids: Vec<String>,
@@ -74,6 +78,9 @@ pub fn load_instance_user_config(config_dir: &Path) -> Option<InstanceUserConfig
 /// load is never written.
 pub fn save_instance_user_config(config_dir: &Path, cfg: &InstanceUserConfig) -> Result<()> {
     validate_instance_lobes(&cfg.lobe_ids).context("invalid lobe set")?;
+    if let Some(alias) = cfg.alias.as_deref() {
+        n3ur0n_core::validate_alias(alias).context("invalid alias")?;
+    }
     std::fs::create_dir_all(config_dir)
         .with_context(|| format!("creating config dir {}", config_dir.display()))?;
     let path = instance_config_path(config_dir);
@@ -123,6 +130,29 @@ pub fn resolve_startup_lobes(cli_lobes: &[String], config_dir: &Path) -> Vec<Str
     kept
 }
 
+/// Resolve the alias a starting node should advertise: CLI, then
+/// `N3UR0N_ALIAS`, then `instance.toml`, then none.
+///
+/// An invalid alias is dropped with a warning rather than aborting startup: a
+/// typo in a display label must not keep a gateway off the network.
+pub fn resolve_startup_alias(cli_alias: Option<&str>, config_dir: &Path) -> Option<String> {
+    let raw = cli_alias
+        .map(str::to_string)
+        .or_else(|| std::env::var("N3UR0N_ALIAS").ok())
+        .or_else(|| load_instance_user_config(config_dir).and_then(|c| c.alias))?;
+    let raw = raw.trim().to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    match n3ur0n_core::validate_alias(&raw) {
+        Ok(()) => Some(raw),
+        Err(e) => {
+            tracing::warn!(error = %e, "ignoring invalid alias");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +164,7 @@ mod tests {
         save_instance_user_config(
             dir.path(),
             &InstanceUserConfig {
+                alias: None,
                 lobe_ids: vec!["from-file".into()],
             },
         )
@@ -149,6 +180,7 @@ mod tests {
         save_instance_user_config(
             dir.path(),
             &InstanceUserConfig {
+                alias: None,
                 lobe_ids: vec!["medical".into(), "legal-fr".into()],
             },
         )
@@ -184,11 +216,56 @@ mod tests {
         let err = save_instance_user_config(
             dir.path(),
             &InstanceUserConfig {
+                alias: None,
                 lobe_ids: vec!["NOPE".into()],
             },
         );
         assert!(err.is_err());
         assert!(!instance_config_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn alias_precedence_cli_then_file_then_none() {
+        let dir = tempdir().unwrap();
+        assert!(resolve_startup_alias(None, dir.path()).is_none());
+        save_instance_user_config(
+            dir.path(),
+            &InstanceUserConfig {
+                alias: Some("from-file".into()),
+                lobe_ids: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_startup_alias(None, dir.path()).as_deref(),
+            Some("from-file")
+        );
+        assert_eq!(
+            resolve_startup_alias(Some("from-cli"), dir.path()).as_deref(),
+            Some("from-cli")
+        );
+    }
+
+    #[test]
+    fn an_invalid_alias_is_dropped_not_fatal() {
+        let dir = tempdir().unwrap();
+        assert!(resolve_startup_alias(Some("has spaces"), dir.path()).is_none());
+        assert!(resolve_startup_alias(Some("   "), dir.path()).is_none());
+    }
+
+    #[test]
+    fn refuses_to_write_an_invalid_alias() {
+        let dir = tempdir().unwrap();
+        assert!(
+            save_instance_user_config(
+                dir.path(),
+                &InstanceUserConfig {
+                    alias: Some("n3:nope".into()),
+                    lobe_ids: vec![]
+                },
+            )
+            .is_err()
+        );
     }
 
     #[test]

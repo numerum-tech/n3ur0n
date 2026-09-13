@@ -80,6 +80,10 @@ pub struct Node {
     /// `cap.lobe_ids ⊆ instance.lobe_ids` rule both read *this*, never the
     /// startup copy.
     pub(crate) lobes: Arc<ArcSwap<Vec<String>>>,
+    /// Live human alias, seeded from [`NodeConfig::alias`] and swappable at
+    /// runtime. `describe_self` reads *this*, never the startup copy, so
+    /// renaming an instance does not require a restart.
+    pub(crate) alias: Arc<ArcSwap<Option<String>>>,
     pub(crate) config: NodeConfig,
     pub(crate) clock: Arc<dyn n3ur0n_core::Clock>,
 }
@@ -115,6 +119,7 @@ impl Node {
             backends: None,
             manifest_dir: None,
             lobes: Arc::new(ArcSwap::from_pointee(config.lobe_ids.clone())),
+            alias: Arc::new(ArcSwap::from_pointee(config.alias.clone())),
             config,
             clock: Arc::new(SystemClock),
         }
@@ -161,6 +166,17 @@ impl Node {
     /// it, but the reader sees a frozen view.
     pub fn registry(&self) -> Arc<CapabilityRegistry> {
         self.registry.load_full()
+    }
+
+    /// Human alias this instance currently advertises, if any.
+    pub fn alias(&self) -> Option<String> {
+        self.alias.load().as_ref().clone()
+    }
+
+    /// Rename the instance. Caller validates
+    /// ([`n3ur0n_core::validate_alias`]); this method trusts it.
+    pub fn set_alias(&self, alias: Option<String>) {
+        self.alias.store(Arc::new(alias));
     }
 
     /// Lobes this instance currently claims membership of.

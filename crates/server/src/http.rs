@@ -351,7 +351,10 @@ async fn public_health(State(state): State<AppState>) -> Json<serde_json::Value>
 }
 
 async fn whoami(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(json!({"instance_id": state.node.instance_id().as_str()}))
+    Json(json!({
+        "instance_id": state.node.instance_id().as_str(),
+        "alias": state.node.alias(),
+    }))
 }
 
 /// List the locale catalogs embedded under `ui/locales/*.json`. Each entry

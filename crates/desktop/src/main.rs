@@ -170,6 +170,7 @@ async fn start_server() -> Result<u16> {
             dir: config_dir.clone(),
         },
         n3ur0n_server::instance_config::resolve_startup_lobes(&[], &config_dir),
+        n3ur0n_server::instance_config::resolve_startup_alias(None, &config_dir),
     )
     .await
     .context("loading node")?;

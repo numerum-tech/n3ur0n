@@ -1389,6 +1389,16 @@ fn resolve_scope(node: &Node, catalog: &Catalog, scope: &MentionScope) -> Resolv
         });
         let self_id = node.instance_id().to_string();
         for entity in &scope.peers {
+            // `@peer:self` is the one name that cannot be squatted: it never
+            // travels, and it means "the instance I am talking to" whoever
+            // that is. Everything else has to be an id precisely because a
+            // name a peer gives itself proves nothing.
+            if entity.eq_ignore_ascii_case("self") {
+                if !out.peer_ids.contains(&self_id) {
+                    out.peer_ids.push(self_id.clone());
+                }
+                continue;
+            }
             let hit = known
                 .iter()
                 .map(|p| p.id.clone())
@@ -2110,6 +2120,19 @@ mod tests {
         let known = resolve_scope(&node, &cat, &MentionScope::from_text("@lobe:medical"));
         assert_eq!(known.lobes, vec!["medical"]);
         assert!(known.unresolved.is_empty());
+    }
+
+    #[test]
+    fn peer_self_resolves_to_this_instance() {
+        let node = node_for_scope();
+        let cat = scope_catalog();
+        let r = resolve_scope(&node, &cat, &MentionScope::from_text("@peer:self"));
+        assert_eq!(r.peer_ids, vec![node.instance_id().to_string()]);
+        assert!(r.unresolved.is_empty());
+        // Case does not matter, and it is not a name a peer could claim: an
+        // instance calling itself "self" still resolves by id, not by label.
+        let r = resolve_scope(&node, &cat, &MentionScope::from_text("@peer:SELF"));
+        assert_eq!(r.peer_ids, vec![node.instance_id().to_string()]);
     }
 
     #[test]

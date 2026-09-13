@@ -384,8 +384,11 @@ async function loadConversations() {
     try {
         const r = await api("GET", "/api/v0/whoami");
         const id = r?.instance_id || "?";
-        selfId.textContent = id;
-        selfId.title = id;
+        // The id is what binds, but it is unreadable. Show the alias when the
+        // instance has one and keep the id one hover away — in a cluster of
+        // five, `n3:4hzrfkoz…` tells a reader nothing about which node this is.
+        selfId.textContent = r?.alias || id;
+        selfId.title = r?.alias ? `${r.alias} · ${id}` : id;
     } catch { /* ignore */ }
     try {
         const r = await api("GET", "/api/v0/conversations");
@@ -1132,6 +1135,10 @@ function collectMentions(wanted, needle) {
         }
     }
     if (want("peer")) {
+        // The one peer token that is always right and never ambiguous.
+        if (!needle || "self".startsWith(needle)) {
+            out.push({ kind: "peer", token: "@peer:self", sub: t("mention.peer.self") });
+        }
         for (const p of _peersCache.peers) {
             const hay = `${p.alias || ""} ${p.instance_id} ${p.endpoint || ""}`.toLowerCase();
             if (needle && !hay.includes(needle)) continue;
@@ -2845,6 +2852,8 @@ async function renderIdentityPage() {
     const body = document.getElementById("settings-page-body");
     let me = { instance_id: "?" };
     try { me = await api("GET", "/api/v0/whoami"); } catch { /* id card degrades to "?" */ }
+    let aliasInfo = { alias: me.alias || null, max_len: 32 };
+    try { aliasInfo = await api("GET", "/api/v0/settings/alias"); } catch { /* keep the fallback */ }
     let data;
     try {
         data = await api("GET", "/api/v0/settings/lobes");
@@ -2882,6 +2891,18 @@ async function renderIdentityPage() {
                 <code style="word-break: break-all; display: block; padding: 8px;">${escapeHtml(me.instance_id || "?")}</code>
             </div>
             <p class="card-meta">${t("settings.identity.instance_id.help")}</p>
+            <form class="settings-form" onsubmit="return false;" style="margin-top: 12px;">
+                <div class="field">
+                    <label class="field-label" for="alias-input">${escapeHtml(t("settings.identity.alias"))}</label>
+                    <div style="display:flex; gap:8px;">
+                        <input id="alias-input" class="form-control" type="text" maxlength="${aliasInfo.max_len || 32}"
+                               placeholder="node-b" value="${escapeHtml(aliasInfo.alias || "")}" />
+                        <button type="button" class="secondary" id="alias-save">${escapeHtml(t("button.save"))}</button>
+                    </div>
+                    <p class="row-sub">${t("settings.identity.alias.help")}</p>
+                    <p class="row-sub" id="alias-status"></p>
+                </div>
+            </form>
         </article>
         <article class="card" style="max-width: 720px; margin-top: 12px;">
             <div class="card-head">
@@ -2907,6 +2928,22 @@ async function renderIdentityPage() {
         </article>
     `;
     paint();
+
+    const aliasStatus = document.getElementById("alias-status");
+    document.getElementById("alias-save")?.addEventListener("click", async () => {
+        const value = document.getElementById("alias-input").value.trim();
+        aliasStatus.textContent = t("settings.lobes.saving");
+        try {
+            const r = await api("PUT", "/api/v0/settings/alias", { alias: value || null });
+            aliasStatus.textContent = r.alias
+                ? t("settings.identity.alias.saved", { alias: r.alias })
+                : t("settings.identity.alias.cleared");
+            // The header carries the alias; refresh it without a reload.
+            await loadConversations();
+        } catch (e) {
+            aliasStatus.textContent = `${t("settings.lobes.save_failed")} ${e.message}`;
+        }
+    });
 
     const input = document.getElementById("lobes-input");
     const status = document.getElementById("lobes-status");

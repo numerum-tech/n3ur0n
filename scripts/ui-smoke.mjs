@@ -106,10 +106,21 @@ step("settings lands on", await evaluate(
       document.querySelector('#settings-nav .settings-nav-item[data-section="about"]').click();
       r.click();
       return document.querySelector('#settings-nav .settings-nav-item.active')?.dataset.section; })()`));
+// That step re-navigates, and the page body is painted asynchronously: without
+// this wait the next assertions read a spinner.
+await sleep(1200);
 step("settings panel visible", await evaluate(
     `(() => { const p = document.getElementById('settings-page'); const r = p.getBoundingClientRect(); return !p.classList.contains('hidden') && r.width > 0 && r.height > 0; })()`));
 
 step("page title", await evaluate(`document.getElementById('settings-page-title')?.textContent`));
+// An alias is what a reader actually recognises; the id stays one hover away.
+await evaluate(`(() => { const i = document.getElementById('alias-input'); i.value = 'smoke-node'; document.getElementById('alias-save').click(); })()`);
+await sleep(1200);
+step("alias saved", await evaluate(`document.getElementById('alias-status')?.textContent`));
+step("header shows the alias", await evaluate(`document.getElementById('self-id')?.textContent`));
+step("header keeps the id on hover", await evaluate(
+    `/n3:[a-z0-9]{20,}/.test(document.getElementById('self-id')?.title || '')`));
+
 step("instance id shown", await evaluate(
     `/^n3:[a-z0-9]+$/.test(document.querySelector('#settings-page-body code')?.textContent?.trim() || '')`));
 step("lobe card title", await evaluate(
