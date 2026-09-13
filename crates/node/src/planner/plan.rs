@@ -761,6 +761,7 @@ use raw refs only, let the downstream tool combine values)",
         let our_endpoint = node_for_steps.config().endpoint.clone();
         let cap_name = tool.cap.name.clone();
         let endpoint = tool.peer_endpoint.clone();
+        let catalog_peer_id = Some(tool.peer_id.clone());
         let sem = step_sem.clone();
         let evt_tx = events.cloned();
         let node_exec = node_for_steps.clone();
@@ -775,6 +776,7 @@ use raw refs only, let the downstream tool combine values)",
                 if let Some(tx) = &evt_tx {
                     let _ = tx.send(DispatchEvent::StepStart { id: id.clone() });
                 }
+                let started = std::time::Instant::now();
                 let result: Result<Value, String> = if endpoint.is_none() {
                     // A local step must take the same route `handler.rs` takes
                     // for an inbound invoke: the capability's own binding when
@@ -838,6 +840,35 @@ use raw refs only, let the downstream tool combine values)",
                         Err(e) => Err(e.to_string()),
                     }
                 };
+                // Journal the step, the counterpart of the inbound journal in
+                // `handler.rs`. A remote step is `out` — network traffic this
+                // node generated. A local step is `local`: it never left the
+                // instance, so it is neither contribution nor consumption, but
+                // it *is* the capability being solicited, which is most of
+                // what an operator wants to see on a node serving its own user.
+                {
+                    let direction = if endpoint.is_some() {
+                        n3ur0n_storage::audit::Direction::Out
+                    } else {
+                        n3ur0n_storage::audit::Direction::Local
+                    };
+                    let entry = n3ur0n_storage::audit::AuditEntry {
+                        timestamp: node_exec.clock().now().unix_timestamp(),
+                        direction,
+                        peer_id: catalog_peer_id
+                            .clone()
+                            .unwrap_or_else(|| node_exec.instance_id().to_string()),
+                        capability: Some(cap_name.clone()),
+                        status: match &result {
+                            Ok(_) => "ok".to_string(),
+                            Err(_) => "call_failed".to_string(),
+                        },
+                        latency_ms: i64::try_from(started.elapsed().as_millis()).ok(),
+                    };
+                    if let Err(e) = n3ur0n_storage::audit::record(node_exec.db(), &entry) {
+                        tracing::warn!(error = %e, "audit write failed");
+                    }
+                }
                 StepCompletion { id, result }
             }
             .boxed(),

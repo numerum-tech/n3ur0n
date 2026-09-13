@@ -51,17 +51,29 @@ pub async fn handle_request(node: &Node, request: SignedMessage) -> NodeResult<S
         tracing::warn!(error = %e, "nonce prune failed");
     }
 
-    let response_payload = match inbound.envelope.verb {
-        ProtocolVerb::DescribeSelf => describe_self(node, now)?,
-        ProtocolVerb::Ping => ping(now)?,
-        ProtocolVerb::GetKnownPeers => get_known_peers(node, &inbound.envelope.payload)?,
-        ProtocolVerb::Invoke => invoke(node, &inbound.envelope).await?,
-        ProtocolVerb::BlobTicket => {
-            return Err(NodeError::InvalidPayload(
-                "blob_ticket is not accepted on /messages; use /n3ur0n/v0/blobs".into(),
-            ));
-        }
+    // Journal the exchange whatever its outcome, so the Activity view can
+    // show what this node serves — including what it refuses. The verb is
+    // recorded, not just `invoke`: a node's external surface is also the
+    // pings and the describe_self crawls it answers.
+    let started = std::time::Instant::now();
+    let outcome = match inbound.envelope.verb {
+        ProtocolVerb::DescribeSelf => describe_self(node, now),
+        ProtocolVerb::Ping => ping(now),
+        ProtocolVerb::GetKnownPeers => get_known_peers(node, &inbound.envelope.payload),
+        ProtocolVerb::Invoke => invoke(node, &inbound.envelope).await,
+        ProtocolVerb::BlobTicket => Err(NodeError::InvalidPayload(
+            "blob_ticket is not accepted on /messages; use /n3ur0n/v0/blobs".into(),
+        )),
     };
+    record_audit(
+        node,
+        crate::audit::Direction::In,
+        inbound.envelope.sender_id.as_str(),
+        inbound_label(&inbound.envelope),
+        &outcome,
+        started.elapsed(),
+    );
+    let response_payload = outcome?;
 
     // Reverse-announce: if the inbound envelope carried a `sender_endpoint`
     // we trust the signed claim (TOFU) and upsert the caller's contact
@@ -261,4 +273,46 @@ async fn invoke(node: &Node, envelope: &Envelope) -> NodeResult<Value> {
     };
     let body = InvokeResponse { result };
     Ok(serde_json::to_value(body)?)
+}
+
+/// What the journal calls this exchange: the capability for an `invoke`,
+/// otherwise the meta verb itself.
+fn inbound_label(envelope: &n3ur0n_core::message::Envelope) -> Option<String> {
+    match envelope.verb {
+        ProtocolVerb::Invoke => envelope
+            .payload
+            .get("capability")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        ProtocolVerb::DescribeSelf => Some("describe_self".into()),
+        ProtocolVerb::Ping => Some("ping".into()),
+        ProtocolVerb::GetKnownPeers => Some("get_known_peers".into()),
+        ProtocolVerb::BlobTicket => Some("blob_ticket".into()),
+    }
+}
+
+/// Best-effort journal write: a node must answer its peer even when it cannot
+/// record having done so, so a failure here is logged and never propagated.
+fn record_audit<T>(
+    node: &Node,
+    direction: crate::audit::Direction,
+    peer_id: &str,
+    capability: Option<String>,
+    outcome: &NodeResult<T>,
+    elapsed: std::time::Duration,
+) {
+    let entry = n3ur0n_storage::audit::AuditEntry {
+        timestamp: node.clock().now().unix_timestamp(),
+        direction,
+        peer_id: peer_id.to_string(),
+        capability,
+        status: match outcome {
+            Ok(_) => "ok".to_string(),
+            Err(e) => crate::audit::status_of(e),
+        },
+        latency_ms: i64::try_from(elapsed.as_millis()).ok(),
+    };
+    if let Err(e) = n3ur0n_storage::audit::record(node.db(), &entry) {
+        tracing::warn!(error = %e, "audit write failed");
+    }
 }

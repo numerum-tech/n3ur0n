@@ -221,6 +221,13 @@ fn build_app(
         )
         .merge(crate::files_api::routes().layer(DefaultBodyLimit::max(FILE_UPLOAD_LIMIT)))
         .merge(
+            // Reading the dashboard is reading what this node does with its
+            // peers, so it rides with the peer directory's own read perm.
+            crate::activity_api::routes()
+                .route_layer(require_perm!(crate::auth::perm::PEERS_READ))
+                .with_state(state.clone()),
+        )
+        .merge(
             Router::new()
                 .route("/planner", get(api_planner_get))
                 .route_layer(require_perm!(crate::auth::perm::BACKENDS_READ))
