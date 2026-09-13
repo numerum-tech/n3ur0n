@@ -64,6 +64,41 @@ pub fn set_alias(db: &Db, id: &str, alias: Option<&str>) -> StorageResult<()> {
     Ok(())
 }
 
+/// Peers whose canonical id starts with `prefix`.
+///
+/// `GLOB` with a literal prefix is the form SQLite resolves through the `id`
+/// primary-key index, so this is a range scan rather than a read of the whole
+/// directory. Returns every match, because two peers sharing a prefix is an
+/// ambiguity the caller has to see rather than a tie to break arbitrarily.
+///
+/// The prefix is rejected unless it is plain lowercase base32 — the shape an
+/// id actually has — which also keeps `GLOB` metacharacters out of the pattern.
+pub fn find_by_id_prefix(db: &Db, prefix: &str, limit: i64) -> StorageResult<Vec<PeerRecord>> {
+    let body = prefix.strip_prefix("n3:").unwrap_or(prefix);
+    if body.is_empty() || !body.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()) {
+        return Ok(Vec::new());
+    }
+    let conn = db.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, endpoint, alias, last_seen, tls_fingerprint,
+                describe_self_cached, describe_self_fetched_at, source
+         FROM peers WHERE id GLOB ?1 ORDER BY id LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![format!("n3:{body}*"), limit], |row| {
+        Ok(PeerRecord {
+            id: row.get(0)?,
+            endpoint: row.get(1)?,
+            alias: row.get(2)?,
+            last_seen: row.get(3)?,
+            tls_fingerprint: row.get(4)?,
+            describe_self_cached: row.get(5)?,
+            describe_self_fetched_at: row.get(6)?,
+            source: row.get(7)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 pub fn get(db: &Db, id: &str) -> StorageResult<Option<PeerRecord>> {
     let conn = db.get()?;
     let mut stmt = conn.prepare(
@@ -155,6 +190,38 @@ mod tests {
             get(&db, "n3:peer").unwrap().unwrap().alias.as_deref(),
             Some("renamed")
         );
+    }
+
+    #[test]
+    fn find_by_id_prefix_matches_on_the_index_and_surfaces_ambiguity() {
+        let db = crate::open_in_memory().unwrap();
+        for id in ["n3:aaaa1111", "n3:aaaa2222", "n3:bbbb3333"] {
+            upsert(
+                &db,
+                &PeerRecord {
+                    id: id.into(),
+                    endpoint: format!("https://{id}.example"),
+                    alias: None,
+                    last_seen: Some(1),
+                    tls_fingerprint: None,
+                    describe_self_cached: None,
+                    describe_self_fetched_at: None,
+                    source: None,
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(find_by_id_prefix(&db, "bbbb", 10).unwrap().len(), 1);
+        // A prefix two peers share is an ambiguity, not a tie to break.
+        assert_eq!(find_by_id_prefix(&db, "aaaa", 10).unwrap().len(), 2);
+        assert_eq!(find_by_id_prefix(&db, "aaaa1", 10).unwrap().len(), 1);
+        // The `n3:` prefix is accepted and stripped.
+        assert_eq!(find_by_id_prefix(&db, "n3:bbbb", 10).unwrap().len(), 1);
+        // Anything that is not an id shape matches nothing — no GLOB wildcard
+        // ever reaches the pattern.
+        assert!(find_by_id_prefix(&db, "*", 10).unwrap().is_empty());
+        assert!(find_by_id_prefix(&db, "AAAA", 10).unwrap().is_empty());
+        assert!(find_by_id_prefix(&db, "", 10).unwrap().is_empty());
     }
 
     #[test]

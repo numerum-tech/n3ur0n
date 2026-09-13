@@ -1383,10 +1383,6 @@ fn resolve_scope(node: &Node, catalog: &Catalog, scope: &MentionScope) -> Resolv
     let mut out = ResolvedScope::default();
 
     if !scope.peers.is_empty() {
-        let known = n3ur0n_storage::peers::list(node.db(), 500).unwrap_or_else(|e| {
-            warn!(error = %e, "peer directory unavailable; peer mentions cannot resolve");
-            Vec::new()
-        });
         let self_id = node.instance_id().to_string();
         for entity in &scope.peers {
             // `@peer:self` is the one name that cannot be squatted: it never
@@ -1406,16 +1402,36 @@ fn resolve_scope(node: &Node, catalog: &Catalog, scope: &MentionScope) -> Resolv
             // without ever trusting the label: only the part after `#` is
             // matched, so a stale or forged alias changes nothing.
             let key = entity.rsplit('#').next().unwrap_or(entity.as_str());
-            let hit = known
-                .iter()
-                .map(|p| p.id.clone())
-                .chain(std::iter::once(self_id.clone()))
-                .find(|id| {
-                    id == key
-                        || id.strip_prefix("n3:").is_some_and(|short| {
-                            key.len() >= 8 && short.starts_with(key)
-                        })
-                });
+
+            // The instance itself is not in its own directory, so it is
+            // matched here rather than looked up.
+            let self_matches = self_id == key
+                || self_id
+                    .strip_prefix("n3:")
+                    .is_some_and(|short| key.len() >= 8 && short.starts_with(key));
+
+            // A prefix lookup on the primary key, not a scan of the whole
+            // directory: the label half of the token is never a search term,
+            // so there is nothing to match but the id.
+            let hit = if self_matches {
+                Some(self_id.clone())
+            } else if key.len() >= 8 || key.starts_with("n3:") {
+                match n3ur0n_storage::peers::find_by_id_prefix(node.db(), key, 2) {
+                    Ok(found) if found.len() == 1 => Some(found[0].id.clone()),
+                    // Two peers behind one prefix: say so instead of picking.
+                    Ok(found) if found.len() > 1 => {
+                        warn!(prefix = %key, "peer mention is ambiguous");
+                        None
+                    }
+                    Ok(_) => None,
+                    Err(e) => {
+                        warn!(error = %e, "peer directory unavailable; peer mentions cannot resolve");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             match hit {
                 Some(id) if !out.peer_ids.contains(&id) => out.peer_ids.push(id),
                 Some(_) => {}
