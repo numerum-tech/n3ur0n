@@ -1,0 +1,42 @@
+[manifest]
+version = "0.1"
+
+[descriptor]
+name = "time"
+version = "0.1.0"
+description = "Returns the current server time as RFC 3339 string and unix epoch seconds. Takes no arguments."
+mode = "free"
+tags = ["util", "time", "clock"]
+disambiguation = "Server wall-clock only. Not a monotonic timer, not a date calculator, not a calendar — pick this when the user asks for the literal current moment."
+output_semantic = "Current UTC instant as both human-readable string and unix epoch seconds."
+
+[descriptor.schema_in]
+type = "object"
+
+[descriptor.schema_out]
+type = "object"
+required = ["now", "unix"]
+properties = { now = { type = "string" }, unix = { type = "integer" } }
+
+[[descriptor.examples]]
+user_intent = "what time is it right now on the server?"
+args = {}
+expected_output = { now = "2026-05-11T12:34:56.789Z", unix = 1778492096 }
+
+[[descriptor.examples]]
+user_intent = "get a timestamp to use elsewhere in the plan"
+args = {}
+expected_output = { now = "2026-05-11T12:34:56.789Z", unix = 1778492096 }
+
+[[descriptor.negative_examples]]
+user_intent = "what day of the week is December 25 2030"
+why_not = "this cap returns *now*, not arbitrary dates; do not use for date arithmetic."
+
+[binding]
+type = "http"
+backend = "hermes"
+
+[binding.http]
+url_template = "/time"
+method = "POST"
+body_template = "{{args}}"

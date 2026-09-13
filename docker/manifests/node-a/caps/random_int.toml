@@ -1,0 +1,43 @@
+[manifest]
+version = "0.1"
+
+[descriptor]
+name = "random_int"
+version = "0.1.0"
+description = "Returns a uniformly random integer in [min, max] inclusive. Defaults: min=0, max=100."
+mode = "free"
+tags = ["util", "random", "number"]
+disambiguation = "Integer randomness only. Each call is independent (no seed control). For random floats or weighted choice, this is the wrong cap."
+output_semantic = "A single uniformly-distributed integer drawn from [min, max]."
+
+[descriptor.schema_in]
+type = "object"
+properties = { min = { type = "integer", default = 0 }, max = { type = "integer", default = 100 } }
+
+[descriptor.schema_out]
+type = "object"
+required = ["value", "min", "max"]
+properties = { value = { type = "integer" }, min = { type = "integer" }, max = { type = "integer" } }
+
+[[descriptor.examples]]
+user_intent = "pick a random number between 1 and 10"
+args = { min = 1, max = 10 }
+expected_output = { value = 7, min = 1, max = 10 }
+
+[[descriptor.examples]]
+user_intent = "give me a random integer"
+args = {}
+expected_output = { value = 42, min = 0, max = 100 }
+
+[[descriptor.negative_examples]]
+user_intent = "shuffle this list of items"
+why_not = "this cap returns one integer, not a permutation; do not use for list shuffling."
+
+[binding]
+type = "http"
+backend = "hermes"
+
+[binding.http]
+url_template = "/random_int"
+method = "POST"
+body_template = "{{args}}"

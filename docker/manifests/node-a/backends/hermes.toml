@@ -1,0 +1,14 @@
+# The cluster's utility API. It lives in its own container (docker/hermes/),
+# outside the gateway: a capability's upstream is a service the node calls, not
+# code compiled into the node. Every n3ur0n instance ships the same binary, so
+# anything embedded in it is published identically by every node and the
+# network never has to route.
+[manifest]
+version = "0.1"
+
+[backend]
+name = "hermes"
+kind = "http_base"
+
+[http_base]
+base_url = "http://hermes:8080"

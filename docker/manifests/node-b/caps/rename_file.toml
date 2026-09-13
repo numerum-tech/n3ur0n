@@ -1,0 +1,58 @@
+# The cheapest possible file capability, and the reason it exists: it exercises
+# the whole blob round trip — upload to the peer (class A), staging on the peer
+# (class C), result fetched back (class B) — without needing the bytes at all.
+# A rename is metadata, so the output is the *same* hash under a new name, and
+# Hermes never fetches the content the reference describes.
+[manifest]
+version = "0.1"
+
+[descriptor]
+name = "rename_file"
+version = "0.1.0"
+description = "Returns a file unchanged under a new name. Input `file` is a blob reference, `new_name` the name to give it. The bytes are not read or modified."
+mode = "free"
+tags = ["util", "file", "rename"]
+disambiguation = "Renames a file and nothing else: same bytes, same hash, new name. Not a conversion, not an edit. Requires a file to already be attached."
+output_semantic = "The same blob as the input, carrying the requested name."
+
+[descriptor.schema_in]
+type = "object"
+required = ["file", "new_name"]
+
+[descriptor.schema_in.properties.file]
+type = "object"
+x-n3uron-type = "blob"
+required = ["hash", "size", "mime"]
+properties = { hash = { type = "string", pattern = "^sha256:[a-f0-9]{64}$" }, size = { type = "integer", minimum = 1 }, mime = { type = "string" } }
+
+[descriptor.schema_in.properties.new_name]
+type = "string"
+minLength = 1
+
+[descriptor.schema_out]
+type = "object"
+required = ["file"]
+
+[descriptor.schema_out.properties.file]
+type = "object"
+x-n3uron-type = "blob"
+required = ["hash", "size", "mime", "name"]
+properties = { hash = { type = "string" }, size = { type = "integer" }, mime = { type = "string" }, name = { type = "string" } }
+
+[[descriptor.examples]]
+user_intent = "rename this file to report-final.txt"
+args = { file = { hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000", size = 12, mime = "text/plain" }, new_name = "report-final.txt" }
+expected_output = { file = { hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000", size = 12, mime = "text/plain", name = "report-final.txt" } }
+
+[[descriptor.negative_examples]]
+user_intent = "convert this PDF to Word"
+why_not = "this cap only changes the name; it never reads or rewrites the bytes. A conversion needs a cap that produces new content."
+
+[binding]
+type = "http"
+backend = "hermes"
+
+[binding.http]
+url_template = "/rename_file"
+method = "POST"
+body_template = "{{args}}"

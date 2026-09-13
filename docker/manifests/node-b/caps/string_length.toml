@@ -1,0 +1,44 @@
+[manifest]
+version = "0.1"
+
+[descriptor]
+name = "string_length"
+version = "0.1.0"
+description = "Counts characters (Unicode scalar values) and bytes in a string. Input field is `text`."
+mode = "free"
+tags = ["util", "string", "count"]
+disambiguation = "Counts characters and bytes of one string. Not a word count, not a token count."
+output_semantic = "Character count and UTF-8 byte count of the input string."
+
+[descriptor.schema_in]
+type = "object"
+required = ["text"]
+properties = { text = { type = "string" } }
+
+[descriptor.schema_out]
+type = "object"
+required = ["chars", "bytes"]
+properties = { chars = { type = "integer" }, bytes = { type = "integer" } }
+
+[[descriptor.examples]]
+user_intent = "how many characters in 'hello world'"
+args = { text = "hello world" }
+expected_output = { chars = 11, bytes = 11 }
+
+[[descriptor.examples]]
+user_intent = "byte size of 'héllo'"
+args = { text = "héllo" }
+expected_output = { chars = 5, bytes = 6 }
+
+[[descriptor.negative_examples]]
+user_intent = "how many words in this sentence"
+why_not = "this cap counts characters, not whitespace-delimited words."
+
+[binding]
+type = "http"
+backend = "hermes"
+
+[binding.http]
+url_template = "/string_length"
+method = "POST"
+body_template = "{{args}}"

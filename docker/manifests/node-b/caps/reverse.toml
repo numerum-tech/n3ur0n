@@ -1,0 +1,39 @@
+[manifest]
+version = "0.1"
+
+[descriptor]
+name = "reverse"
+version = "0.1.0"
+description = "Reverses a string character by character (Unicode scalar-value order). Input field is `text`."
+mode = "free"
+tags = ["util", "string", "text"]
+disambiguation = "Character-level reversal of one string. Not a word reversal, not a sort, not a palindrome test."
+output_semantic = "The input string with its characters in reverse order."
+
+[descriptor.schema_in]
+type = "object"
+required = ["text"]
+properties = { text = { type = "string" } }
+
+[descriptor.schema_out]
+type = "object"
+required = ["reversed"]
+properties = { reversed = { type = "string" } }
+
+[[descriptor.examples]]
+user_intent = "reverse the string hello"
+args = { text = "hello" }
+expected_output = { reversed = "olleh" }
+
+[[descriptor.negative_examples]]
+user_intent = "put these words in reverse order"
+why_not = "this cap reverses characters, not word order."
+
+[binding]
+type = "http"
+backend = "hermes"
+
+[binding.http]
+url_template = "/reverse"
+method = "POST"
+body_template = "{{args}}"

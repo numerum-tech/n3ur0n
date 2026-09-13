@@ -8,7 +8,9 @@
 # Nodes — the capability spread is the point: no single node has everything,
 # one node has nothing, and one advertises a capability it cannot serve.
 #   node-a — seed + planner (PlanExec, host Ollama); publishes time, random_int
-#   node-b — utility: rename_file, reverse, string_length (port 4243)
+#   node-b — rename_file, reverse, string_length (port 4243)
+#   hermes — not a node: the HTTP service node-a and node-b bind those five
+#            caps to, via manifests in docker/manifests/ (port 4250)
 #   node-c — chat via host Ollama (port 4244) — a working LLM cap
 #   node-d — chat via a remote LLM on the LAN (port 4245). Deliberately left
 #            pointing at an endpoint that is usually unreachable: a peer that
@@ -52,15 +54,18 @@ services:
         ipv4_address: 172.28.42.42
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      hermes:
+        condition: service_healthy
     environment:
       N3UR0N_ENDPOINT: http://node-a:4242
       N3UR0N_ALIAS: seed
       N3UR0N_AUTH_DISABLE: "1"
       # The seed publishes too: a node that only calls is not the common case,
       # and a planner whose own instance offers something has to weigh local
-      # against remote. Two cheap caps are enough for that.
-      N3UR0N_BACKEND: utility
-      N3UR0N_CAPS: time,random_int
+      # against remote. Two cheap caps are enough for that. They come from
+      # manifests bound to the hermes service, not from the binary.
+      N3UR0N_MANIFEST_DIR: /etc/n3ur0n/manifests
       # node-a runs the local planner: a 7B/8B model on the host's Ollama.
       # plan_exec: LLM compiles a typed plan upfront, deterministic executor
       # walks it. Override with PLANNER_MODE=llm to use the older ReAct loop.
@@ -75,6 +80,7 @@ services:
       - "4242:4242"
     volumes:
       - node-a-data:/var/lib/n3ur0n
+      - ./manifests/node-a:/etc/n3ur0n/manifests:ro
 
   node-b:
     <<: *node
@@ -86,21 +92,23 @@ services:
     depends_on:
       node-a:
         condition: service_healthy
+      hermes:
+        condition: service_healthy
     environment:
       N3UR0N_ENDPOINT: http://node-b:4242
       N3UR0N_ALIAS: toolbox
       N3UR0N_AUTH_DISABLE: "1"
-      N3UR0N_BACKEND: utility
-      # The complement of node-a's share. Splitting the backend's five caps
+      # The complement of node-a's share. Splitting hermes' five functions
       # across two nodes is what forces the planner to pick a peer instead of
       # always landing on the one node that has everything.
-      N3UR0N_CAPS: rename_file,reverse,string_length
+      N3UR0N_MANIFEST_DIR: /etc/n3ur0n/manifests
       N3UR0N_BOOTSTRAP_PEERS: http://node-a:4242
       RUST_LOG: info,n3ur0n=debug
     ports:
       - "4243:4242"
     volumes:
       - node-b-data:/var/lib/n3ur0n
+      - ./manifests/node-b:/etc/n3ur0n/manifests:ro
 
   node-c:
     <<: *node
@@ -183,6 +191,33 @@ services:
     volumes:
       - node-e-data:/var/lib/n3ur0n
       - ${N3UR0N_MANIFEST_HOST_DIR:-/tmp/n3manifest}:/etc/n3ur0n/manifests:ro
+
+  # Not an n3ur0n node: the utility API the cluster's caps bind to. It exists
+  # because functions compiled into the gateway are published identically by
+  # every node running that build, which leaves the network nothing to route.
+  # Moving them out puts a capability's upstream where it belongs — behind an
+  # HTTP call the node makes — and gives the repo its first worked example of
+  # manifest mode. See docker/hermes/server.py and docker/manifests/.
+  hermes:
+    build:
+      context: hermes
+    image: n3ur0n-hermes:dev
+    container_name: n3uron-hermes
+    hostname: hermes
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health',timeout=2).status==200 else 1)\""
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 2s
+    networks:
+      n3uronnet:
+        ipv4_address: 172.28.42.50
+    ports:
+      - "4250:8080"
 
 networks:
   # Fixed subnet, and each node pinned to the address that matches its
