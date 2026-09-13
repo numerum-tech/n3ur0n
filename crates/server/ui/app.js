@@ -2180,7 +2180,7 @@ async function uploadDraftFiles(fileList) {
 
 function openSettings() {
     activateSection("settings");
-    activateSettingsSection("backends");
+    activateSettingsSection("identity");
 }
 
 function closeSettings() {

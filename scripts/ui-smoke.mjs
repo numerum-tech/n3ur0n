@@ -86,11 +86,18 @@ step("auth gate visible", await evaluate(`!!document.querySelector('#auth-gate:n
 const openLobes = async () => {
     await evaluate(`document.querySelector('.rail-btn[data-section="settings"]').click()`);
     await sleep(900);
+    // Settings lands on Identity, but click it anyway: the step must hold if
+    // the landing section ever changes again.
     await evaluate(`document.querySelector('#settings-nav .settings-nav-item[data-section="identity"]').click()`);
     await sleep(1200);
 };
 await openLobes();
 step("section", await evaluate("document.body.dataset.section"));
+step("settings lands on", await evaluate(
+    `(() => { const r = document.querySelector('.rail-btn[data-section="settings"]');
+      document.querySelector('#settings-nav .settings-nav-item[data-section="about"]').click();
+      r.click();
+      return document.querySelector('#settings-nav .settings-nav-item.active')?.dataset.section; })()`));
 step("settings panel visible", await evaluate(
     `(() => { const p = document.getElementById('settings-page'); const r = p.getBoundingClientRect(); return !p.classList.contains('hidden') && r.width > 0 && r.height > 0; })()`));
 
