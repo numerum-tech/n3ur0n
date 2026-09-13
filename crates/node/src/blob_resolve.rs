@@ -56,6 +56,10 @@ fn parse_blob_ref(value: &Value) -> Option<BlobRef> {
             .get("fetch_url")
             .and_then(|u| u.as_str())
             .map(String::from),
+        name: value
+            .get("name")
+            .and_then(|n| n.as_str())
+            .map(String::from),
     })
 }
 
@@ -160,11 +164,19 @@ fn record_inbound_output(
     let class = classify_inbound_output();
     let now = node.clock().now().unix_timestamp();
     let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Output) as i64;
-    // The producer never sends a name, so we assign a provisional one. It is
-    // meant to be renamed; it only has to be unambiguous and sortable.
-    let path = n3ur0n_core::sanitize_blob_path(&n3ur0n_core::derive_output_path(
-        capability, &blob.mime, now,
-    ));
+    // A producer that names its output is taken at its word, after
+    // sanitizing — the name is a label chosen by a remote peer, never a path
+    // to trust. Without one we assign a provisional name, unambiguous and
+    // sortable, meant to be renamed later.
+    let path = blob
+        .name
+        .as_deref()
+        .and_then(n3ur0n_core::sanitize_blob_path)
+        .or_else(|| {
+            n3ur0n_core::sanitize_blob_path(&n3ur0n_core::derive_output_path(
+                capability, &blob.mime, now,
+            ))
+        });
     let row = BlobInsert {
         hash: blob.hash.clone(),
         path,
@@ -254,8 +266,18 @@ pub async fn fetch_output_blobs(
 
     let mut out = value;
     for br in refs {
-        // Skip if already local.
+        // Holding the bytes already is not a reason to skip the result: a
+        // capability that transforms a file without changing it — a rename —
+        // hands back the very hash we uploaded. Downloading it again would be
+        // pointless, but it is still an output of this call, and the row still
+        // has to move to class B and take the name the capability chose.
         if read_local_bytes(node, &br.hash).is_some() {
+            let now = node.clock().now().unix_timestamp();
+            let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Output) as i64;
+            let name = br.name.as_deref().and_then(n3ur0n_core::sanitize_blob_path);
+            blobs::mark_inbound_output(node.db(), &br.hash, name.as_deref(), expires)
+                .map_err(|e| e.to_string())?;
+            strip_fetch_url(&mut out, &br.hash);
             continue;
         }
         let bytes = download_blob(http, node.keypair(), endpoint, &recipient, &br)
@@ -343,6 +365,7 @@ pub fn store_local_cache(
     blobs::upsert(node.db(), &row).map_err(|e| e.to_string())?;
 
     Ok(BlobRef {
+        name: path.map(str::to_string),
         hash,
         size: bytes.len() as u64,
         mime: mime.to_string(),

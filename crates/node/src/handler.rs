@@ -235,6 +235,21 @@ async fn invoke(node: &Node, envelope: &Envelope) -> NodeResult<Value> {
     }
     // v0.1: subscription token validation is the operator's concern (out-of-band).
 
+    // Blob arguments (spec §12): the caller uploads the bytes to our listener
+    // before invoking, which stages them as class C. Confirm we actually hold
+    // every blob the args mention before running the capability — a peer that
+    // skipped the upload, or whose upload expired and was collected, would
+    // otherwise reach a capability that cannot possibly do its job, and the
+    // failure would surface as whatever that capability improvises.
+    for br in crate::blob_resolve::collect_blob_refs(&req.args) {
+        if crate::blob_resolve::read_local_bytes(node, &br.hash).is_none() {
+            return Err(NodeError::InvalidPayload(format!(
+                "blob {} was not uploaded to this instance (PUT /n3ur0n/v0/blobs first)",
+                br.hash
+            )));
+        }
+    }
+
     // v0.3: bindings take precedence over the legacy single-backend path.
     // When the registry carries a binding for this cap (manifest mode),
     // dispatch through it; otherwise fall back to the compile-time

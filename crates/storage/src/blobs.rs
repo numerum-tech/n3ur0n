@@ -187,6 +187,47 @@ pub fn mark_outbound(pool: &Db, hash: &str, expires_at: i64) -> StorageResult<bo
     Ok(n > 0)
 }
 
+/// Record that these bytes came back as the output of a remote capability
+/// (class B), optionally under a name the capability chose.
+///
+/// The sibling of [`mark_outbound`], and needed for the same reason: [`upsert`]
+/// never rewrites a classification. It matters most when a capability returns
+/// the *same* bytes it was given — a rename — because the row already exists as
+/// the class A blob we sent, and nothing else would move it to B.
+///
+/// `name` replaces the stored path when set. That is the one place the
+/// "first name wins" rule of [`upsert`] is deliberately overridden: there, a
+/// second name means the same bytes were re-uploaded under a different
+/// filename and the original should stand; here it is a capability's answer to
+/// a request to rename, which is the whole point of the call.
+///
+/// The `WHERE` clause spares class C: a cap staging blob belongs to the peer
+/// that uploaded it, and must never be relabelled as one of our results.
+pub fn mark_inbound_output(
+    pool: &Db,
+    hash: &str,
+    name: Option<&str>,
+    expires_at: i64,
+) -> StorageResult<bool> {
+    let conn = pool.get()?;
+    let n = conn.execute(
+        "UPDATE blobs SET
+            provenance = 'inbound',
+            role = 'output',
+            anchor_kind = 'user_session',
+            processing_status = 'ready',
+            user_visible = 1,
+            user_deletable = 1,
+            path = COALESCE(?2, path),
+            expires_at = ?3,
+            last_access_at = strftime('%s', 'now')
+         WHERE hash = ?1
+           AND anchor_kind IN ('local_cache', 'user_session')",
+        rusqlite::params![hash, name, expires_at],
+    )?;
+    Ok(n > 0)
+}
+
 pub fn get(pool: &Db, hash: &str) -> StorageResult<Option<BlobRecord>> {
     let conn = pool.get()?;
     let sql = format!("SELECT {SELECT_COLS} FROM blobs WHERE hash = ?1");
@@ -390,6 +431,45 @@ mod tests {
         let a = get(&db, "sha256:a").unwrap().unwrap();
         assert_eq!(a.anchor_kind, "user_session");
         assert_eq!(a.expires_at, 12_345);
+    }
+
+    #[test]
+    fn mark_inbound_output_moves_a_sent_file_to_class_b_under_its_new_name() {
+        let db = crate::open_in_memory().unwrap();
+        let mut sent = row_classed("sha256:sent", "outbound", "input", "user_session");
+        sent.path = Some("note.txt".into());
+        upsert(&db, &sent).unwrap();
+
+        // A rename returns the same bytes, so this is the very row we sent.
+        assert!(mark_inbound_output(&db, "sha256:sent", Some("renamed.txt"), 9_000).unwrap());
+        let r = get(&db, "sha256:sent").unwrap().unwrap();
+        assert_eq!(r.provenance, "inbound");
+        assert_eq!(r.role, "output");
+        assert_eq!(r.path.as_deref(), Some("renamed.txt"));
+        assert_eq!(r.processing_status, "ready");
+    }
+
+    #[test]
+    fn mark_inbound_output_keeps_the_name_when_the_cap_supplies_none() {
+        let db = crate::open_in_memory().unwrap();
+        let mut sent = row_classed("sha256:keep", "outbound", "input", "local_cache");
+        sent.path = Some("note.txt".into());
+        upsert(&db, &sent).unwrap();
+        assert!(mark_inbound_output(&db, "sha256:keep", None, 9_000).unwrap());
+        assert_eq!(
+            get(&db, "sha256:keep").unwrap().unwrap().path.as_deref(),
+            Some("note.txt")
+        );
+    }
+
+    #[test]
+    fn mark_inbound_output_never_touches_cap_staging() {
+        let db = crate::open_in_memory().unwrap();
+        upsert(&db, &row_classed("sha256:capjob", "inbound", "input", "cap_job")).unwrap();
+        assert!(!mark_inbound_output(&db, "sha256:capjob", Some("mine.txt"), 9_000).unwrap());
+        let r = get(&db, "sha256:capjob").unwrap().unwrap();
+        assert_eq!(r.anchor_kind, "cap_job");
+        assert_eq!(r.role, "input");
     }
 
     #[test]

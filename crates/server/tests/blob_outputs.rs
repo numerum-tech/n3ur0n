@@ -131,6 +131,7 @@ async fn capability_output_lands_in_the_requesting_users_files() {
         size: data.len() as u64,
         mime: "text/plain".into(),
         fetch_url: None,
+        name: None,
     };
     assert_eq!(
         n3ur0n_node::blob_resolve::read_local_bytes(&consumer, &br.hash).as_deref(),

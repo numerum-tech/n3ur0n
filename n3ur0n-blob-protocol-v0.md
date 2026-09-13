@@ -6,6 +6,14 @@
 **Portée** : transfert de blobs auxiliaire au verbe `invoke`. Ne touche pas aux 4 verbes existants. Ajoute un endpoint HTTPS sur le listener publisher.
 **Lecteur** : implémenteur runtime, designer du format `cap.toml` / `backend.toml`, équipe UI Tauri.
 
+**Amendement 2026-09-13** (additif, sans bump de `protocol_version`) :
+
+- **`BlobRef.name`** (`Option<String>`, `serde(default)`) — nom lisible que le *producteur* veut donner au blob. Absent sur la plupart des références : les octets sont l'identité, le nom est une étiquette. Une cap qui transforme un fichier le renseigne ; le destinataire le **sanitize** (`sanitize_blob_path`) avant de l'écrire — c'est une étiquette choisie par un pair distant, jamais un chemin de confiance. Sans `name`, `record_inbound_output` garde le nom provisoire dérivé de la cap et de l'horodatage.
+- **Vérification des blobs entrants (§12, enfin implémentée)** — `handler.rs::invoke` refuse désormais un `invoke` dont les args référencent un blob que l'instance ne détient pas, avec un message nommant le hash. Avant, la cap était appelée quand même et échouait comme elle pouvait.
+- **Sortie déjà locale** — `fetch_output_blobs` ne court-circuitait une référence locale qu'en sautant *tout* le traitement. Une cap qui renvoie les octets qu'on lui a donnés (un renommage) produit le même hash : le téléchargement est bien inutile, mais la ligne doit passer en classe B et prendre le nom choisi. `blobs::mark_inbound_output` fait cette transition, gardée pour ne jamais toucher la classe C.
+- **Une ligne par hash, un nom à la fois.** L'index est adressé par contenu : envoyer un fichier puis le recevoir renommé fait bouger *la même* ligne (A → B) et remplace son nom. Deux noms simultanés pour les mêmes octets ne sont pas représentables ; c'est cohérent avec un renommage, ce serait faux pour une cap qui « copie sous un autre nom ».
+- **Cap de référence** — `rename_file` (backend `utility`, node-b du cluster) : même hash, nouveau nom, sans lire les octets. C'est la plus petite cap qui exerce la boucle A → C → B en entier ; test : `cargo test -p n3ur0n-node --test cluster_blob_transfer -- --ignored`.
+
 **Amendement 2026-06-04** : classification des blobs par **provenance** (envoyé / reçu) et **ancrage** (session utilisateur locale vs job cap). Quatre classes A–D (§2.4). Panneau **Files** utilisateur (§10.5) limité aux classes visibles ; staging cap distant (classe C) hors UI utilisateur, admin/cap uniquement. Index SQLite étendu (§5.4), RBAC local (§6.3). Pas de backend de stockage pluggable — disque + SQLite comme au brouillon initial.
 
 ---

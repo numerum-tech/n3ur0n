@@ -7,6 +7,7 @@
 //! - `random_int` — random integer in a range.
 //! - `reverse` — reverses a string.
 //! - `string_length` — counts characters in a string.
+//! - `rename_file` — returns the same blob under a new name.
 
 use async_trait::async_trait;
 use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
@@ -51,6 +52,41 @@ impl Backend for UtilityBackend {
                 Ok(json!({
                     "chars": text.chars().count(),
                     "bytes": text.len()
+                }))
+            }
+            // The cheapest possible file capability, and the reason it exists:
+            // it exercises the whole blob round trip — upload to the peer
+            // (class A), staging on the peer (class C), result fetched back
+            // (class B) — without needing the bytes at all. A rename is
+            // metadata, so the output is the *same* hash under a new name.
+            "rename_file" => {
+                let file = args
+                    .get("file")
+                    .ok_or_else(|| AdapterError::Backend("`file` required".into()))?;
+                let hash = file
+                    .get("hash")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| AdapterError::Backend("`file.hash` required".into()))?;
+                let size = file
+                    .get("size")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| AdapterError::Backend("`file.size` required".into()))?;
+                let mime = file
+                    .get("mime")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("application/octet-stream");
+                let new_name = coerce_to_string(args.get("new_name"))
+                    .ok_or_else(|| AdapterError::Backend("`new_name` required".into()))?;
+                if new_name.trim().is_empty() {
+                    return Err(AdapterError::Backend("`new_name` must not be empty".into()));
+                }
+                Ok(json!({
+                    "file": {
+                        "hash": hash,
+                        "size": size,
+                        "mime": mime,
+                        "name": new_name,
+                    }
                 }))
             }
             other => Err(AdapterError::UnknownCapability(other.to_string())),
@@ -278,6 +314,83 @@ words. Use a chat cap or a dedicated word-count cap if available."
                 languages: vec![],
                 countries: vec![],
             },
+            CapabilityDecl {
+                name: "rename_file".into(),
+                description: "Returns a file unchanged under a new name. Input `file` is a blob reference, `new_name` the name to give it. The bytes are not read or modified."
+                    .into(),
+                schema_in: json!({
+                    "type": "object",
+                    "required": ["file", "new_name"],
+                    "properties": {
+                        "file": {
+                            "type": "object",
+                            "x-n3uron-type": "blob",
+                            "required": ["hash", "size", "mime"],
+                            "properties": {
+                                "hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+                                "size": {"type": "integer", "minimum": 1},
+                                "mime": {"type": "string"}
+                            }
+                        },
+                        "new_name": {"type": "string", "minLength": 1}
+                    }
+                }),
+                schema_out: json!({
+                    "type": "object",
+                    "required": ["file"],
+                    "properties": {
+                        "file": {
+                            "type": "object",
+                            "x-n3uron-type": "blob",
+                            "required": ["hash", "size", "mime", "name"],
+                            "properties": {
+                                "hash": {"type": "string"},
+                                "size": {"type": "integer"},
+                                "mime": {"type": "string"},
+                                "name": {"type": "string"}
+                            }
+                        }
+                    }
+                }),
+                mode: AccessMode::Free,
+                pricing: None,
+                tags: vec!["util".into(), "file".into(), "rename".into()],
+                lobe_ids: vec![],
+                examples: vec![CapabilityExample {
+                    user_intent: "rename this file to report-final.txt".into(),
+                    args: json!({
+                        "file": {
+                            "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                            "size": 12,
+                            "mime": "text/plain"
+                        },
+                        "new_name": "report-final.txt"
+                    }),
+                    expected_output: json!({
+                        "file": {
+                            "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                            "size": 12,
+                            "mime": "text/plain",
+                            "name": "report-final.txt"
+                        }
+                    }),
+                }],
+                disambiguation: Some(
+                    "Renames a file and nothing else: same bytes, same hash, new name. Not a conversion, not an edit. Requires a file to already be attached."
+                        .into(),
+                ),
+                negative_examples: vec![NegativeExample {
+                    user_intent: "convert this PDF to Word".into(),
+                    why_not: "this cap only changes the name; it never reads or rewrites the bytes. A conversion needs a cap that produces new content."
+                        .into(),
+                }],
+                output_semantic: Some(
+                    "The same blob as the input, carrying the requested name.".into(),
+                ),
+                version: "0.1.0".into(),
+                languages: vec![],
+                countries: vec![],
+            },
         ])
     }
 
@@ -342,10 +455,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn describe_lists_four_caps() {
+    async fn describe_lists_every_cap() {
         let decls = UtilityBackend.describe().await.unwrap();
         let names: Vec<&str> = decls.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, ["time", "random_int", "reverse", "string_length"]);
+        assert_eq!(
+            names,
+            ["time", "random_int", "reverse", "string_length", "rename_file"]
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_file_returns_the_same_blob_under_the_new_name() {
+        let hash = format!("sha256:{}", "a".repeat(64));
+        let v = UtilityBackend
+            .invoke(
+                "rename_file",
+                json!({
+                    "file": {"hash": hash, "size": 12, "mime": "text/plain"},
+                    "new_name": "report-final.txt"
+                }),
+            )
+            .await
+            .unwrap();
+        // Same bytes, so the same hash: a rename is metadata, not a transform.
+        assert_eq!(v["file"]["hash"], hash.as_str());
+        assert_eq!(v["file"]["size"], 12);
+        assert_eq!(v["file"]["name"], "report-final.txt");
+    }
+
+    #[tokio::test]
+    async fn rename_file_refuses_an_empty_or_missing_name() {
+        let hash = format!("sha256:{}", "a".repeat(64));
+        let file = json!({"hash": hash, "size": 12, "mime": "text/plain"});
+        assert!(
+            UtilityBackend
+                .invoke("rename_file", json!({"file": file, "new_name": "   "}))
+                .await
+                .is_err()
+        );
+        assert!(
+            UtilityBackend
+                .invoke("rename_file", json!({"file": file}))
+                .await
+                .is_err()
+        );
+        assert!(
+            UtilityBackend
+                .invoke("rename_file", json!({"new_name": "x.txt"}))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

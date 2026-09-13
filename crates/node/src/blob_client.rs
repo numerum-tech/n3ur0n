@@ -114,6 +114,7 @@ pub async fn upload_blob(
             size: bytes.len() as u64,
             mime: mime.to_string(),
             fetch_url: None,
+            name: None,
         });
     }
 
@@ -149,6 +150,7 @@ pub async fn upload_blob(
         size: bytes.len() as u64,
         mime: mime.to_string(),
         fetch_url: None,
+        name: None,
     })
 }
 

@@ -26,6 +26,15 @@ pub struct BlobRef {
     /// Canonical fetch URL on the publisher (present on outbound refs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fetch_url: Option<String>,
+    /// Human-readable name the producer wants this blob to carry.
+    ///
+    /// Absent on most refs: the bytes are the identity, the name is a label.
+    /// A capability that transforms a file sets it so the caller stores the
+    /// result under a meaningful name instead of the provisional one derived
+    /// from the capability and a timestamp. Sanitized by the receiver — it is
+    /// a label chosen by a remote peer, never a path to trust.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Blob ticket operation.
