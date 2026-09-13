@@ -2800,7 +2800,7 @@ async function renderLobesPage() {
         list.innerHTML = draft.length === 0
             ? `<p class="row-sub">${escapeHtml(t("settings.lobes.empty"))}</p>`
             : draft.map(l => `
-                <span class="mention-badge" data-lobe="${escapeHtml(l)}">
+                <span class="mention-chip mention-chip-lobe" data-lobe="${escapeHtml(l)}">
                     @lobe:${escapeHtml(l)}
                     <button type="button" class="lobe-drop" data-drop="${escapeHtml(l)}"
                             title="${escapeHtml(t("settings.lobes.remove"))}" aria-label="${escapeHtml(t("settings.lobes.remove"))}">×</button>
@@ -2818,13 +2818,13 @@ async function renderLobesPage() {
                 <div class="card-icon">🌐</div>
                 <span class="card-title">${escapeHtml(t("settings.lobes.current"))}</span>
             </div>
-            <div id="lobes-chips" class="mention-badge-row"></div>
+            <div id="lobes-chips" class="lobe-row"></div>
             <form class="settings-form" onsubmit="return false;" style="margin-top: 12px;">
                 <div class="field">
                     <label class="field-label" for="lobes-input">${escapeHtml(t("settings.lobes.add.label"))}</label>
                     <div style="display:flex; gap:8px;">
                         <input id="lobes-input" class="form-control" type="text" placeholder="medical" />
-                        <button type="button" id="lobes-add">${escapeHtml(t("settings.lobes.add.button"))}</button>
+                        <button type="button" id="lobes-add" class="secondary">${escapeHtml(t("settings.lobes.add.button"))}</button>
                     </div>
                     <p class="row-sub">${escapeHtml(t("settings.lobes.max", { max }))}</p>
                 </div>
@@ -3466,11 +3466,11 @@ async function openCapForm(existingName, templateKey) {
                 <label>${escapeHtml(t("cap.form.field.lobes"))}</label>
                 ${_selfLobes.length === 0
                     ? `<p class="row-sub">${escapeHtml(t("cap.form.field.lobes.none"))}</p>`
-                    : `<div class="mention-badge-row">${_selfLobes.map(l => `
-                        <label class="row-sub" style="display:inline-flex; align-items:center; gap:6px;">
+                    : `<div class="lobe-row">${_selfLobes.map(l => `
+                        <label class="lobe-choice">
                             <input type="checkbox" class="cf-lobe" value="${escapeHtml(l)}"${(prefill.lobe_ids || []).includes(l) ? " checked" : ""} />
                             ${escapeHtml(l)}
-                        </label>`).join(" ")}</div>`}
+                        </label>`).join("")}</div>`}
             </form>
         </section>
         <section class="section">
