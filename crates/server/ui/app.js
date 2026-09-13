@@ -1948,11 +1948,21 @@ function activateSection(section) {
 let _filesCache = [];
 let _filesCategory = "all";
 
+/// Classes A and B are produced by network traffic, never by a file picker:
+/// A is what we PUT at a peer before an invoke, B is a result we downloaded.
+/// An upload always becomes class D, so offering Upload while one of those
+/// two is selected promises something the button cannot deliver.
+function categoryAcceptsUpload(category) {
+    return category !== "class_a" && category !== "class_b";
+}
+
 function setFilesCategory(category) {
     _filesCategory = category;
     document.querySelectorAll("#files-nav .files-nav-item").forEach(el =>
         el.classList.toggle("active", el.dataset.category === category)
     );
+    document.getElementById("files-upload")
+        ?.classList.toggle("hidden", !categoryAcceptsUpload(category));
     renderFilesList();
 }
 
@@ -2073,12 +2083,14 @@ function renderFilesList() {
     }
 
     if (filtered.length === 0) {
+        const canUpload = categoryAcceptsUpload(_filesCategory);
+        const bodyKey = canUpload ? "files.empty.body" : `files.empty.${_filesCategory}`;
         body.innerHTML = `
             <div class="empty-state">
                 <div class="empty-icon">${iconHtml("folder", { size: 28 })}</div>
-                <p class="empty-title">${escapeHtml(t("sidebar.files.empty"))}</p>
-                <p class="empty-body">${escapeHtml(t("files.empty.body"))}</p>
-                <button class="primary" id="empty-files-upload">${escapeHtml(t("sidebar.files.upload"))}</button>
+                <p class="empty-title">${escapeHtml(t(canUpload ? "sidebar.files.empty" : "files.empty.title.network"))}</p>
+                <p class="empty-body">${escapeHtml(t(bodyKey))}</p>
+                ${canUpload ? `<button class="primary" id="empty-files-upload">${escapeHtml(t("sidebar.files.upload"))}</button>` : ""}
             </div>
         `;
         document.getElementById("empty-files-upload")?.addEventListener("click", () => {

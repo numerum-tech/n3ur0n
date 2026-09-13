@@ -171,6 +171,11 @@ await evaluate(`document.querySelector('#files-nav [data-category="class_b"]').c
 await sleep(600);
 step("files category before upload", await evaluate(
     `document.querySelector('#files-nav .files-nav-item.active')?.dataset.category`));
+// Inbound is filled by the network, never by a picker: no upload offered.
+step("inbound hides the upload button", await evaluate(
+    `document.getElementById('files-upload')?.classList.contains('hidden')`));
+step("inbound empty state has no upload", await evaluate(
+    `!document.getElementById('empty-files-upload')`));
 const doc = await send("DOM.getDocument");
 const input = await send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "#files-input" });
 await send("DOM.setFileInputFiles", { files: [SAMPLE], nodeId: input.nodeId });
