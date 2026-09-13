@@ -21,6 +21,11 @@ pub struct NodeConfig {
     pub endpoint: Option<String>,
     /// Optional human alias.
     pub alias: Option<String>,
+    /// Lobes this instance claims membership of, advertised in
+    /// `describe_self`. Bounded by
+    /// [`MAX_LOBES_PER_INSTANCE`](n3ur0n_core::MAX_LOBES_PER_INSTANCE); a
+    /// capability may only claim a lobe present here.
+    pub lobe_ids: Vec<String>,
     /// Verification policy for incoming messages.
     pub verify: VerifyConfig,
     /// Initial peers to bootstrap from at startup.
@@ -28,6 +33,22 @@ pub struct NodeConfig {
     /// Local blob cache directory (`<config>/blobs/sha256/`). Required for
     /// planner blob orchestration and the Files panel.
     pub blobs_dir: Option<PathBuf>,
+}
+
+/// Log every lobe claim stripped by
+/// [`CapabilityRegistry::enforce_instance_lobes`]. Silence would leave a user
+/// wondering why `@lobe:medical` matches nothing while the manifest says it
+/// should: the fix is to declare the lobe on the instance, and the warning has
+/// to say so.
+fn report_dropped_lobes(dropped_per_cap: Vec<(String, Vec<String>)>) {
+    for (cap, dropped) in dropped_per_cap {
+        tracing::warn!(
+            cap = %cap,
+            lobes = %dropped.join(", "),
+            "capability claims lobes this instance does not declare; ignoring them \
+             (declare them in settings → Lobes, or with `serve --lobe <id>`)"
+        );
+    }
 }
 
 /// Live node state. Cloning a [`Node`] is cheap: the heavy state sits behind
@@ -53,6 +74,12 @@ pub struct Node {
     /// running in manifest mode so the cap-reload entry point can scan
     /// the same directory.
     pub(crate) manifest_dir: Option<PathBuf>,
+    /// Live lobe membership. Seeded from [`NodeConfig::lobe_ids`] and
+    /// swappable at runtime (settings → Lobes) like the cap registry, because
+    /// joining a lobe should not require a restart. `describe_self` and the
+    /// `cap.lobe_ids ⊆ instance.lobe_ids` rule both read *this*, never the
+    /// startup copy.
+    pub(crate) lobes: Arc<ArcSwap<Vec<String>>>,
     pub(crate) config: NodeConfig,
     pub(crate) clock: Arc<dyn n3ur0n_core::Clock>,
 }
@@ -78,6 +105,8 @@ impl Node {
         registry: CapabilityRegistry,
         config: NodeConfig,
     ) -> Self {
+        let mut registry = registry;
+        report_dropped_lobes(registry.enforce_instance_lobes(&config.lobe_ids));
         Self {
             keypair: Arc::new(keypair),
             db,
@@ -85,6 +114,7 @@ impl Node {
             registry: Arc::new(ArcSwap::from_pointee(registry)),
             backends: None,
             manifest_dir: None,
+            lobes: Arc::new(ArcSwap::from_pointee(config.lobe_ids.clone())),
             config,
             clock: Arc::new(SystemClock),
         }
@@ -131,6 +161,26 @@ impl Node {
     /// it, but the reader sees a frozen view.
     pub fn registry(&self) -> Arc<CapabilityRegistry> {
         self.registry.load_full()
+    }
+
+    /// Lobes this instance currently claims membership of.
+    pub fn lobes(&self) -> Vec<String> {
+        self.lobes.load().as_ref().clone()
+    }
+
+    /// Replace the live lobe set, then re-apply `cap.lobe_ids ⊆
+    /// instance.lobe_ids` to the registry in place.
+    ///
+    /// Leaving a lobe strips it from every capability that claimed it. Joining
+    /// one cannot restore a lobe already stripped from an in-memory
+    /// declaration — that comes back on the next cap reload, which manifest
+    /// mode performs right after this call. Caller validates the ids
+    /// ([`n3ur0n_core::validate_instance_lobes`]); this method trusts them.
+    pub fn set_lobes(&self, lobes: Vec<String>) {
+        self.lobes.store(Arc::new(lobes.clone()));
+        let mut registry = (*self.registry.load_full()).clone();
+        report_dropped_lobes(registry.enforce_instance_lobes(&lobes));
+        self.registry.store(Arc::new(registry));
     }
 
     /// Re-scan the configured manifest dir's `caps/` subfolder and
@@ -185,7 +235,8 @@ impl Node {
             };
             entries.push((cap.descriptor, binding));
         }
-        let new_registry = CapabilityRegistry::from_entries(entries);
+        let mut new_registry = CapabilityRegistry::from_entries(entries);
+        report_dropped_lobes(new_registry.enforce_instance_lobes(&self.lobes()));
         let len = new_registry.len();
         self.registry.store(Arc::new(new_registry));
         tracing::info!(loaded = len, "cap registry hot-reloaded");

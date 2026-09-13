@@ -169,6 +169,7 @@ async fn start_server() -> Result<u16> {
         BackendKind::Manifest {
             dir: config_dir.clone(),
         },
+        n3ur0n_server::instance_config::resolve_startup_lobes(&[], &config_dir),
     )
     .await
     .context("loading node")?;

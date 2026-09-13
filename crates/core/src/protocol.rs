@@ -45,6 +45,12 @@ pub struct DescribeSelfResponse {
     pub protocol_version: String,
     /// RFC 3339 timestamp of when this descriptor was last updated.
     pub updated_at: String,
+    /// Lobes this instance claims membership of. At most
+    /// [`MAX_LOBES_PER_INSTANCE`](crate::lobe::MAX_LOBES_PER_INSTANCE). Every
+    /// `lobe_ids` entry of every capability below is a member of this set.
+    /// Unverified before v0.5: a claim, not a proof.
+    #[serde(default)]
+    pub lobe_ids: Vec<String>,
     /// Capabilities exposed by this instance.
     #[serde(default)]
     pub capabilities: Vec<CapabilityDecl>,

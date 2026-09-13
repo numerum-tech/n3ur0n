@@ -453,11 +453,20 @@ async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
             let body: Vec<Value> = rows
                 .into_iter()
                 .map(|p| {
-                    let caps: Vec<Value> = p
+                    let descriptor: Option<Value> = p
                         .describe_self_cached
                         .as_deref()
-                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                        .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+                    let caps: Vec<Value> = descriptor
+                        .as_ref()
                         .and_then(|d| d.get("capabilities").and_then(|c| c.as_array()).cloned())
+                        .unwrap_or_default();
+                    // Instance-level membership. A peer can belong to a lobe
+                    // whose caps we have not cached, so the picker offers more
+                    // than the catalogue alone would show.
+                    let peer_lobes: Vec<Value> = descriptor
+                        .as_ref()
+                        .and_then(|d| d.get("lobe_ids").and_then(|l| l.as_array()).cloned())
                         .unwrap_or_default();
                     let summarised: Vec<Value> = caps
                         .into_iter()
@@ -476,6 +485,7 @@ async fn api_peers(State(state): State<AppState>) -> impl IntoResponse {
                         "instance_id": p.id,
                         "endpoint": p.endpoint,
                         "alias": p.alias,
+                        "lobe_ids": peer_lobes,
                         "capabilities": summarised,
                     })
                 })

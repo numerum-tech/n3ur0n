@@ -102,6 +102,36 @@ impl CapabilityRegistry {
             .collect()
     }
 
+    /// Apply the instance-level membership rule `cap.lobe_ids ⊆
+    /// instance.lobe_ids`: any lobe a capability claims that its own instance
+    /// does not declare is dropped from the declaration, so the registry, the
+    /// local catalog and `describe_self` all agree on one set.
+    ///
+    /// Returns one entry per capability that lost at least one lobe, as
+    /// `(capability name, dropped lobe ids)`, for the caller to report. The
+    /// capability itself is kept — a stray lobe is a labelling mistake, not a
+    /// reason to take a working skill off the network.
+    pub fn enforce_instance_lobes(
+        &mut self,
+        instance_lobes: &[String],
+    ) -> Vec<(String, Vec<String>)> {
+        let mut dropped_per_cap = Vec::new();
+        for (name, entry) in self.by_name.iter_mut() {
+            let dropped: Vec<String> =
+                n3ur0n_core::unclaimable_lobes(&entry.decl.lobe_ids, instance_lobes)
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect();
+            if dropped.is_empty() {
+                continue;
+            }
+            entry.decl.lobe_ids.retain(|l| instance_lobes.contains(l));
+            dropped_per_cap.push((name.clone(), dropped));
+        }
+        dropped_per_cap.sort();
+        dropped_per_cap
+    }
+
     /// Number of registered capabilities.
     pub fn len(&self) -> usize {
         self.by_name.len()
@@ -137,6 +167,36 @@ mod tests {
             languages: vec![],
             countries: vec![],
         }
+    }
+
+    fn decl_in_lobes(name: &str, lobes: &[&str]) -> CapabilityDecl {
+        let mut d = decl(name, AccessMode::Free);
+        d.lobe_ids = lobes.iter().map(|l| (*l).to_string()).collect();
+        d
+    }
+
+    #[test]
+    fn enforce_instance_lobes_strips_unclaimable_and_reports_them() {
+        let mut reg = CapabilityRegistry::from_decls(vec![
+            decl_in_lobes("a", &["medical", "finance"]),
+            decl_in_lobes("b", &["medical"]),
+            decl_in_lobes("c", &[]),
+        ]);
+        let dropped = reg.enforce_instance_lobes(&["medical".to_string()]);
+        assert_eq!(dropped, vec![("a".to_string(), vec!["finance".to_string()])]);
+        assert_eq!(reg.get("a").unwrap().lobe_ids, vec!["medical".to_string()]);
+        assert_eq!(reg.get("b").unwrap().lobe_ids, vec!["medical".to_string()]);
+        assert!(reg.get("c").unwrap().lobe_ids.is_empty());
+        // Every capability survives: only the claim is dropped.
+        assert_eq!(reg.len(), 3);
+    }
+
+    #[test]
+    fn an_instance_with_no_lobes_grants_none() {
+        let mut reg = CapabilityRegistry::from_decls(vec![decl_in_lobes("a", &["medical"])]);
+        let dropped = reg.enforce_instance_lobes(&[]);
+        assert_eq!(dropped.len(), 1);
+        assert!(reg.get("a").unwrap().lobe_ids.is_empty());
     }
 
     #[test]

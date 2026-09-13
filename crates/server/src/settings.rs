@@ -12,6 +12,9 @@
 //!   GET    /api/v0/caps/manifests/:name    — fetch raw cap.toml
 //!   DELETE /api/v0/caps/manifests/:name    — remove a cap.toml
 //!
+//!   GET    /api/v0/settings/lobes          — lobes this instance belongs to
+//!   PUT    /api/v0/settings/lobes          — replace them (instance.toml)
+//!
 //! CRUD operations write to `<config>/backends/<name>.toml` or
 //! `<config>/caps/<name>.toml`. Backend and capability CRUD trigger live
 //! reloads on the in-memory registries. When the planner uses a named
@@ -81,6 +84,17 @@ pub fn router(
         .route("/caps/manifests", get(list_cap_manifests))
         .route("/caps/manifests/{name}", get(get_cap_manifest))
         .route_layer(require_perm!(perm::CAPS_READ))
+        .with_state(state.clone());
+
+    // Lobe membership. Reading is part of reading what this instance offers;
+    // writing changes what the network sees, so it rides with CAPS_WRITE.
+    let lobes_read = Router::new()
+        .route("/settings/lobes", get(get_lobes))
+        .route_layer(require_perm!(perm::CAPS_READ))
+        .with_state(state.clone());
+    let lobes_write = Router::new()
+        .route("/settings/lobes", axum::routing::put(put_lobes))
+        .route_layer(require_perm!(perm::CAPS_WRITE))
         .with_state(state);
 
     Router::new()
@@ -88,6 +102,67 @@ pub fn router(
         .merge(backends_read)
         .merge(caps_write)
         .merge(caps_read)
+        .merge(lobes_read)
+        .merge(lobes_write)
+}
+
+// ---------------------------------------------------------------------------
+// Lobe membership
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct PutLobesRequest {
+    #[serde(default)]
+    lobe_ids: Vec<String>,
+}
+
+async fn get_lobes(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
+    Json(json!({
+        "lobe_ids": state.node.lobes(),
+        "max": n3ur0n_core::MAX_LOBES_PER_INSTANCE,
+    }))
+}
+
+/// Replace the instance's lobe set: validate, persist to `instance.toml`, swap
+/// the live set, then reload caps so a lobe that was stripped while unclaimed
+/// comes back the moment the instance joins.
+async fn put_lobes(
+    AxumState(state): AxumState<SettingsState>,
+    Json(req): Json<PutLobesRequest>,
+) -> impl IntoResponse {
+    let lobe_ids: Vec<String> = req
+        .lobe_ids
+        .iter()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if let Err(e) = n3ur0n_core::validate_instance_lobes(&lobe_ids) {
+        return settings_error(StatusCode::BAD_REQUEST, &e.to_string());
+    }
+
+    let cfg = crate::instance_config::InstanceUserConfig {
+        lobe_ids: lobe_ids.clone(),
+    };
+    if let Err(e) = crate::instance_config::save_instance_user_config(&state.config_dir, &cfg) {
+        return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    }
+    state.node.set_lobes(lobe_ids);
+
+    // Manifest mode only: re-reading the cap files is what restores lobe
+    // claims stripped by an earlier, narrower set. A failure here is not fatal
+    // — the set is saved and live — so it is reported, not raised.
+    let mut reloaded = None;
+    match state.node.reload_caps_from_manifest_dir() {
+        Ok(n) => reloaded = Some(n),
+        Err(e) => warn!(error = %e, "cap reload after lobe change skipped"),
+    }
+
+    Json(json!({
+        "ok": true,
+        "lobe_ids": state.node.lobes(),
+        "caps_reloaded": reloaded,
+    }))
+    .into_response()
 }
 
 fn settings_error(status: StatusCode, message: &str) -> axum::response::Response {
@@ -708,6 +783,19 @@ async fn upsert_cap_manifest(
         return settings_error(
             StatusCode::BAD_REQUEST,
             "at least one example is required (the planner refuses caps with no examples)",
+        );
+    }
+    // `cap.lobe_ids ⊆ instance.lobe_ids`. Refusing here is what keeps the
+    // registry from having to strip the lobe back out at load time.
+    let instance_lobes = state.node.lobes();
+    let unclaimable = n3ur0n_core::unclaimable_lobes(&req.lobe_ids, &instance_lobes);
+    if !unclaimable.is_empty() {
+        return settings_error(
+            StatusCode::BAD_REQUEST,
+            &format!(
+                "this instance does not belong to {}; join the lobe in Settings → Lobes first",
+                unclaimable.join(", ")
+            ),
         );
     }
 

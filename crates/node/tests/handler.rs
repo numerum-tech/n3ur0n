@@ -108,6 +108,61 @@ async fn describe_self_lists_capabilities() {
 }
 
 #[tokio::test]
+async fn describe_self_advertises_instance_lobes_and_strips_unclaimed_ones() {
+    let server_kp = Keypair::generate();
+    let db = open_in_memory().unwrap();
+    let backend: Arc<dyn Backend> = Arc::new(EchoBackend);
+    let mut decls = backend.describe().await.unwrap();
+    // The echo cap claims one lobe the instance joined and one it did not.
+    decls[0].lobe_ids = vec!["medical".into(), "finance".into()];
+    let node = Node::new(
+        Keypair::from_secret_bytes(&server_kp.secret_bytes()),
+        db,
+        backend.clone(),
+        CapabilityRegistry::from_decls(decls),
+        NodeConfig {
+            endpoint: Some("https://srv.example".into()),
+            lobe_ids: vec!["medical".into()],
+            ..Default::default()
+        },
+    )
+    .with_clock(Arc::new(FixedClock(Mutex::new(
+        OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+    ))));
+
+    let client = Keypair::generate();
+    let now = node.clock().now();
+    let req = signed(
+        &client,
+        &node.instance_id(),
+        ProtocolVerb::DescribeSelf,
+        json!({}),
+        now,
+    );
+    let reply = handle_request(&node, req).await.unwrap();
+    let body: DescribeSelfResponse = serde_json::from_value(reply.envelope.payload).unwrap();
+
+    assert_eq!(body.lobe_ids, vec!["medical".to_string()]);
+    let echo = body.capabilities.iter().find(|c| c.name == "echo").unwrap();
+    assert_eq!(echo.lobe_ids, vec!["medical".to_string()]);
+
+    // Leaving the lobe takes the claim off the wire without a restart.
+    node.set_lobes(vec![]);
+    let req = signed(
+        &client,
+        &node.instance_id(),
+        ProtocolVerb::DescribeSelf,
+        json!({}),
+        now,
+    );
+    let reply = handle_request(&node, req).await.unwrap();
+    let body: DescribeSelfResponse = serde_json::from_value(reply.envelope.payload).unwrap();
+    assert!(body.lobe_ids.is_empty());
+    let echo = body.capabilities.iter().find(|c| c.name == "echo").unwrap();
+    assert!(echo.lobe_ids.is_empty());
+}
+
+#[tokio::test]
 async fn replay_rejected() {
     let (node, _server_kp) = make_node().await;
     let client = Keypair::generate();

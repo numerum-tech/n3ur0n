@@ -149,6 +149,7 @@ Workspace Rust opérationnel : `cargo check --workspace`, `cargo test --workspac
 ```bash
 n3ur0n init                            # genère keys.json (0600) + sqlite
 n3ur0n serve --port 4242 --endpoint http://... [--bootstrap http://peer1:4242 --bootstrap http://peer2:4242] \
+   [--lobe medical --lobe legal-fr] \
    [--backend echo|openai|ollama] [--openai-base-url URL] [--openai-model NAME] [--openai-api-key TOKEN]
 n3ur0n keys                            # affiche instance_id
 n3ur0n send --endpoint http://node-b:4242 --verb ping
@@ -161,7 +162,7 @@ n3ur0n peers refresh --endpoint http://node-b:4242    # signed describe_self →
 n3ur0n peers discover --capability echo               # cascade depth-1, random fan-out 5
 ```
 
-`--config-dir` lu via flag OU env `N3UR0N_CONFIG_DIR`. `--bootstrap` lu via flag répété OU env `N3UR0N_BOOTSTRAP_PEERS` (CSV). Backend args lus aussi via env `N3UR0N_BACKEND`, `N3UR0N_OPENAI_BASE_URL`, `N3UR0N_OPENAI_MODEL`, `N3UR0N_OPENAI_API_KEY`.
+`--config-dir` lu via flag OU env `N3UR0N_CONFIG_DIR`. `--bootstrap` lu via flag répété OU env `N3UR0N_BOOTSTRAP_PEERS` (CSV). `--lobe` lu via flag répété OU env `N3UR0N_LOBES` (CSV), sinon `instance.toml` ; modifiable à chaud par `PUT /api/v0/settings/lobes` (cf. archi §9.3bis : `cap.lobe_ids ⊆ instance.lobe_ids`, 5 lobes max, appartenance **non vérifiée**). Backend args lus aussi via env `N3UR0N_BACKEND`, `N3UR0N_OPENAI_BASE_URL`, `N3UR0N_OPENAI_MODEL`, `N3UR0N_OPENAI_API_KEY`.
 
 ### Backends
 
@@ -302,6 +303,7 @@ n3ur0n invoke <peer> <capability> [--args ...]
 - Position juridique sur les noms de marques (`@google`, `@adobe`).
 - Localisation du planner pour pipelines multi-étapes.
 - Modèle économique du registre par défaut.
+- Ancrage de l'appartenance à un lobe (§11.6) — une instance déclare ses lobes depuis le 2026-09-13, rien ne le vérifie.
 
 Si une décision implémentation force la main sur l'une de ces questions, **ne pas trancher silencieusement** — remonter à l'utilisateur.
 

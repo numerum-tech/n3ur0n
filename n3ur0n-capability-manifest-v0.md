@@ -127,7 +127,7 @@ Tous ces champs deviennent les champs publics de `CapabilityDecl` exposés via `
 | `description` | string | oui | Description courte (≤ 280 caractères recommandé). Première information vue par les planners distants. |
 | `mode` | `"free"` ou `"restricted"` | oui | Mode d'accès. `restricted` exige whitelist ou subscription_token (logique côté n3uron). |
 | `tags` | array<string> | non | Tags libres pour discovery. |
-| `lobe_ids` | array<string> | non | Lobes auxquels la cap est attachée. |
+| `lobe_ids` | array<string> | non | Lobes auxquels la cap est attachée. **Note 2026-09-13** : doit être un sous-ensemble des lobes déclarés par l'instance (archi §9.3bis) — un lobe non rejoint est refusé à l'enregistrement par l'API et retiré de la déclaration au chargement du manifeste. Grammaire : `[a-z0-9]` aux deux bouts, `-` et `.` à l'intérieur, 2 à 64 caractères. |
 | `pricing` | string | non | Chaîne libre. Convention v0.1 : `"free"`, `"per-invocation:0.001USD"`, etc. Pas de parsing en v0.1. |
 | `disambiguation` | string (multiline) | recommandé | Texte expliquant quand préférer / éviter cette cap. Lu par le planner. |
 | `schema_in` | objet JSON Schema | oui | Schéma d'entrée. Validé contre le binding au boot. |

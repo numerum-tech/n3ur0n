@@ -1056,18 +1056,23 @@ function activeMentionFragment(el) {
     return { start: at, frag };
 }
 
-/// Lobes have no registry of their own: the ones worth offering are those the
-/// known capabilities actually declare.
+/// Lobes have no registry of their own. Three sources, unioned: the lobes this
+/// instance declares, those its known peers declare, and those the cached
+/// capabilities carry. The count returned is the number of *capabilities*
+/// known in that lobe — zero for a lobe only declared at instance level, which
+/// is still worth offering: scoping to it is how the user finds out what is
+/// there.
 function knownLobes() {
     const seen = new Map();
+    const note = (l, n) => seen.set(l, (seen.get(l) || 0) + n);
+    for (const l of _selfLobes) note(l, 0);
     for (const p of _peersCache.peers) {
+        for (const l of (p.lobe_ids || [])) note(l, 0);
         for (const c of (p.capabilities || [])) {
-            for (const l of (c.lobe_ids || [])) {
-                seen.set(l, (seen.get(l) || 0) + 1);
-            }
+            for (const l of (c.lobe_ids || [])) note(l, 1);
         }
     }
-    return [...seen.entries()].sort((a, b) => b[1] - a[1]);
+    return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 /// Mirror of `mention::quote_if_needed` on the Rust side: a value is quoted
@@ -1159,7 +1164,9 @@ function collectMentions(wanted, needle) {
             out.push({
                 kind: "lobe",
                 token: `@lobe:${quoteMentionValue(lobe)}`,
-                sub: t("mention.lobe.caps", { count }),
+                // A lobe nobody has published into yet is still selectable;
+                // saying "0 skills" would read as broken rather than empty.
+                sub: count === 0 ? t("mention.lobe.declared") : t("mention.lobe.caps", { count }),
             });
         }
     }
@@ -1270,6 +1277,7 @@ async function ensureMentionData() {
     const jobs = [];
     if (_filesCache.length === 0) jobs.push(refreshFiles().catch(() => {}));
     if (_peersCache.peers.length === 0) jobs.push(refreshNetwork().catch(() => {}));
+    if (!_selfLobesLoaded) jobs.push(refreshSelfLobes());
     if (jobs.length) await Promise.all(jobs);
 }
 
@@ -1401,6 +1409,21 @@ function modeLabel(mode) {
 // Caches kept in memory so the inspector can cross-link without re-fetching.
 let _peersCache = { self: null, peers: [] };
 let _capsCache = { self: null, caps: [] };
+// Lobes this instance itself declares. Not derivable from the peer cache —
+// our own describe_self never comes back to us — so the composer would
+// otherwise be unable to offer a lobe we just joined.
+let _selfLobes = [];
+let _selfLobesLoaded = false;
+
+async function refreshSelfLobes() {
+    try {
+        const d = await api("GET", "/api/v0/settings/lobes");
+        _selfLobes = d.lobe_ids || [];
+    } catch {
+        _selfLobes = [];
+    }
+    _selfLobesLoaded = true;
+}
 
 async function refreshNetwork() {
     try {
@@ -2197,6 +2220,10 @@ function activateSettingsSection(name) {
         actions.innerHTML = `<button class="primary" id="settings-add-cap">${escapeHtml(t("settings.caps.add"))}</button>`;
         document.getElementById("settings-add-cap")?.addEventListener("click", () => openCapTemplatePicker());
         renderCapsCards();
+    } else if (name === "lobes") {
+        title.textContent = t("settings.lobes.title");
+        sub.textContent = t("settings.lobes.subtitle");
+        renderLobesPage();
     } else if (name === "gateways") {
         title.textContent = t("settings.gateways.title");
         sub.textContent = t("settings.gateways.subtitle");
@@ -2745,6 +2772,103 @@ async function renderPlannerPage() {
     applyIcons();
 }
 
+// ---- Lobes section ----
+
+/// Client-side twin of `n3ur0n_core::lobe::validate_lobe_id`. The server is
+/// the authority; this only spares the user a round-trip to learn they typed
+/// a capital letter.
+function lobeIdError(id) {
+    if (id.length < 2 || id.length > 64) return t("settings.lobes.err.length");
+    if (!/^[a-z0-9]$|^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(id)) return t("settings.lobes.err.charset");
+    return null;
+}
+
+async function renderLobesPage() {
+    const body = document.getElementById("settings-page-body");
+    let data;
+    try {
+        data = await api("GET", "/api/v0/settings/lobes");
+    } catch (e) {
+        body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p class="empty-title">/api/v0/settings/lobes not available</p><p class="empty-body">${escapeHtml(e.message)}</p></div>`;
+        return;
+    }
+    const max = data.max || 5;
+    let draft = [...(data.lobe_ids || [])];
+
+    const paint = () => {
+        const list = document.getElementById("lobes-chips");
+        list.innerHTML = draft.length === 0
+            ? `<p class="row-sub">${escapeHtml(t("settings.lobes.empty"))}</p>`
+            : draft.map(l => `
+                <span class="mention-badge" data-lobe="${escapeHtml(l)}">
+                    @lobe:${escapeHtml(l)}
+                    <button type="button" class="lobe-drop" data-drop="${escapeHtml(l)}"
+                            title="${escapeHtml(t("settings.lobes.remove"))}" aria-label="${escapeHtml(t("settings.lobes.remove"))}">×</button>
+                </span>`).join(" ");
+        list.querySelectorAll("[data-drop]").forEach(b => b.addEventListener("click", () => {
+            draft = draft.filter(l => l !== b.dataset.drop);
+            paint();
+        }));
+        document.getElementById("lobes-add").disabled = draft.length >= max;
+    };
+
+    body.innerHTML = `
+        <article class="card" style="max-width: 720px;">
+            <div class="card-head">
+                <div class="card-icon">🌐</div>
+                <span class="card-title">${escapeHtml(t("settings.lobes.current"))}</span>
+            </div>
+            <div id="lobes-chips" class="mention-badge-row"></div>
+            <form class="settings-form" onsubmit="return false;" style="margin-top: 12px;">
+                <div class="field">
+                    <label class="field-label" for="lobes-input">${escapeHtml(t("settings.lobes.add.label"))}</label>
+                    <div style="display:flex; gap:8px;">
+                        <input id="lobes-input" class="form-control" type="text" placeholder="medical" />
+                        <button type="button" id="lobes-add">${escapeHtml(t("settings.lobes.add.button"))}</button>
+                    </div>
+                    <p class="row-sub">${escapeHtml(t("settings.lobes.max", { max }))}</p>
+                </div>
+            </form>
+            <p class="row-sub">${t("settings.lobes.help")}</p>
+            <div style="margin-top: 12px; display:flex; gap:8px; align-items:center;">
+                <button class="primary" id="lobes-save">${escapeHtml(t("settings.lobes.save"))}</button>
+                <span id="lobes-status" class="row-sub"></span>
+            </div>
+        </article>
+    `;
+    paint();
+
+    const input = document.getElementById("lobes-input");
+    const status = document.getElementById("lobes-status");
+    const add = () => {
+        const id = input.value.trim().toLowerCase();
+        if (!id) return;
+        const err = lobeIdError(id);
+        if (err) { status.textContent = err; return; }
+        if (draft.includes(id)) { status.textContent = t("settings.lobes.err.duplicate"); return; }
+        if (draft.length >= max) { status.textContent = t("settings.lobes.err.full", { max }); return; }
+        draft.push(id);
+        input.value = "";
+        status.textContent = "";
+        paint();
+    };
+    document.getElementById("lobes-add").addEventListener("click", add);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+
+    document.getElementById("lobes-save").addEventListener("click", async () => {
+        status.textContent = t("settings.lobes.saving");
+        try {
+            const r = await api("PUT", "/api/v0/settings/lobes", { lobe_ids: draft });
+            draft = r.lobe_ids || [];
+            paint();
+            status.textContent = t("settings.lobes.saved");
+            await refreshSelfLobes();
+        } catch (e) {
+            status.textContent = `${t("settings.lobes.save_failed")} ${e.message}`;
+        }
+    });
+}
+
 async function renderUiPage() {
     const body = document.getElementById("settings-page-body");
     document.getElementById("settings-page-title").textContent = t("settings.ui.title");
@@ -3231,6 +3355,9 @@ async function openCapForm(existingName, templateKey) {
         const b = await api("GET", "/api/v0/backends");
         backends = (b.backends || []).filter(x => !x.error);
     } catch { /* leave empty */ }
+    // A skill may only claim a lobe its instance belongs to, so the form
+    // offers that set rather than a free-text field the server would reject.
+    await refreshSelfLobes();
 
     if (existingName) {
         // Load the raw cap.toml so we can preserve all binding-kind data.
@@ -3248,6 +3375,7 @@ async function openCapForm(existingName, templateKey) {
                     version: cap.version || "0.1.0",
                     description: cap.description || "",
                     mode: cap.mode || "free",
+                    lobe_ids: cap.lobe_ids || [],
                     tags: (cap.tags || []).join(", "),
                     languages: (cap.languages || []).join(", "),
                     countries: (cap.countries || []).join(", "),
@@ -3273,6 +3401,7 @@ async function openCapForm(existingName, templateKey) {
             bindingKind = tpl.binding_kind;
             prefill = {
                 name: d.name, version: d.version, description: d.description, mode: d.mode,
+                lobe_ids: [],
                 tags: d.tags, languages: d.languages, countries: d.countries,
                 disambiguation: d.disambiguation, output_semantic: d.output_semantic,
                 schema_in: d.schema_in, schema_out: d.schema_out,
@@ -3285,6 +3414,7 @@ async function openCapForm(existingName, templateKey) {
         } else {
             prefill = {
                 ...defaultPromptData(),
+                lobe_ids: [],
                 backend: "",
                 http: defaultHttpData().http,
                 mcp: defaultMcpData().mcp,
@@ -3333,6 +3463,14 @@ async function openCapForm(existingName, templateKey) {
                 <label for="cf-tags">${escapeHtml(t("cap.form.field.tags"))}</label>
                 <input id="cf-tags" type="text" value="${escapeHtml(prefill.tags)}"
                        placeholder="translation, language, fr…" />
+                <label>${escapeHtml(t("cap.form.field.lobes"))}</label>
+                ${_selfLobes.length === 0
+                    ? `<p class="row-sub">${escapeHtml(t("cap.form.field.lobes.none"))}</p>`
+                    : `<div class="mention-badge-row">${_selfLobes.map(l => `
+                        <label class="row-sub" style="display:inline-flex; align-items:center; gap:6px;">
+                            <input type="checkbox" class="cf-lobe" value="${escapeHtml(l)}"${(prefill.lobe_ids || []).includes(l) ? " checked" : ""} />
+                            ${escapeHtml(l)}
+                        </label>`).join(" ")}</div>`}
             </form>
         </section>
         <section class="section">
@@ -3568,9 +3706,10 @@ async function saveCapForm(existingName) {
         status.textContent = `unknown binding kind: ${bindKind}`; return;
     }
 
+    const lobe_ids = [...document.querySelectorAll(".cf-lobe:checked")].map(el => el.value);
     const payload = {
         name, version, description, mode,
-        languages, countries, tags, lobe_ids: [],
+        languages, countries, tags, lobe_ids,
         disambiguation: disambig || null,
         output_semantic: outsem || null,
         schema_in: schemaIn,

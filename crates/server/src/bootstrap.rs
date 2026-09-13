@@ -54,6 +54,7 @@ pub async fn load_node(
     endpoint: Option<String>,
     bootstrap_peers: Vec<String>,
     backend_kind: BackendKind,
+    lobe_ids: Vec<String>,
 ) -> Result<Node> {
     let kp = IdentityFile::load(&keys_path(config_dir))
         .with_context(|| format!("loading identity from {}", keys_path(config_dir).display()))?;
@@ -63,6 +64,7 @@ pub async fn load_node(
     let cfg = NodeConfig {
         endpoint,
         alias: None,
+        lobe_ids,
         bootstrap_peers,
         blobs_dir: Some(config_dir.join("blobs").join("sha256")),
         ..Default::default()

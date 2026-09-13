@@ -150,6 +150,7 @@ fn describe_self(node: &Node, now: OffsetDateTime) -> NodeResult<Value> {
         updated_at: now
             .format(&time::format_description::well_known::Rfc3339)
             .map_err(|e| NodeError::InvalidPayload(e.to_string()))?,
+        lobe_ids: node.lobes(),
         capabilities: node.registry().public_decls(),
     };
     Ok(serde_json::to_value(body)?)

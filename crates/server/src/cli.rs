@@ -45,6 +45,13 @@ pub(crate) struct ServeArgs {
     #[arg(long = "bootstrap", env = "N3UR0N_BOOTSTRAP_PEERS", value_delimiter = ',', num_args = 0..)]
     pub(crate) bootstrap: Vec<String>,
 
+    /// Lobes this instance claims membership of, advertised in
+    /// `describe_self`. Repeatable; comma-separated values accepted. Overrides
+    /// `instance.toml` when non-empty. At most 5; a capability may only claim
+    /// a lobe declared here.
+    #[arg(long = "lobe", env = "N3UR0N_LOBES", value_delimiter = ',', num_args = 0..)]
+    pub(crate) lobe: Vec<String>,
+
     /// Transitive bootstrap depth. 0 = pull only the seeds themselves
     /// (legacy v0.2 behaviour). 1 = seeds + their immediate known peers.
     /// 2 = up to grand-peers (default). Higher values walk further but
@@ -192,6 +199,12 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
     let bootstrap_peers = n3ur0n_server::bootstrap_config::resolve_startup_peers(&cli_peers, &dir);
+    let cli_lobes: Vec<String> = args
+        .lobe
+        .iter()
+        .flat_map(|raw| n3ur0n_server::instance_config::parse_lobe_list(raw))
+        .collect();
+    let lobe_ids = n3ur0n_server::instance_config::resolve_startup_lobes(&cli_lobes, &dir);
 
     // v0.3 manifest mode trumps the compile-time --backend selector.
     let backend_kind = if let Some(manifest_dir) = args.manifest_dir.clone() {
@@ -209,7 +222,14 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
         )?
     };
     let node =
-        bootstrap::load_node(&dir, args.endpoint, bootstrap_peers.clone(), backend_kind).await?;
+        bootstrap::load_node(
+            &dir,
+            args.endpoint,
+            bootstrap_peers.clone(),
+            backend_kind,
+            lobe_ids,
+        )
+        .await?;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], args.port));
     tracing::info!(instance_id = %node.instance_id(), port = args.port, "starting n3ur0n server");
 
@@ -362,7 +382,7 @@ async fn peers_list(config_dir: Option<PathBuf>, limit: i64) -> Result<()> {
 
 async fn peers_refresh(config_dir: Option<PathBuf>, endpoint: String) -> Result<()> {
     let dir = config_dir.unwrap_or_else(bootstrap::default_config_dir);
-    let node = bootstrap::load_node(&dir, None, vec![], BackendKind::Echo).await?;
+    let node = bootstrap::load_node(&dir, None, vec![], BackendKind::Echo, vec![]).await?;
     let client = peer_client::http_client();
     let desc = discovery::refresh_peer(&node, &client, &endpoint).await?;
     println!(
@@ -379,7 +399,7 @@ async fn peers_refresh(config_dir: Option<PathBuf>, endpoint: String) -> Result<
 
 async fn peers_discover(config_dir: Option<PathBuf>, capability: String) -> Result<()> {
     let dir = config_dir.unwrap_or_else(bootstrap::default_config_dir);
-    let node = bootstrap::load_node(&dir, None, vec![], BackendKind::Echo).await?;
+    let node = bootstrap::load_node(&dir, None, vec![], BackendKind::Echo, vec![]).await?;
     let added = discovery::discover_capability(&node, &capability).await?;
     println!("discovered {added} new peer(s) for capability \"{capability}\"");
     Ok(())

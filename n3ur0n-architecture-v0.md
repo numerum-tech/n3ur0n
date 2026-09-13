@@ -15,6 +15,10 @@
 4. **`AccessMode::Private` livré** — filtrage `describe_self` + rejet invoke réseau (cf. amendement 2026-05-12 §6.1).
 5. **Comptes locaux RBAC phase 1** — hors protocole pair ; sessions cookie sur `/api/v0` / UI embarquée uniquement.
 
+**Amendement 2026-09-13** (sans changement d'envelope) :
+
+6. **Appartenance aux lobes déclarée au niveau instance.** `describe_self` porte désormais `lobe_ids: Vec<String>` à côté de `capabilities` (`#[serde(default)]`, rétrocompatible, pas de bump de `protocol_version`). Règle de sous-ensemble : `cap.lobe_ids ⊆ instance.lobe_ids` — une capacité ne peut pas inscrire sa passerelle dans une fédération que la passerelle n'a pas rejointe. Grammaire d'un id : minuscules, chiffres, `-` et `.`, bornes alphanumériques, 2 à 64 caractères (la forme courte `medical` et la forme namespacée `lobe.community.translators.v1` du doc manifeste sont toutes deux acceptées) ; **au plus 5 lobes par instance**. Voir §9.3bis. **L'appartenance reste non vérifiée** : c'est une déclaration, pas une preuve — cf. question ouverte §11.6.
+
 Le code prime sur les docs. Cf. règle de précédence CLAUDE.md.
 
 ---
@@ -292,6 +296,43 @@ Encodé en JSON. La signature couvre la concaténation canonique des cinq champs
 
 Aucun autre verbe n'est requis à v0.1. Toute fonction supplémentaire (gestion de souscriptions, gouvernance de lobe, paiement, etc.) est hors-protocole et passe par des canaux hors-bande définis par chaque opérateur.
 
+### 9.3bis Appartenance aux lobes (ajouté 2026-09-13)
+
+La réponse à `describe_self` porte, à côté de ses capacités, la liste des lobes
+que l'instance revendique :
+
+```json
+{
+  "instance_id": "n3:…",
+  "lobe_ids": ["medical", "legal-fr"],
+  "capabilities": [ { "name": "summarize", "lobe_ids": ["medical"], … } ]
+}
+```
+
+Trois règles, toutes appliquées **à l'écriture**, jamais à la lecture :
+
+1. `cap.lobe_ids ⊆ instance.lobe_ids`. Un lobe revendiqué par une capacité que
+   l'instance n'a pas rejoint est retiré de la déclaration au chargement du
+   registre (la capacité, elle, est conservée : une étiquette fausse n'est pas
+   une raison de retirer une compétence du réseau) et refusé en 400 à
+   l'enregistrement d'un manifeste via l'API.
+2. Grammaire de l'identifiant : `[a-z0-9]` aux deux bouts, `-` et `.` admis à
+   l'intérieur, 2 à 64 caractères. La casse n'est pas normalisée — un id non
+   minuscule est rejeté, pour que deux orthographes ne désignent jamais deux
+   lobes.
+3. Au plus **5 lobes par instance**. Une passerelle qui appartient partout
+   n'appartient nulle part ; le plafond garde la revendication informative et
+   borne la charge utile de `describe_self`.
+
+Le jeu vit dans `instance.toml` (`[instance] lobe_ids`), se déclare aussi par
+`serve --lobe <id>` / `N3UR0N_LOBES`, et se modifie à chaud via
+`PUT /api/v0/settings/lobes` sans redémarrage.
+
+**Ce que cela n'est pas** : une preuve. Rien ne vérifie qu'une instance
+appartient au lobe qu'elle déclare. Le cadrage par lobe (`@lobe:` dans le
+composer) est un filtre de retrieval, jamais une frontière de confiance. Le
+mécanisme d'attestation est une question ouverte — §11.6.
+
 ### 9.4 Format de déclaration de capacité (mis à jour 2026-05-12)
 
 Pour chaque capacité exposée, l'instance déclare dans son `describe_self()` :
@@ -412,6 +453,35 @@ Le n3ur0n de bootstrap maintenu par le projet est un point de centralisation pra
 - *Multi-registres concurrents* dès le départ, avec sélection par l'utilisateur lors de l'installation.
 
 Le choix doit être public dès la première version distribuée.
+### 11.6 Ancrage de l'appartenance à un lobe (ouvert 2026-09-13)
+
+Depuis l'amendement 2026-09-13, une instance *déclare* ses lobes (§9.3bis) sans
+que rien ne le vérifie. Attester cette appartenance suppose de résoudre une
+récursion : une signature n'établit jamais **quelle clé fait autorité** sur un
+lobe.
+
+- *Attestation signée par le lobe* — le lobe détient une paire Ed25519 et signe
+  `{lobe_id, member_id, issued_at, expires_at}` en JCS ; le membre la joint à
+  son `describe_self`. Vérification hors-ligne avec les primitives déjà
+  présentes, révocation par expiration courte. **Mais** cela déplace le
+  problème sur l'origine de la clé du lobe, ça ne le résout pas.
+- *Identifiant de lobe auto-certifiant* — `lobe_id = base32(sha256(pk)[..20])`,
+  le procédé déjà retenu pour les `n3:`. Une clé falsifiée produit un autre
+  identifiant, donc un autre lobe : il n'y a plus rien à résoudre ni aucune
+  autorité à interroger. Coût : `@lobe:medical` redevient un alias d'affichage
+  non contraignant au-dessus d'un id canonique illisible.
+- *Vérité externe* (DNS TXT, CA, instance-registre de §8.4) — ancre réelle mais
+  réintroduit une autorité centrale, ce que §5.1 refuse ; et le registre a
+  lui-même un `n3:` qu'il faut épingler, ce qui ramène au cas précédent d'un
+  cran.
+
+Un certificat TLS ne répond pas à la question : il lie un domaine à un
+endpoint, pas un `n3:` à un lobe, et le transport est en TOFU auto-signé.
+
+Piste privilégiée, non actée : identifiant auto-certifiant pour la preuve, DNS
+TXT rétrogradé en confort de découverte (mapper un nom humain vers l'id
+canonique) — s'il ment, la vérification échoue quand même.
+
 
 ---
 

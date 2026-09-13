@@ -17,6 +17,8 @@ pub mod capability;
 pub mod error;
 /// Cryptographic identity: keypair, public key, instance id.
 pub mod identity;
+/// Lobe identifiers and the instance/capability membership rules.
+pub mod lobe;
 /// Wire envelope, signed message, JCS-canonical signing helpers.
 pub mod message;
 /// Typed payloads for the four v0.1 protocol verbs.
@@ -34,5 +36,9 @@ pub use blob::{
 pub use capability::{AccessMode, CapabilityDecl, CapabilityExample, NegativeExample};
 pub use error::{CoreError, CoreResult};
 pub use identity::{InstanceId, Keypair, PublicKey};
+pub use lobe::{
+    LOBE_ID_MAX_LEN, LOBE_ID_MIN_LEN, MAX_LOBES_PER_INSTANCE, unclaimable_lobes,
+    validate_instance_lobes, validate_lobe_id,
+};
 pub use message::{Envelope, ProtocolVerb, SignedMessage};
 pub use verify::{Clock, SystemClock, VerifiedEnvelope, VerifyConfig, verify_envelope};
