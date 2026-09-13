@@ -540,9 +540,11 @@ function renderHistoricalStepper(toolTurns) {
         row.appendChild(chip);
         if (hasError) errors++;
     }
+    const steps = t(calls.length > 1 ? "stepper.steps_many" : "stepper.steps_one",
+        { count: calls.length });
     status.textContent = errors
-        ? `dispatch · ${calls.length} step${calls.length > 1 ? "s" : ""} · ${errors} error${errors > 1 ? "s" : ""}`
-        : `dispatch · ${calls.length} step${calls.length > 1 ? "s" : ""}`;
+        ? `${t("stepper.dispatch")} · ${steps} · ${t(errors > 1 ? "stepper.errors_many" : "stepper.errors_one", { count: errors })}`
+        : `${t("stepper.dispatch")} · ${steps}`;
 
     conv.appendChild(wrap);
 }
@@ -741,7 +743,7 @@ function appendStepper(isDirect = false) {
 
     const status = document.createElement("div");
     status.className = "stepper-status";
-    status.textContent = isDirect ? t("composer.direct.status") : "compiling plan…";
+    status.textContent = isDirect ? t("composer.direct.status") : t("stepper.compiling");
     wrap.appendChild(status);
 
     const row = document.createElement("div");
@@ -825,7 +827,7 @@ function appendStepper(isDirect = false) {
                 // first round's chips must survive it.
                 if (round <= 1) {
                     wrap.classList.add("no-plan");
-                    setStatus("no plan — answering directly");
+                    setStatus(t("stepper.no_plan"));
                 }
                 return;
             }
@@ -838,12 +840,13 @@ function appendStepper(isDirect = false) {
                     capability: s.capability,
                 });
             }
-            setStatus(`plan ready · ${steps.length} step${steps.length > 1 ? "s" : ""}`);
+            setStatus(t(steps.length > 1 ? "stepper.plan_ready_many" : "stepper.plan_ready_one",
+                { count: steps.length }));
         },
         startStep(id) {
             ensureChip(chipKey(id));
             setChipState(chipKey(id), "running");
-            setStatus(`running ${id}…`);
+            setStatus(t("stepper.running", { step: id }));
         },
         doneStep(id, args, result, error) {
             setChipState(chipKey(id), error ? "error" : "done");
@@ -863,17 +866,16 @@ function appendStepper(isDirect = false) {
             chip.onclick = () => toggleStepDetails(wrap, call, res, chip);
         },
         reflecting() {
-            setStatus("composing reply…");
+            setStatus(t("stepper.composing"));
         },
         markLowConfidence(confidence) {
             wrap.classList.add("degraded");
-            const pct = typeof confidence === "number"
-                ? ` (confidence ${Math.round(confidence * 100)}%)`
-                : "";
-            setStatus(`low-confidence plan${pct} — result should be checked`);
+            setStatus(typeof confidence === "number"
+                ? t("stepper.low_confidence_pct", { pct: Math.round(confidence * 100) })
+                : t("stepper.low_confidence"));
         },
         finalize(reply, model) {
-            setStatus(model ? `done · ${model}` : "done");
+            setStatus(model ? `${t("stepper.done")} · ${model}` : t("stepper.done"));
             wrap.classList.add("complete");
             if (reply) {
                 appendBubble("assistant", model ? `assistant · ${model}` : "assistant", reply);
