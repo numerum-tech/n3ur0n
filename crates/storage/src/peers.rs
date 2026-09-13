@@ -14,6 +14,14 @@ pub struct PeerRecord {
     pub source: Option<String>,
 }
 
+/// Insert or update a peer.
+///
+/// `alias` is COALESCEd on purpose: a `None` from this path means *this writer
+/// does not know*, not *the peer has no alias*. The reverse-announce path
+/// learns a caller's endpoint from a signed envelope and nothing else, and an
+/// unconditional write erased the alias a real `describe_self` had just
+/// stored — every peer in the cluster lost its name after one exchange.
+/// [`set_alias`] is how a writer that does know says so.
 pub fn upsert(db: &Db, record: &PeerRecord) -> StorageResult<()> {
     let conn = db.get()?;
     conn.execute(
@@ -22,7 +30,7 @@ pub fn upsert(db: &Db, record: &PeerRecord) -> StorageResult<()> {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(id) DO UPDATE SET
              endpoint = excluded.endpoint,
-             alias = excluded.alias,
+             alias = COALESCE(excluded.alias, peers.alias),
              last_seen = COALESCE(excluded.last_seen, peers.last_seen),
              tls_fingerprint = COALESCE(excluded.tls_fingerprint, peers.tls_fingerprint),
              describe_self_cached = COALESCE(excluded.describe_self_cached, peers.describe_self_cached),
@@ -38,6 +46,20 @@ pub fn upsert(db: &Db, record: &PeerRecord) -> StorageResult<()> {
             record.describe_self_fetched_at,
             record.source,
         ],
+    )?;
+    Ok(())
+}
+
+/// Record what a peer calls itself, as learned from its `describe_self`.
+///
+/// Separate from [`upsert`] because only a descriptor is authoritative: it can
+/// say "no alias" and mean it, which is why this takes an `Option` and writes
+/// it as given.
+pub fn set_alias(db: &Db, id: &str, alias: Option<&str>) -> StorageResult<()> {
+    let conn = db.get()?;
+    conn.execute(
+        "UPDATE peers SET alias = ?2 WHERE id = ?1",
+        rusqlite::params![id, alias],
     )?;
     Ok(())
 }
@@ -100,6 +122,40 @@ pub fn delete(db: &Db, id: &str) -> StorageResult<bool> {
 mod tests {
     use super::*;
     use crate::open_in_memory;
+
+    #[test]
+    fn an_alias_survives_a_writer_that_does_not_know_it() {
+        let db = crate::open_in_memory().unwrap();
+        let mut p = PeerRecord {
+            id: "n3:peer".into(),
+            endpoint: "https://x.example".into(),
+            alias: Some("toolbox".into()),
+            last_seen: Some(1),
+            tls_fingerprint: None,
+            describe_self_cached: None,
+            describe_self_fetched_at: None,
+            source: Some("manual".into()),
+        };
+        upsert(&db, &p).unwrap();
+
+        // Reverse-announce: a signed call arrives, we learn the endpoint and
+        // nothing else. The name must not evaporate.
+        p.alias = None;
+        p.endpoint = "http://new-host:4242".into();
+        upsert(&db, &p).unwrap();
+        let got = get(&db, "n3:peer").unwrap().unwrap();
+        assert_eq!(got.alias.as_deref(), Some("toolbox"));
+        assert_eq!(got.endpoint, "http://new-host:4242");
+
+        // A descriptor is authoritative, including when it says "no alias".
+        set_alias(&db, "n3:peer", None).unwrap();
+        assert!(get(&db, "n3:peer").unwrap().unwrap().alias.is_none());
+        set_alias(&db, "n3:peer", Some("renamed")).unwrap();
+        assert_eq!(
+            get(&db, "n3:peer").unwrap().unwrap().alias.as_deref(),
+            Some("renamed")
+        );
+    }
 
     #[test]
     fn upsert_and_get() {

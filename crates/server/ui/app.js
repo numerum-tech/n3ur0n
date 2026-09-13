@@ -1142,13 +1142,15 @@ function collectMentions(wanted, needle) {
         for (const p of _peersCache.peers) {
             const hay = `${p.alias || ""} ${p.instance_id} ${p.endpoint || ""}`.toLowerCase();
             if (needle && !hay.includes(needle)) continue;
-            // The token carries the id, which is unreadable; the name a human
-            // recognises belongs beside it, not instead of it.
-            const readable = p.alias || hostOf(p.endpoint);
+            // The token lands in the user's sentence and stays there, so it
+            // has to read as a name. It carries both halves: the alias for the
+            // reader, the id prefix for the resolver, which matches only the
+            // part after `#`. A bare alias would route by a claim a peer makes
+            // about itself; a bare id is unreadable once written.
             out.push({
                 kind: "peer",
-                token: `@peer:${quoteMentionValue(shortId(p.instance_id))}`,
-                sub: readable || p.endpoint || "",
+                token: `@peer:${quoteMentionValue(peerHandle(p))}`,
+                sub: p.alias ? p.endpoint || "" : hostOf(p.endpoint) || p.endpoint || "",
             });
         }
     }
@@ -1187,7 +1189,7 @@ function peerCapabilityCandidates(needle) {
     const [peerPart, capPart] = needle.split("/");
     const out = [];
     for (const p of _peersCache.peers) {
-        const short = shortId(p.instance_id);
+        const short = peerHandle(p);
         if (!`${p.alias || ""} ${p.instance_id}`.toLowerCase().includes(peerPart)) continue;
         for (const c of (p.capabilities || [])) {
             if (capPart && !c.name.toLowerCase().includes(capPart)) continue;
@@ -1356,6 +1358,14 @@ function moveMentionSelection(delta) {
 // the main pane (chat state is preserved underneath). Cross-links: a peer
 // detail lists its caps as chips → click → cap detail; a cap detail lists
 // every peer exposing it → click → peer detail.
+
+/// What a peer is called in a mention: `alias#idprefix` when it has an alias,
+/// the id prefix alone otherwise. Mirrors `resolve_scope` on the Rust side,
+/// which splits on the last `#` and matches only what follows.
+function peerHandle(p) {
+    const short = shortId(p.instance_id);
+    return p.alias ? `${p.alias}#${short.slice(0, 8)}` : short;
+}
 
 function shortId(id) {
     if (!id) return "?";

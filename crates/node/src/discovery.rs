@@ -247,6 +247,14 @@ pub async fn refresh_peer(
         source: Some("bootstrap".into()),
     };
     peers::upsert(node.db(), &record)?;
+    // The descriptor is the only authority on a peer's alias, including when
+    // it has none: `upsert` keeps the stored one on a `None`, so a rename to
+    // nothing would otherwise never take.
+    peers::set_alias(
+        node.db(),
+        &descriptor.instance_id.to_string(),
+        descriptor.alias.as_deref(),
+    )?;
     Ok(descriptor)
 }
 

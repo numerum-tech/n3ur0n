@@ -8,7 +8,9 @@
 //!
 //! ```text
 //! @file:contrats/2026/bail.pdf   a blob in the local store
-//! @peer:alice                    an instance (n3: id; `self` = this one)
+//! @peer:toolbox#ynhr3l57         an instance: readable label, `#`, id prefix
+//! @peer:ynhr3l572ywe             the id prefix alone works too
+//! @peer:self                     this instance
 //! @peer:alice/summarize          one capability on one instance
 //! @lobe:medical                  a lobe
 //! @lobe:medical/summarize        that capability, anywhere in the lobe

@@ -1399,14 +1399,21 @@ fn resolve_scope(node: &Node, catalog: &Catalog, scope: &MentionScope) -> Resolv
                 }
                 continue;
             }
+            // `alias#shortid` — the readable half is decoration, the id binds.
+            // Writing `@peer:n3:ynhr3l57…` in a sentence is unreadable, and
+            // writing `@peer:toolbox` alone would route by a name a peer
+            // asserts about itself. Carrying both keeps the sentence legible
+            // without ever trusting the label: only the part after `#` is
+            // matched, so a stale or forged alias changes nothing.
+            let key = entity.rsplit('#').next().unwrap_or(entity.as_str());
             let hit = known
                 .iter()
                 .map(|p| p.id.clone())
                 .chain(std::iter::once(self_id.clone()))
                 .find(|id| {
-                    id == entity
+                    id == key
                         || id.strip_prefix("n3:").is_some_and(|short| {
-                            entity.len() >= 8 && short.starts_with(entity.as_str())
+                            key.len() >= 8 && short.starts_with(key)
                         })
                 });
             match hit {
@@ -2120,6 +2127,38 @@ mod tests {
         let known = resolve_scope(&node, &cat, &MentionScope::from_text("@lobe:medical"));
         assert_eq!(known.lobes, vec!["medical"]);
         assert!(known.unresolved.is_empty());
+    }
+
+    #[test]
+    fn a_peer_mention_can_carry_a_readable_alias_before_the_id() {
+        let node = node_for_scope();
+        let cat = scope_catalog();
+        let id = node.instance_id().to_string();
+        let short = &id["n3:".len()..][..8];
+
+        // The id alone still works, and so does the readable compound form.
+        let bare = resolve_scope(&node, &cat, &MentionScope::from_text(&format!("@peer:{short}")));
+        let named = resolve_scope(
+            &node,
+            &cat,
+            &MentionScope::from_text(&format!("@peer:toolbox#{short}")),
+        );
+        assert_eq!(bare.peer_ids, vec![id.clone()]);
+        assert_eq!(named.peer_ids, vec![id.clone()]);
+
+        // The label is never matched: a wrong one resolves to the same peer,
+        // which is the whole point of putting the id in the token.
+        let lying = resolve_scope(
+            &node,
+            &cat,
+            &MentionScope::from_text(&format!("@peer:not-my-name#{short}")),
+        );
+        assert_eq!(lying.peer_ids, vec![id]);
+
+        // And a label with no id behind it resolves to nothing.
+        let label_only = resolve_scope(&node, &cat, &MentionScope::from_text("@peer:toolbox"));
+        assert!(label_only.peer_ids.is_empty());
+        assert_eq!(label_only.unresolved, vec!["@peer:toolbox"]);
     }
 
     #[test]
