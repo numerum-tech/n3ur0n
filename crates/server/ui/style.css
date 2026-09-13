@@ -1179,6 +1179,16 @@ button.secondary:hover,
     color: var(--muted);
     font-size: var(--fs-xs);
 }
+
+/* A label that IS a manifest key, not a word: it names the exact field the
+   user will find in the capability's TOML. The uppercase transform the other
+   labels carry broke that correspondence — `output_semantic` rendered as
+   OUTPUT_SEMANTIC, which matches nothing on disk. */
+.field-label.keyed {
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
 .field-label.tight { margin-top: 8px; }
 .field-label.flush { margin-top: 0; }
 .card-meta code {

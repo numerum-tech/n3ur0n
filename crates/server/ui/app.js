@@ -3651,7 +3651,7 @@ async function openCapForm(existingName, templateKey) {
             <h3>${escapeHtml(t("cap.form.section.disambig"))}</h3>
             <textarea id="cf-disambig" class="form-textarea" rows="3"
                       placeholder="${escapeHtml(t("cap.form.field.disambig.placeholder"))}">${escapeHtml(prefill.disambiguation)}</textarea>
-            <label for="cf-outsem" class="field-label">${escapeHtml(t("cap.form.field.output_semantic"))}</label>
+            <label for="cf-outsem" class="field-label keyed">${escapeHtml(t("cap.form.field.output_semantic"))}</label>
             <textarea id="cf-outsem" class="form-textarea" rows="2">${escapeHtml(prefill.output_semantic)}</textarea>
         </section>
         <section class="section">
@@ -3700,7 +3700,7 @@ async function openCapForm(existingName, templateKey) {
                 </form>
                 <label for="cf-http-headers" class="field-label">${escapeHtml(t("cap.form.field.http.headers"))}</label>
                 <textarea id="cf-http-headers" class="form-textarea code" rows="3" placeholder="Accept: application/json">${escapeHtml(prefill.http?.headers || "")}</textarea>
-                <label for="cf-http-body" class="field-label">${t("cap.form.field.http.body_template")}</label>
+                <label for="cf-http-body" class="field-label keyed">${t("cap.form.field.http.body_template")}</label>
                 <textarea id="cf-http-body" class="form-textarea code" rows="4" placeholder='{"query":"{{args.q}}"}'>${escapeHtml(prefill.http?.body_template || "")}</textarea>
             </div>
             <div id="cf-bind-mcp" class="hidden" style="margin-top: 10px;">
@@ -3708,17 +3708,17 @@ async function openCapForm(existingName, templateKey) {
                     <label for="cf-mcp-tool">${escapeHtml(t("cap.form.field.mcp.tool_name"))}</label>
                     <input id="cf-mcp-tool" type="text" value="${escapeHtml(prefill.mcp?.tool_name || "")}" placeholder="read_file" />
                 </form>
-                <label for="cf-mcp-argmap" class="field-label">${escapeHtml(t("cap.form.field.mcp.arg_mapping"))}</label>
+                <label for="cf-mcp-argmap" class="field-label keyed">${escapeHtml(t("cap.form.field.mcp.arg_mapping"))}</label>
                 <textarea id="cf-mcp-argmap" class="form-textarea code" rows="4">${escapeHtml(prefill.mcp?.arg_mapping || "{}")}</textarea>
-                <label for="cf-mcp-resmap" class="field-label">${escapeHtml(t("cap.form.field.mcp.result_mapping"))}</label>
+                <label for="cf-mcp-resmap" class="field-label keyed">${escapeHtml(t("cap.form.field.mcp.result_mapping"))}</label>
                 <textarea id="cf-mcp-resmap" class="form-textarea code" rows="4">${escapeHtml(prefill.mcp?.result_mapping || "{}")}</textarea>
             </div>
         </section>
         <section class="section">
             <h3>${escapeHtml(t("cap.form.section.schemas"))}</h3>
-            <label for="cf-schemain" class="field-label flush">${escapeHtml(t("cap.form.field.schema_in"))}</label>
+            <label for="cf-schemain" class="field-label keyed flush">${escapeHtml(t("cap.form.field.schema_in"))}</label>
             <textarea id="cf-schemain" class="form-textarea code" rows="7">${escapeHtml(prefill.schema_in)}</textarea>
-            <label for="cf-schemaout" class="field-label">${escapeHtml(t("cap.form.field.schema_out"))}</label>
+            <label for="cf-schemaout" class="field-label keyed">${escapeHtml(t("cap.form.field.schema_out"))}</label>
             <textarea id="cf-schemaout" class="form-textarea code" rows="7">${escapeHtml(prefill.schema_out)}</textarea>
         </section>
         <section class="section">
@@ -3728,9 +3728,9 @@ async function openCapForm(existingName, templateKey) {
                 <input id="cf-ex-intent" type="text" value="${escapeHtml(prefill.example_intent)}"
                        placeholder="translate 'bonjour' to English" />
             </form>
-            <label for="cf-ex-args" class="field-label tight">${escapeHtml(t("cap.form.field.example.args"))}</label>
+            <label for="cf-ex-args" class="field-label keyed tight">${escapeHtml(t("cap.form.field.example.args"))}</label>
             <textarea id="cf-ex-args" class="form-textarea code" rows="3">${escapeHtml(prefill.example_args)}</textarea>
-            <label for="cf-ex-out" class="field-label tight">${escapeHtml(t("cap.form.field.example.output"))}</label>
+            <label for="cf-ex-out" class="field-label keyed tight">${escapeHtml(t("cap.form.field.example.output"))}</label>
             <textarea id="cf-ex-out" class="form-textarea code" rows="3">${escapeHtml(prefill.example_output)}</textarea>
         </section>
         <div class="form-actions">
