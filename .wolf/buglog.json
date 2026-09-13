@@ -3594,6 +3594,24 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-09-13T14:09:58.005634Z"
+    },
+    {
+      "id": "bug-223",
+      "timestamp": "2026-09-13T15:10:48.961569Z",
+      "error_message": "A manifest-mode node cannot execute its own capability through the planner: `time` returns {} and the model reports it could not read the clock",
+      "file": "crates/node/src/planner/plan.rs",
+      "root_cause": "The plan executor dispatched any step with no endpoint through `node.backend()` — the single compile-time backend slot. In manifest mode that slot is deliberately filled with an inert EchoBackend (bootstrap.rs) because capabilities are supposed to dispatch through their own binding, which is exactly what handler.rs::invoke does for an inbound invoke. So a LOCAL step got Echo's identity of its arguments as its result: `time` with args {} answered {}, `random_int` answered {min,max} with no value. Remote steps were unaffected (they go over the wire and reach the peer's handler), which is why the same capability answered correctly to a signed invoke and wrongly to the node's own planner. Latent until node-a became the first manifest-mode node that both publishes caps and runs a planner.",
+      "fix": "The local branch now mirrors handler.rs: registry.binding_for(cap) first, node.backend() only as the legacy fallback. Regression test crates/node/tests/local_step_uses_its_binding.rs builds a manifest-shaped node (inert Echo + a binding answering something the args do not contain) and executes a one-step plan; it fails without the fix with left: None. Verified on the cluster: time, random_int, reverse and string_length all return real values through the planner.",
+      "tags": [
+        "planner",
+        "manifest",
+        "bindings",
+        "execution",
+        "rs"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T15:10:48.961569Z"
     }
   ],
   "version": 1

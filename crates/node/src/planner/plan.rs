@@ -776,10 +776,24 @@ use raw refs only, let the downstream tool combine values)",
                     let _ = tx.send(DispatchEvent::StepStart { id: id.clone() });
                 }
                 let result: Result<Value, String> = if endpoint.is_none() {
-                    backend
-                        .invoke(&cap_name, resolved_args.clone())
-                        .await
-                        .map_err(|e| e.to_string())
+                    // A local step must take the same route `handler.rs` takes
+                    // for an inbound invoke: the capability's own binding when
+                    // the registry has one, the compile-time backend only as a
+                    // fallback. In manifest mode that backend slot holds an
+                    // inert Echo, so calling it returned the step's arguments
+                    // back as its result — `time` answered `{}` and the planner
+                    // reported it could not read the clock, while the very same
+                    // capability answered correctly over a signed invoke.
+                    match node_exec.registry().binding_for(&cap_name) {
+                        Some(binding) => binding
+                            .invoke(resolved_args.clone())
+                            .await
+                            .map_err(|e| e.to_string()),
+                        None => backend
+                            .invoke(&cap_name, resolved_args.clone())
+                            .await
+                            .map_err(|e| e.to_string()),
+                    }
                 } else {
                     let ep = endpoint.as_deref().unwrap();
                     let invoke_args = match crate::blob_resolve::prepare_invoke_args(
