@@ -251,6 +251,23 @@ impl Node {
             };
             entries.push((cap.descriptor, binding));
         }
+        // Swapping in an empty set would retire everything the node serves.
+        // That is right when the manifests say so, and wrong in the two cases
+        // below — both of which used to unpublish a working node silently.
+        if entries.is_empty() {
+            let files = load_cap_dir(&caps_dir).len();
+            if files > 0 {
+                return Err(NodeError::InvalidPayload(format!(
+                    "none of the {files} cap manifest(s) in {} could be loaded — \
+                     check the backend each one binds to",
+                    caps_dir.display()
+                )));
+            }
+            // No manifests at all: nothing to promote. A node running a
+            // compile-time backend keeps serving it.
+            tracing::debug!(dir = %caps_dir.display(), "no cap manifests; registry unchanged");
+            return Ok(0);
+        }
         let mut new_registry = CapabilityRegistry::from_entries(entries);
         report_dropped_lobes(new_registry.enforce_instance_lobes(&self.lobes()));
         let len = new_registry.len();
@@ -294,9 +311,20 @@ impl Node {
         cell.store(Arc::new(new_registry));
         tracing::info!(loaded = backends_len, "backends registry hot-reloaded");
         // Rebind caps against the new backends so existing bindings don't
-        // hold stale references.
-        let caps_len = self.reload_caps_from_manifest_dir()?;
-        Ok((backends_len, caps_len))
+        // hold stale references. A cap that still fails to bind must not
+        // erase the fact that the backends themselves loaded: the swap above
+        // already happened, and reporting `backends_loaded: 0` sent the
+        // operator looking at the backend they had just saved correctly.
+        match self.reload_caps_from_manifest_dir() {
+            Ok(caps_len) => Ok((backends_len, caps_len)),
+            Err(e) => {
+                tracing::warn!(error = %e, "backends reloaded; cap rebind failed");
+                Err(NodeError::PartialReload {
+                    backends_loaded: backends_len,
+                    reason: e.to_string(),
+                })
+            }
+        }
     }
 
     /// Borrow the storage handle.

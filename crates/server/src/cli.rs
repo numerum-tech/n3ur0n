@@ -213,8 +213,18 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
     let lobe_ids = n3ur0n_server::instance_config::resolve_startup_lobes(&cli_lobes, &dir);
     let alias = n3ur0n_server::instance_config::resolve_startup_alias(args.alias.as_deref(), &dir);
 
-    // v0.3 manifest mode trumps the compile-time --backend selector.
-    let backend_kind = if let Some(manifest_dir) = args.manifest_dir.clone() {
+    // Manifest mode trumps the compile-time --backend selector. It engages
+    // either because the operator named a directory, or because the default
+    // one — `<config>/manifests` — actually holds manifests. Engaging it
+    // unconditionally would have silently disabled `--backend` on every
+    // existing deployment; engaging it never, as before, left the authoring
+    // UI writing to a folder nothing read.
+    let default_manifests = bootstrap::default_manifest_dir(&dir);
+    let manifest_dir = args
+        .manifest_dir
+        .clone()
+        .or_else(|| bootstrap::has_manifests(&default_manifests).then_some(default_manifests));
+    let backend_kind = if let Some(manifest_dir) = manifest_dir {
         tracing::info!(
             manifest_dir = %manifest_dir.display(),
             "manifest mode active; --backend flag ignored"

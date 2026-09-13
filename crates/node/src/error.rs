@@ -37,6 +37,15 @@ pub enum NodeError {
     #[error("invalid payload for verb: {0}")]
     InvalidPayload(String),
 
+    /// Backends reloaded but the cap rebind that follows did not. Carries
+    /// the count so a caller can report what really happened instead of
+    /// collapsing a partial success into a zero.
+    #[error("backends reloaded ({backends_loaded}) but cap rebind failed: {reason}")]
+    PartialReload {
+        backends_loaded: usize,
+        reason: String,
+    },
+
     /// Identity file IO error.
     #[error("identity file: {0}")]
     Identity(String),

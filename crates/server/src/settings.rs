@@ -487,6 +487,15 @@ base_url = "{base_url}"
     let (backends_len, caps_len, reload_warning) =
         match state.node.reload_backends_from_manifest_dir() {
             Ok((b, c)) => (b, c, None),
+            // A cap that will not bind is a reason to warn, not a reason to
+            // report the backend as unloaded: it was written and swapped in.
+            Err(n3ur0n_node::error::NodeError::PartialReload {
+                backends_loaded,
+                reason,
+            }) => {
+                tracing::warn!(error = %reason, "backends reloaded; cap rebind failed");
+                (backends_loaded, 0, Some(reason))
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "backend reload after upsert failed");
                 (0, 0, Some(e.to_string()))
@@ -892,6 +901,20 @@ async fn upsert_cap_manifest(
             );
         }
     };
+    // The reload skips a manifest whose backend is unknown or whose binding
+    // will not build, and says so only in the log. Reporting `ok` for a
+    // capability the node does not serve is the kind of success message that
+    // sends someone looking for a network problem.
+    if state.node.registry().get(name).is_none() {
+        return settings_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!(
+                "saved to {} but not registered — its binding could not be built; \
+                 check that the backend it names exists",
+                target.display()
+            ),
+        );
+    }
     Json(json!({
         "ok": true,
         "name": name,

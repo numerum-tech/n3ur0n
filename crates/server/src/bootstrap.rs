@@ -38,6 +38,32 @@ pub fn default_config_dir() -> PathBuf {
     }
 }
 
+/// Where an instance keeps its capability and backend manifests when nothing
+/// says otherwise: a `manifests/` folder inside the config directory.
+///
+/// Before this existed, `--manifest-dir` had no default, so a plain install
+/// ran in legacy mode and never read a manifest at all — while the settings
+/// UI happily wrote capabilities to disk and reported success. The authoring
+/// screen was inert out of the box.
+pub fn default_manifest_dir(dir: &Path) -> PathBuf {
+    dir.join("manifests")
+}
+
+/// Whether `dir` holds anything worth loading — one `.toml` under `caps/` or
+/// `backends/` is enough. A directory the user has not populated must not
+/// switch the instance into manifest mode and silently retire `--backend`.
+pub fn has_manifests(dir: &Path) -> bool {
+    ["caps", "backends"].iter().any(|sub| {
+        std::fs::read_dir(dir.join(sub))
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("toml"))
+            })
+            .unwrap_or(false)
+    })
+}
+
 pub fn db_path(dir: &Path) -> PathBuf {
     dir.join("n3ur0n.sqlite")
 }
@@ -125,13 +151,39 @@ pub async fn load_node(
                 .with_manifest_runtime(Arc::new(backends), dir))
         }
         other => {
+            // A compile-time backend still gets the manifest directory and an
+            // (initially empty) backends registry attached. Without them the
+            // settings API has nowhere to write and `reload_caps_from_manifest_dir`
+            // refuses, which is how authoring a capability on a default install
+            // ended in "saved but reload failed". With them, saving the first
+            // manifest promotes the node to serving it, no restart.
             let backend: Arc<dyn Backend> = build_backend(other)?;
             let decls = backend.describe().await?;
             let mut registry = CapabilityRegistry::from_decls(decls);
             apply_published_caps(&mut registry);
-            Ok(Node::new(kp, db, backend, registry, cfg))
+            let manifests = default_manifest_dir(config_dir);
+            let backends = load_backends_only(&manifests);
+            Ok(Node::new(kp, db, backend, registry, cfg)
+                .with_manifest_runtime(Arc::new(backends), manifests))
         }
     }
+}
+
+/// Build a [`BackendsRegistry`] from `<dir>/backends/` alone, tolerating a
+/// directory that does not exist yet — on a fresh install it will not, and an
+/// empty registry is the correct starting point.
+fn load_backends_only(dir: &Path) -> BackendsRegistry {
+    let mut manifests = Vec::new();
+    for result in load_backend_dir(&dir.join("backends")) {
+        match result {
+            Ok(m) => manifests.push(m),
+            Err(e) => tracing::warn!(error = %e, "skipping malformed backend manifest"),
+        }
+    }
+    BackendsRegistry::from_manifests(manifests).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "backend registry unavailable; starting empty");
+        BackendsRegistry::default()
+    })
 }
 
 /// Scan `<manifest_dir>/backends/` and `<manifest_dir>/caps/`, build a
