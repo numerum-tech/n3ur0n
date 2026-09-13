@@ -3466,21 +3466,22 @@
       "last_seen": "2026-09-12T18:38:19.514211Z"
     },
     {
-      "error_message": "OPEN — mojibake in the chat UI: 'chaÃ®ne inversÃ©e', 'caractÃ¨res'",
-      "file": "crates/server/ui/app.js",
-      "root_cause": "UNVERIFIED. UTF-8 bytes decoded as latin-1 somewhere between the LLM response and the bubble. Only affects text produced by the model (the user's own message renders correctly in the same view), which points at the SSE/response path rather than at the page charset.",
-      "fix": "NOT FIXED — user asked to note only.",
+      "error_message": "Mojibake in every accented reply: 'chaÃ®ne inversÃ©e', 'caractÃ¨res'",
+      "file": "crates/node/src/planner/plan.rs",
+      "root_cause": "NOT the UI, as first assumed. `resolve_value` (planner/plan.rs) and `substitute_inline` (bindings/template.rs) both walked their input with a byte index and ended each iteration on `out.push(bytes[i] as char)`. That cast reads a single UTF-8 byte as a Latin-1 code point, so every multi-byte sequence came out as one mojibake character per byte: `î` (C3 AE) -> `Ã` + `®`. `resolve_value` runs over EVERY composer reply, so every accented assistant message was mangled. Located by elimination on the live cluster: the stored user turn was clean, the stored assistant turn was corrupt, Ollama queried directly answered cleanly, and a byte-inspecting proxy on the wire showed the LLM returning clean UTF-8 — so the corruption was inside n3ur0n, after serde_json::from_slice.",
+      "fix": "Both loops now take the next `char` and advance by `len_utf8()`. Regression tests in each file; with the fix reverted they fail with left: 'La chaÃ®ne inversÃ©e est ruojnob â\\u{80}\\u{94} 7 caractÃ¨res'. Verified on the cluster: the same prompt now returns 'La chaîne \"bonjour\" inversée est \"ruojnob\" et elle contient 7 caractères', with no C3 83 byte anywhere in the response.",
       "tags": [
-        "open",
-        "ui",
+        "planner",
+        "utf8",
         "encoding",
-        "i18n"
+        "bindings",
+        "rs"
       ],
       "id": "bug-216",
       "timestamp": "2026-09-12T18:38:19.514211Z",
       "related_bugs": [],
       "occurrences": 1,
-      "last_seen": "2026-09-12T18:38:19.514211Z"
+      "last_seen": "2026-09-13T16:34:07.684539Z"
     },
     {
       "id": "bug-217",

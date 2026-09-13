@@ -484,8 +484,17 @@ fn substitute_inline(s: &str, blackboard: &HashMap<String, Value>) -> String {
                 continue;
             }
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        // A `char`, not a byte. `bytes[i] as char` reads each byte as a
+        // Latin-1 code point, so every multi-byte UTF-8 sequence came out
+        // as one mojibake character per byte: `î` (C3 AE) rendered as
+        // `Ã®`. Every accented reply the composer wrote was mangled on its
+        // way through here.
+        let ch = s[i..]
+            .chars()
+            .next()
+            .expect("i is always on a char boundary: every branch advances past ASCII");
+        out.push(ch);
+        i += ch.len_utf8();
     }
     out
 }
@@ -1032,6 +1041,20 @@ mod tests {
         };
         let order = topological_order(&plan).unwrap();
         assert_eq!(order, vec!["s1".to_string(), "s2".to_string()]);
+    }
+
+    #[test]
+    fn non_ascii_text_survives_reference_substitution() {
+        // `resolve_value` runs over every composer reply, so this walked the
+        // bytes of each one and cast them to Latin-1 chars: `chaîne inversée`
+        // reached the browser as `chaÃ®ne inversÃ©e`.
+        let mut bb = HashMap::new();
+        bb.insert("s1".to_string(), json!({"reversed": "ruojnob"}));
+        let out = resolve_value(
+            &Value::String("La chaîne inversée est ${s1.reversed} — 7 caractères".into()),
+            &bb,
+        );
+        assert_eq!(out, json!("La chaîne inversée est ruojnob — 7 caractères"));
     }
 
     #[test]

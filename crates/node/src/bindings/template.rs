@@ -137,8 +137,17 @@ fn substitute_inline(s: &str, args: &Value) -> Result<String, TemplateError> {
             i = i + 2 + rel_end + 2;
             continue;
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        // A `char`, not a byte. `bytes[i] as char` reads each byte as a
+        // Latin-1 code point, so every multi-byte UTF-8 sequence came out
+        // as one mojibake character per byte: `î` (C3 AE) rendered as
+        // `Ã®`. Every accented reply the composer wrote was mangled on its
+        // way through here.
+        let ch = s[i..]
+            .chars()
+            .next()
+            .expect("i is always on a char boundary: every branch advances past ASCII");
+        out.push(ch);
+        i += ch.len_utf8();
     }
     Ok(out)
 }
@@ -152,6 +161,22 @@ fn value_to_text(v: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn non_ascii_text_survives_substitution() {
+        // The loop used to walk bytes and cast each to `char`, turning every
+        // multi-byte sequence into one Latin-1 character per byte.
+        let args = json!({"name": "Noël"});
+        assert_eq!(
+            render("Bonjour {{args.name}}, à bientôt — 日本", &args).unwrap(),
+            json!("Bonjour Noël, à bientôt — 日本")
+        );
+        // Including when there is nothing to substitute at all.
+        assert_eq!(
+            render("chaîne inversée · caractères", &args).unwrap(),
+            json!("chaîne inversée · caractères")
+        );
+    }
+
     #[test]
     fn a_bare_args_forwards_the_whole_object() {
         // The only shape that expresses a capability with optional arguments:
