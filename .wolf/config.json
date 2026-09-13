@@ -44,6 +44,9 @@
       ],
       "respect_gitignore": true
     },
+    "buglog": {
+      "auto_detect": false
+    },
     "token_audit": {
       "enabled": true,
       "report_frequency": "weekly",
