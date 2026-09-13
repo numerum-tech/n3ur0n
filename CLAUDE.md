@@ -187,7 +187,7 @@ cargo test -p n3ur0n-node --test cluster_blob_transfer -- --ignored --nocapture
 docker compose -f docker/compose.yml down -v
 ```
 
-3 nodes (`node-a`/`node-b`/`node-c`) sur ports hôte 4242/4243/4244, réseau bridge interne `n3uronnet`. Volumes par nœud. Healthcheck via `/n3ur0n/v0/health` (renvoie `{status, instance_id, protocol_version}`).
+3 nodes (`node-a`/`node-b`/`node-c`) sur ports hôte 4242/4243/4244, réseau bridge interne `n3uronnet` (**sous-réseau figé `172.28.42.0/24`, dernier octet = port publié** : node-a `.42`/4242, node-b `.43`/4243, …). Sans épinglage, Docker attribue les adresses dans l'ordre de démarrage : recréer un conteneur redistribue les autres, et un nom mis en cache par un navigateur pointe alors vers un autre nœud. Pour savoir à quel nœud une page appartient, lire l'**identifiant d'instance** dans l'en-tête de l'UI, pas le nom d'hôte. Volumes par nœud. Healthcheck via `/n3ur0n/v0/health` (renvoie `{status, instance_id, protocol_version}`).
 
 - `node-a`, `node-b` : backend echo (default).
 - `node-c` : backend Ollama via `host.docker.internal:11434` (host Ollama réutilisé via `extra_hosts: host-gateway`). Modèle override par env `OLLAMA_MODEL` (défaut `qwen2.5:0.5b`), base URL override par `OLLAMA_BASE_URL`.

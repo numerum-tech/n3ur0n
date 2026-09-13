@@ -12,6 +12,11 @@
 #   node-d — chat cap via remote Ollama gpt-oss:20b on LAN (port 4245)
 #
 # Each node has its own persistent volume so its identity survives restarts.
+#
+# Addressing is fixed, not allocation-order dependent: the last octet matches
+# the published port, so node-b is always 172.28.42.43 on :4243. Check which
+# node a page belongs to by its instance id, shown in the UI header — the
+# hostname alone can be stale in a browser's cache.
 
 name: n3ur0n-cluster
 
@@ -37,6 +42,9 @@ services:
     <<: *node
     container_name: n3uron-node-a
     hostname: node-a
+    networks:
+      n3uronnet:
+        ipv4_address: 172.28.42.42
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -61,6 +69,9 @@ services:
     <<: *node
     container_name: n3uron-node-b
     hostname: node-b
+    networks:
+      n3uronnet:
+        ipv4_address: 172.28.42.43
     depends_on:
       node-a:
         condition: service_healthy
@@ -79,6 +90,9 @@ services:
     <<: *node
     container_name: n3uron-node-c
     hostname: node-c
+    networks:
+      n3uronnet:
+        ipv4_address: 172.28.42.44
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -104,6 +118,9 @@ services:
     <<: *node
     container_name: n3uron-node-d
     hostname: node-d
+    networks:
+      n3uronnet:
+        ipv4_address: 172.28.42.45
     depends_on:
       node-a:
         condition: service_healthy
@@ -126,6 +143,9 @@ services:
     <<: *node
     container_name: n3uron-node-e
     hostname: node-e
+    networks:
+      n3uronnet:
+        ipv4_address: 172.28.42.46
     depends_on:
       node-a:
         condition: service_healthy
@@ -142,8 +162,17 @@ services:
       - ${N3UR0N_MANIFEST_HOST_DIR:-/tmp/n3manifest}:/etc/n3ur0n/manifests:ro
 
 networks:
+  # Fixed subnet, and each node pinned to the address that matches its
+  # published port: node-a 4242 -> .42, node-b 4243 -> .43, and so on. Docker
+  # hands out addresses in start order otherwise, so recreating one container
+  # reshuffles the others and a name that was cached by a browser or a resolver
+  # starts pointing at a different node. That is not a theoretical worry: it
+  # sent a session's worth of screenshots of node-b to a tab labelled node-d.
   n3uronnet:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.42.0/24
 
 volumes:
   node-a-data:
