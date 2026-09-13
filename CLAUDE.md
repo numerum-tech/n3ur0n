@@ -191,7 +191,9 @@ docker compose -f docker/compose.yml down -v
 
 - `node-a`, `node-b` : backend echo (default).
 - `node-c` : backend Ollama via `host.docker.internal:11434` (host Ollama réutilisé via `extra_hosts: host-gateway`). Modèle override par env `OLLAMA_MODEL` (défaut `qwen2.5:0.5b`), base URL override par `OLLAMA_BASE_URL`.
-- `node-b` bootstrappe automatiquement depuis `node-a` (env `N3UR0N_BOOTSTRAP_PEERS`).
+- `node-b` bootstrappe automatiquement depuis `node-a` (env `N3UR0N_BOOTSTRAP_PEERS`). Idem `node-c`, `node-d`, `node-e` : **node-a est le seed**, il ne bootstrappe depuis personne.
+- `node-e` n'a **volontairement aucune capacité propre** (profil consumer) : son dossier de manifestes est vide par défaut. Ne pas le « réparer ».
+- La découverte est **automatique au démarrage** (walk transitif depuis le seed) et **passive à la première rencontre** d'un pair inconnu (reverse-announce + `describe_self` en tâche de fond). Elle **ne se rejoue pas** ensuite : le descripteur d'un pair déjà connu reste figé jusqu'à un `POST /api/v0/peers/refresh` — c'est ce que fait le bouton de rafraîchissement des Compétences.
 
 ### Capacity planner (v0.2 — PlanExec, mis à jour 2026-05-12)
 

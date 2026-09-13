@@ -137,8 +137,12 @@ services:
     volumes:
       - node-d-data:/var/lib/n3ur0n
 
-  # node-e: manifest mode (v0.3+). Loads capabilities from caps/*.toml
-  # mounted from the host. Demonstrates the binding-driven runtime path.
+  # node-e: manifest mode (v0.3+), and **deliberately empty**. The mounted
+  # manifest dir is expected to hold nothing, so node-e publishes no capability
+  # of its own: it is the consumer profile, a node that only invokes what the
+  # network offers. A cluster where every node publishes something never
+  # exercises that case. Point N3UR0N_MANIFEST_HOST_DIR at a directory of
+  # caps/*.toml to turn it into a publisher instead.
   node-e:
     <<: *node
     container_name: n3uron-node-e
