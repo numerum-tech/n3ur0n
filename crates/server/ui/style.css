@@ -1567,6 +1567,38 @@ button.secondary:hover,
 
 .stepper.no-plan .stepper-row { display: none; }
 
+/* Direct mode compiles nothing, so it gets no plan panel: the dashed box and
+   its status line described work that does not happen. What is left is the
+   wait itself. */
+.stepper.direct-mode {
+    background: none;
+    border: none;
+    padding: 6px 2px;
+}
+
+.typing-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: var(--muted);
+    animation: typing-dot 1.2s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes typing-dot {
+    0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+    30%           { opacity: 1;    transform: translateY(-2px); }
+}
+
+/* Respect a reduced-motion preference: the dots still say "waiting" by
+   staying visible, they simply stop moving. */
+@media (prefers-reduced-motion: reduce) {
+    .typing-dot { animation: none; opacity: 0.6; }
+}
+
 .stepper-details {
     margin-top: 4px;
     padding: 8px 10px;

@@ -743,7 +743,11 @@ function appendStepper(isDirect = false) {
 
     const status = document.createElement("div");
     status.className = "stepper-status";
-    status.textContent = isDirect ? t("composer.direct.status") : t("stepper.compiling");
+    if (isDirect) {
+        setEllipsis(status);
+    } else {
+        status.textContent = t("stepper.compiling");
+    }
     wrap.appendChild(status);
 
     const row = document.createElement("div");
@@ -765,6 +769,19 @@ function appendStepper(isDirect = false) {
 
     function setStatus(text) {
         status.textContent = text;
+    }
+
+    /// Direct mode has a single LLM call and nothing to narrate: naming the
+    /// mode and the phase filled a box with words that said "wait". Three
+    /// animated dots say it without asking to be read.
+    function setEllipsis(el) {
+        el.textContent = "";
+        el.setAttribute("aria-label", t("stepper.waiting"));
+        for (let i = 0; i < 3; i++) {
+            const dot = document.createElement("span");
+            dot.className = "typing-dot";
+            el.appendChild(dot);
+        }
     }
 
     /// Same row, with a warning glyph instead of the word "error:". The prefix
@@ -818,8 +835,10 @@ function appendStepper(isDirect = false) {
                 row.appendChild(sep);
             }
             if (isDirect) {
+                // The node sends an empty PlanReady in direct mode for stream
+                // symmetry. There is no plan to show and the ellipsis already
+                // stands: nothing to say here.
                 wrap.classList.add("no-plan", "direct-mode");
-                setStatus(t("composer.direct.status"));
                 return;
             }
             if (!steps || steps.length === 0) {
@@ -866,10 +885,10 @@ function appendStepper(isDirect = false) {
             chip.onclick = () => toggleStepDetails(wrap, call, res, chip);
         },
         reflecting() {
-            // Direct mode has no plan to reflect on: the node sends this event
-            // for stream symmetry, and overwriting the status with the plan
-            // wording put "composing reply…" where the mode's own line was.
-            setStatus(isDirect ? t("composer.direct.status") : t("stepper.composing"));
+            // Direct mode keeps its ellipsis: the node emits this event for
+            // stream symmetry, and there is no second phase to announce.
+            if (isDirect) return;
+            setStatus(t("stepper.composing"));
         },
         markLowConfidence(confidence) {
             wrap.classList.add("degraded");
