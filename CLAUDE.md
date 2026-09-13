@@ -181,6 +181,8 @@ Smoke validé : `n3ur0n serve --backend ollama --openai-model qwen2.5:0.5b` puis
 ```bash
 docker compose -f docker/compose.yml up -d --build
 bash docker/cluster-smoke.sh        # 6 pings + describe_self + invoke
+# Transfert de blob réel sur le fil (ignoré par défaut, exige le cluster) :
+cargo test -p n3ur0n-node --test cluster_blob_transfer -- --ignored --nocapture
 docker compose -f docker/compose.yml down -v
 ```
 
