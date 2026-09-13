@@ -3576,6 +3576,24 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-09-13T13:58:33.223876Z"
+    },
+    {
+      "id": "bug-222",
+      "timestamp": "2026-09-13T14:09:58.005634Z",
+      "error_message": "Direct chat mode still renders the plan-progress stepper: an empty box reading 'composing reply…' then 'done · <model>'",
+      "file": "crates/server/ui/app.js",
+      "root_cause": "appendStepper() already branched on isDirect for its initial status, but reflecting() did not: DirectChatPlanner emits PlanReady + Reflecting for stream symmetry, and the Reflecting branch overwrote the mode's line with the plan wording. finalize() then left the widget in place as 'done · model', duplicating the assistant bubble header, with no chips to inspect because direct mode compiles no plan. Every one of those status strings was also a hard-coded English literal in an otherwise translated panel. Observed in the browser over CDP: {cls:'stepper direct-mode no-plan', status:'composing reply…'} then {cls:'... complete', status:'done · qwen2.5:7b'}.",
+      "fix": "reflecting() keeps composer.direct.status in direct mode; finalize() removes the widget entirely in direct mode (it survives on error, the one thing it still reports). Separately, every stepper status moved to i18n keys stepper.* in both locales. Verified over CDP on a live node: direct mode shows 'direct · rédaction de la réponse…' then zero .stepper elements; auto mode still shows 'compilation du plan…' → chip → 'terminé · qwen2.5:7b'. ui-smoke: 26 steps, no console errors.",
+      "tags": [
+        "ui",
+        "direct-mode",
+        "stepper",
+        "i18n",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T14:09:58.005634Z"
     }
   ],
   "version": 1
