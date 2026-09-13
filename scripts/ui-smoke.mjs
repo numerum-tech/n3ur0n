@@ -135,11 +135,25 @@ await sleep(1500);
 step("cap form lobe checkboxes", await evaluate(`[...document.querySelectorAll('.cf-lobe')].map(e => e.value)`));
 out.shots.push(await shot("05-cap-form-lobes"));
 
+// Back to the Skills list: its type filter must wear the same chrome as every
+// other select, which only a look at the pixels really settles.
+await evaluate(`document.getElementById('inspector-close')?.click()
+    || document.querySelector('#inspector [data-action="close"]')?.click()`);
+await sleep(500);
+await evaluate(`document.querySelector('#settings-nav .settings-nav-item[data-section="caps"]').click()`);
+await sleep(1000);
+step("type filter is a styled select", await evaluate(
+    `(() => { const s = document.getElementById('caps-type-filter');
+      return s ? [...s.classList].join(' ') + ' | appearance=' + getComputedStyle(s).appearance : 'missing'; })()`));
+out.shots.push(await shot("07-skills-filter"));
+
 // About keeps facts about the project; the instance id moved to Identity.
 await evaluate(`document.querySelector('.rail-btn[data-section="settings"]').click()`);
 await sleep(600);
 await evaluate(`document.querySelector('#settings-nav .settings-nav-item[data-section="about"]').click()`);
 await sleep(900);
+step("first nav entry", await evaluate(
+    `document.querySelector('#settings-nav .settings-nav-item')?.dataset.section`));
 step("about mentions no instance id", await evaluate(
     `!/n3:[a-z0-9]{20,}/.test(document.getElementById('settings-page-body').textContent || '')`));
 step("about version badge", await evaluate(

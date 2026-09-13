@@ -2394,7 +2394,7 @@ async function renderCapsCards() {
         ];
         body.innerHTML = `
             <div class="caps-toolbar">
-                <select id="caps-type-filter" class="filter type-filter" title="${escapeHtml(t("filter.type.tooltip"))}">
+                <select id="caps-type-filter" class="form-select type-filter" title="${escapeHtml(t("filter.type.tooltip"))}">
                     ${filterOpts.map(([v, k]) => `<option value="${escapeHtml(v)}"${v === typeFilterValue ? " selected" : ""}>${escapeHtml(t(k))}</option>`).join("")}
                 </select>
                 <span class="row-sub">${filteredCaps.length}/${caps.length}</span>

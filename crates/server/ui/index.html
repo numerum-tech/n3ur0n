@@ -140,6 +140,13 @@
         <section class="context-section hidden" data-context="settings">
             <h2 class="context-section-title" data-i18n="nav.rail.settings">Settings</h2>
             <ul id="settings-nav" class="settings-nav">
+                <li class="settings-nav-item" data-section="identity" data-perm="caps:read">
+                    <span class="nav-icon" data-icon="fingerprint" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="settings.nav.identity">Identity</span>
+                        <span class="nav-sub" data-i18n="settings.nav.identity.sub">Instance id and lobe membership</span>
+                    </div>
+                </li>
                 <li class="settings-nav-item active" data-section="backends" data-perm="backends:read">
                     <span class="nav-icon" data-icon="zap" data-icon-size="16"></span>
                     <div class="nav-text">
@@ -159,13 +166,6 @@
                     <div class="nav-text">
                         <span class="nav-title" data-i18n="settings.nav.caps">Skills</span>
                         <span class="nav-sub" data-i18n="settings.nav.caps.sub">Capability manifests you publish</span>
-                    </div>
-                </li>
-                <li class="settings-nav-item" data-section="identity" data-perm="caps:read">
-                    <span class="nav-icon" data-icon="fingerprint" data-icon-size="16"></span>
-                    <div class="nav-text">
-                        <span class="nav-title" data-i18n="settings.nav.identity">Identity</span>
-                        <span class="nav-sub" data-i18n="settings.nav.identity.sub">Instance id and lobe membership</span>
                     </div>
                 </li>
                 <li class="settings-nav-item" data-section="gateways" data-perm="peers:write">
