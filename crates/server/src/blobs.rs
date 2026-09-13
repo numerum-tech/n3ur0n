@@ -22,6 +22,8 @@ use time::OffsetDateTime;
 
 use crate::http::AppState;
 
+/// Longest retention a `put` ticket may obtain by asking (spec §5.1).
+const MAX_GRANTED_TTL_SECS: i64 = 7 * 24 * 60 * 60;
 const DEFAULT_PER_PEER_BYTES: i64 = 100 * 1024 * 1024;
 const DEFAULT_PER_PEER_BLOBS: i64 = 50;
 
@@ -147,12 +149,25 @@ fn check_peer_quota(state: &AppState, uploader: &str, add_bytes: i64) -> Result<
     Ok(())
 }
 
+/// Retention granted to a stored blob (spec §5.1).
+///
+/// Emphatically **not** the ticket's `expires_at`. That field is the
+/// authorization window — five minutes, in this implementation — and reading it
+/// as a retention policy gave every uploaded file a five-minute life, after
+/// which the ten-minute GC sweep erased it. A peer would upload, invoke, and
+/// find the publisher's store empty minutes later with nothing to explain it.
+///
+/// Retention comes from the blob's purpose: one hour for inputs, a day for
+/// outputs. A put ticket may ask for longer through `requested_ttl_secs`, which
+/// the publisher grants up to a week and otherwise ignores silently — the
+/// `201` response carries the `expires_at` actually granted.
 fn effective_expires(ticket: &BlobTicketPayload, now: i64) -> i64 {
-    if ticket.expires_at > now {
-        ticket.expires_at
-    } else {
-        now + default_ttl_secs(ticket.purpose) as i64
-    }
+    let default = default_ttl_secs(ticket.purpose) as i64;
+    let granted = ticket
+        .requested_ttl_secs
+        .map(|r| i64::try_from(r).unwrap_or(i64::MAX).clamp(default, MAX_GRANTED_TTL_SECS))
+        .unwrap_or(default);
+    now + granted
 }
 
 #[allow(clippy::too_many_arguments)] // blob-record columns; a struct would just move the args
@@ -451,4 +466,51 @@ pub fn forge_local_get_ticket(
         sender_endpoint: None,
     };
     env.sign(keypair)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use n3ur0n_core::{BlobOperation, BlobPurpose};
+
+    fn ticket(purpose: BlobPurpose, requested: Option<u64>, expires_at: i64) -> BlobTicketPayload {
+        BlobTicketPayload {
+            operation: BlobOperation::Put,
+            hash: None,
+            size: None,
+            mime: None,
+            capability: None,
+            expires_at,
+            purpose,
+            requested_ttl_secs: requested,
+            recipients_whitelist: None,
+        }
+    }
+
+    #[test]
+    fn retention_comes_from_the_purpose_not_from_the_ticket_window() {
+        let now = 1_000_000;
+        // A ticket is authorized for five minutes; the blob it carries lives an
+        // hour. Reading the ticket window as retention is what made uploaded
+        // files disappear on the next GC sweep.
+        let t = ticket(BlobPurpose::Input, None, now + 300);
+        assert_eq!(effective_expires(&t, now), now + 3600);
+
+        let t = ticket(BlobPurpose::Output, None, now + 300);
+        assert_eq!(effective_expires(&t, now), now + 24 * 3600);
+    }
+
+    #[test]
+    fn a_longer_retention_can_be_requested_up_to_a_week() {
+        let now = 1_000_000;
+        let day = 24 * 3600;
+        let t = ticket(BlobPurpose::Input, Some(day as u64), now + 300);
+        assert_eq!(effective_expires(&t, now), now + day);
+
+        // Beyond the cap, and below the default, the request is ignored.
+        let t = ticket(BlobPurpose::Input, Some(30 * day as u64), now + 300);
+        assert_eq!(effective_expires(&t, now), now + MAX_GRANTED_TTL_SECS);
+        let t = ticket(BlobPurpose::Input, Some(1), now + 300);
+        assert_eq!(effective_expires(&t, now), now + 3600);
+    }
 }

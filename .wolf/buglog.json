@@ -3535,6 +3535,26 @@
       ],
       "occurrences": 1,
       "last_seen": "2026-09-13T10:42:54.244823Z"
+    },
+    {
+      "id": "bug-220",
+      "timestamp": "2026-09-13T11:37:29.503977Z",
+      "error_message": "An uploaded blob vanishes from the publisher a few minutes after the transfer",
+      "file": "crates/server/src/blobs.rs",
+      "root_cause": "effective_expires() returned the ticket's expires_at whenever it was in the future, and a put ticket is authorized for TICKET_TTL_SECS = 300 s. So every blob stored through PUT /n3ur0n/v0/blobs got a five-minute lifetime instead of the one hour spec 5.1 prescribes, and the ten-minute GC sweep erased it. The fallback branch (now + default_ttl_secs) was unreachable: it only fired on an already-expired ticket, which verify_ticket rejects first. No symptom at upload time — 201 returned, the invoke ran, the store was empty minutes later. Found because node-b's cap-jobs listing and its blobs/sha256 directory were both empty right after a successful cluster transfer.",
+      "fix": "effective_expires() now derives retention from ticket.purpose via default_ttl_secs, with requested_ttl_secs honoured up to a 7-day cap (spec 5.1) and clamped to the default below it. Two unit tests pin the distinction between the authorization window and the retention. Verified on the cluster: blobs now persist with expires_at at upload + 1 h, visible in /api/v0/cap-jobs/blobs and on disk.",
+      "tags": [
+        "blob",
+        "ttl",
+        "gc",
+        "server",
+        "rs"
+      ],
+      "related_bugs": [
+        "bug-219"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T11:37:29.503977Z"
     }
   ],
   "version": 1
