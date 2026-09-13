@@ -64,16 +64,37 @@ See [CHANGELOG.md](CHANGELOG.md) for what has shipped.
 - 💭 Wire format fuzz harness (`cargo-fuzz`)
 - 💭 Public capability marketplace browser
 
-## v0.4.x — blob protocol ✅ (unreleased)
+## v0.4.x — blob protocol ✅
 
 - ✅ Blob side-channel (`/n3ur0n/v0/blobs`, `blob_ticket` verb, hash refs in `invoke` payloads)
 - ✅ Classification A–D : outbound / inbound output / cap staging (non user-visible) / local cache
 - ✅ User Files panel + `GET /api/v0/files` (session-scoped) ; cap staging admin view only ; periodic GC
+- ✅ Real transfer between two live nodes, covered by cluster tests (0.4.3)
 - 💭 Inline base64 threshold §8 ; `data_policy` / `blob_quota` in manifests
+- 💭 Blob access log — every read is meant to be logged; nothing writes one yet (lifecycle doc §8)
 
-See [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md).
+See [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md) and
+[n3ur0n-blob-lifecycle-v0.md](n3ur0n-blob-lifecycle-v0.md).
+
+## v0.4.3 — addressing, manifests, activity ✅
+
+- ✅ Instance `alias`, announced in `describe_self`; mentions read `alias#idprefix` and
+  resolve only by `n3:` id
+- ✅ Lobe membership declared per instance (`cap.lobe_ids ⊆ instance.lobe_ids`, 5 max) —
+  **declared, not verified**, see archi §11.6
+- ✅ `@` mention picker (files, peers, caps, lobes); an unknown reference refuses the
+  dispatch instead of widening the scope
+- ✅ Capabilities leave the binary: `--manifest-dir` defaults to `<config>/manifests`,
+  and the test cluster's utility caps move to an HTTP service behind manifests
+- ✅ Activity dashboard over the `audit_log` table, which had no writer until now
+- ✅ Planner continuation rounds on structural triggers; hybrid retrieval (BM25 + embeddings)
+- 🧭 Capability authoring still needs a backend to exist first; the UI does not offer to
+  create one from the cap form
 
 ## v0.5 — federation 💭
+
+Untouched by 0.4.3: an instance now *declares* its lobes, but nothing
+subscribes, verifies or enumerates members.
 
 - Lobe membership protocol (subscribe / unsubscribe / list members)
 - HITL approval gate before sensitive `invoke` execution

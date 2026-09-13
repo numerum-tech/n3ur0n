@@ -4,11 +4,42 @@ All notable changes to this project are documented here. The format is loosely b
 
 ## [Unreleased]
 
-### Removed
-- `frontend/` — dead SvelteKit scaffold from the initial commit (`1453c6b`, May 2026). 214 LOC of boilerplate whose own landing copy read *"Pre-implementation scaffold. UI surfaces … will land progressively"*; they never did. It was never built by CI (no `pnpm`/`npm` step in either workflow), never served, and had no root `package.json` to `--filter` from. Its only external reference was a `COPY frontend ./frontend` in `docker/Dockerfile`, which fed an image with no node toolchain — removed too.
+## [0.4.3] — 2026-09-13 — addressing, manifests out of the binary, activity
+
+### Added
+- **Readable addressing.** An instance can carry an `alias` (`--alias`, `N3UR0N_ALIAS`, `instance.toml`, or Settings → Identity), announced in `describe_self`. Chat mentions render it as `alias#idprefix` and still resolve **only** by `n3:` id: an alias is a claim a node makes about itself and would go to the first squatter. `@peer:self` names the current instance.
+- **Lobe membership.** An instance declares the federations it belongs to (`--lobe`, `N3UR0N_LOBES`, `instance.toml`, `PUT /api/v0/settings/lobes`), 5 max, and `cap.lobe_ids ⊆ instance.lobe_ids` is enforced at registration. Membership is **declared, not verified** — see architecture §11.6.
+- **`@` mention picker** in the composer scoping files, peers, capabilities and lobes; each entry shows the token it inserts, a partial prefix filters by type, and an unknown reference now **refuses the dispatch** (422 `unresolved_mentions`) instead of silently widening the scope the user had narrowed.
+- **Activity section**: a live dashboard of what the node serves, runs and calls, fed by the `audit_log` table — which had existed since the first migration with no writer. Aggregates only, never a listing; SSE snapshot every two seconds. `GET /api/v0/activity`, `GET /api/v0/activity/stream`.
+- **Continuation rounds** in the planner (`MAX_PLAN_ROUNDS=2`), driven by structural triggers — a failed step, or a plan that hit the per-round depth cap — never by asking the model to judge its own completeness.
+- **Hybrid capability retrieval** (BM25 + embeddings) when an embeddings endpoint is configured.
+- `rename_file` capability and a real blob round trip over the wire, covered by three cluster tests (`cargo test -p n3ur0n-node --test cluster_blob_transfer -- --ignored`).
+- Blobs carry a human-readable `path`; capability outputs are attached to the user who requested them.
+- `bash scripts/ui-smoke.sh` — drives the embedded UI in a real Chrome over CDP, asserts on the DOM and captures PNGs. No npm dependency: Node 22 has `WebSocket`, Chrome speaks the protocol.
+- Reference doc [n3ur0n-blob-lifecycle-v0.md](n3ur0n-blob-lifecycle-v0.md): a file's full life between two nodes, with the known gaps between spec and code.
 
 ### Changed
+- **Capabilities belong outside the gateway.** The five compiled utility functions (`time`, `random_int`, `reverse`, `string_length`, `rename_file`) moved to `docker/hermes/`, an HTTP service in its own container, reached through an `http_base` backend manifest and one cap manifest each (`docker/manifests/`). Every instance ships the same binary, so anything compiled into it is published identically by every node and the network has nothing to route — the cluster only looked federated because `N3UR0N_CAPS` hid part of the list on each node. These are also the repo's first worked example of manifest mode, which existed only in the parser's tests.
+- **`--manifest-dir` has a default**: `<config>/manifests`. Manifest mode engages when that directory holds a `.toml`; a node whose directory is empty keeps its compile-time backend and still gets the manifest runtime, so the first capability saved through the UI is served without a restart.
+- `{{args}}` in a binding template forwards the whole argument object. Without it a capability with *optional* arguments had no valid spelling: naming each field fails to render as soon as one is absent, and omitting `body_template` sends no body.
+- Docker cluster: fixed subnet with the last octet matching the published port (a recreated container used to reshuffle the others and a cached name then pointed at a different node); capabilities spread so no node has everything, one node has none, and one advertises a capability it cannot serve.
+- UI: instance identity grouped under **Identity**, About left to the project; dispatch statuses translated and Firstcapped; direct chat waits with an animated ellipsis instead of a plan panel it has no plan for.
+- Default planner model `qwen2.5:7b` (measured; 7B is the practical floor — see [n3ur0n-planner-selection-v0.md](n3ur0n-planner-selection-v0.md) §6bis).
 - Docs corrected to describe the UI that actually ships. The web UI is `crates/server/ui/`: hand-written vanilla JS (ES modules) + CSS, **no bundler, no package.json, no build step** — ~4.3k LOC across `app.js` (3500), `auth.js`, `i18n.js`, `icons.js`, `index.html`, `style.css`, `locales/{en,fr}.json`. It is embedded by rust-embed (`#[folder = "ui/"]`, `crates/server/src/http.rs`) and is also what the desktop shell loads (`"frontendDist": "../server/ui"`). In debug builds rust-embed reads the assets from disk, so editing a `.js`/`.css` and reloading the page needs no recompile; release builds embed them. Claims of SvelteKit / `adapter-static` / Tailwind / `bits-ui` / `pnpm --filter frontend` in `CLAUDE.md`, `project-tech-stack.md` (§8, §10.1, §12.4, §15) and the 0.1.0 entry below were never true; each is now corrected in place with a dated deviation note.
+
+### Fixed
+- **Accented text was mangled in every reply.** `resolve_value` and `substitute_inline` walked their input byte by byte and ended each iteration on `out.push(bytes[i] as char)`, reading one UTF-8 byte as a Latin-1 code point: `chaîne inversée` reached the browser as `chaÃ®ne inversÃ©e`. `resolve_value` runs over every composer reply.
+- **A manifest-mode node could not execute its own capability.** The plan executor sent any step with no endpoint to `node.backend()` — the compile-time slot, which manifest mode fills with an inert Echo — so `time` answered `{}` while the same capability answered correctly to a signed invoke from a peer.
+- **The settings API edited a directory the node never read.** It used `config_dir/{caps,backends}` while the node reloads from `--manifest-dir`; a capability saved on the cluster returned `{"ok": true, "registered": 2}`, the count coming from the other directory. A reload that can load none of the manifests present no longer swaps an empty registry in, and a capability saved but not registered answers 422 naming the missing backend.
+- **The composer answered the same message twice.** The user turn is recorded before the plan compiles, so the conversation tail handed to reflect already ended on it and the re-statement appended a second copy.
+- Blob layer: retention derives from the ticket's *purpose*, not its 300 s authorization window (uploads were swept by the GC minutes after landing); a file that has been sent stops classifying itself as local cache; an upload appears in the section it actually landed in, and sections that cannot receive one no longer offer the button.
+- A tool call and its result are persisted atomically — a crash between the two left a dangling call.
+- The Skills refresh button actually asks the peers (`POST /api/v0/peers/refresh`) instead of re-reading local caches; a peer's alias survives a reverse-announce that does not know it.
+- A peer mention resolves through an indexed `GLOB` prefix rather than a full directory scan.
+
+### Removed
+- `UtilityBackend` and `--backend utility`. **Breaking** for any deployment selecting it; the equivalent capabilities now come from manifests (see Changed). `EchoBackend` and the OpenAI-compatible backend are unaffected.
+- `frontend/` — dead SvelteKit scaffold from the initial commit (`1453c6b`, May 2026). 214 LOC of boilerplate whose own landing copy read *"Pre-implementation scaffold. UI surfaces … will land progressively"*; they never did. It was never built by CI (no `pnpm`/`npm` step in either workflow), never served, and had no root `package.json` to `--filter` from. Its only external reference was a `COPY frontend ./frontend` in `docker/Dockerfile`, which fed an image with no node toolchain — removed too.
 
 ## [0.4.2] — 2026-07-20 — planner accuracy + release plumbing
 

@@ -151,39 +151,37 @@
       "last_seen": "2026-09-12T18:34:49.843805Z"
     },
     {
-      "error_message": "OPEN — continuation rounds still invisible in the cluster UI (no second chip group, no round separator)",
+      "error_message": "Continuation rounds invisible in the cluster UI — NOT A DEFECT",
       "file": "crates/server/ui/app.js",
-      "root_cause": "UNVERIFIED. Leading hypothesis: the Docker cluster image is a release build, so the UI is embedded by rust-embed AND the PlanReady.round field comes from the node binary — neither the JS nor the Rust change is live until the image is rebuilt. Check `docker compose -f docker/compose.yml up -d --build` before looking for a code defect. Second hypothesis: the dispatch genuinely used one round (depth 3 triggers a continuation, which then compiles an empty plan and renders nothing, by design).",
-      "fix": "NOT FIXED — user asked to note only. Next step: rebuild the cluster, then read node-a logs for 'compiling a continuation round'.",
+      "root_cause": "The second hypothesis recorded at the time was the right one. Re-tested on the rebuilt cluster (0.4.3) with a step that genuinely fails — an invoke on node-d, whose LAN LLM is unreachable on purpose. node-a logs `compiling a continuation round round=1 depth=1 reason=a step failed`, so the loop runs; no second PlanReady follows, because the continuation compiled an empty plan. The UI has no second chip group to draw and the round separator only appears when round 2 produces steps. Working as designed: a continuation that finds nothing worth doing ends the dispatch.",
+      "fix": "No code change. Closed as not a defect.",
       "tags": [
-        "open",
-        "ui",
         "planner",
         "continuation",
-        "docker"
+        "not-a-defect"
       ],
       "id": "bug-214",
       "timestamp": "2026-09-12T18:38:19.514211Z",
       "related_bugs": [],
       "occurrences": 1,
-      "last_seen": "2026-09-12T18:38:19.514211Z"
+      "last_seen": "2026-09-13T16:58:21.703685Z"
     },
     {
-      "error_message": "OPEN — reflect quotes a PREVIOUS turn's tool value: two dispatches minutes apart returned the same reversed string for different timestamps",
+      "error_message": "Reflect quoted a PREVIOUS turn's tool value — no longer reproduces",
       "file": "crates/node/src/planner/plan_exec.rs",
-      "root_cause": "UNVERIFIED. Observed: dispatch 1 time=2026-09-12T18:30:52.901772712Z reply reversed=Z217277109.25:03:81T21-90-6202 (CORRECT). Dispatch 2 time=2026-09-12T18:36:19.391088723Z reply reversed=Z217277109.25:03:81T21-90-6202 (dispatch 1's value, wrong). reflect_only feeds the conversation tail (MAX_CONTEXT_TURNS) before the blackboard, so the composer appears to copy the earlier assistant message rather than the current results. Distinct from bug-212: the value is not invented, it is stale.",
-      "fix": "NOT FIXED — user asked to note only. Candidate: make the current round's blackboard outrank conversation history in the reflect prompt, or test with the ${ref} substitution live (needs the cluster rebuilt).",
+      "root_cause": "UNVERIFIED. Observed: dispatch 1 time=2026-09-12T18:30:52.901772712Z reply reversed=Z217277109.25:03:81T21-90-6202 (CORRECT). Dispatch 2 time=2026-09-12T18:36:19.391088723Z reply reversed=Z217277109.25:03:81T21-90-6202 (dispatch 1's value, wrong). reflect_only feeds the conversation tail (MAX_CONTEXT_TURNS) before the blackboard, so the composer appears to copy the earlier assistant message rather than the current results. Distinct from bug-212: the value is not invented, it is stale. | 2026-09-13: does not reproduce on 0.4.3. Two dispatches of the same question in one conversation return their own fresh values (16:55:40Z then 16:55:45Z, each matching its own step result). The likely cause is bug-221's fix, which removed a duplicated user turn from the same reflect prompt — same class of context contamination — but that is not proven: the original report was two dispatches MINUTES apart and this retest was seconds apart. Reopen if it returns.",
+      "fix": "No targeted fix. Not reproducible after the reflect-prompt cleanup in bug-221; kept as a watch item.",
       "tags": [
-        "open",
         "planner",
         "reflect",
-        "context-contamination"
+        "context-contamination",
+        "not-reproducible"
       ],
       "id": "bug-215",
       "timestamp": "2026-09-12T18:38:19.514211Z",
       "related_bugs": [],
       "occurrences": 1,
-      "last_seen": "2026-09-12T18:38:19.514211Z"
+      "last_seen": "2026-09-13T16:58:21.703685Z"
     },
     {
       "error_message": "Mojibake in every accented reply: 'chaÃ®ne inversÃ©e', 'caractÃ¨res'",
