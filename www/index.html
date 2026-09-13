@@ -129,9 +129,9 @@ n3ur0n send --endpoint https://peer.example \
             invoke them with cryptographically signed envelopes.
           </p>
           <p>
-            Identity is self-certifying:
-            <strong><code>n3:</code> + Base32(SHA-256(Ed25519 public key))</strong>.
-            Anyone can verify; no one needs a registry to issue an ID.
+            Identity is self-certifying: your ID is a hash of your own public key —
+            <strong><code>n3:eytey6vdqdeoodtcpx3ugxsqyy3dxpjw</code></strong>.
+            Anyone can verify it; no one needs a registry to issue one.
           </p>
           <p>
             Capabilities are <strong>data on disk</strong>, not plugins in the binary.

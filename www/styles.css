@@ -436,6 +436,20 @@ main {
   align-items: start;
 }
 
+/* A grid item's min-width defaults to auto, so a single unbreakable token —
+   an instance id, say — widens its column past the viewport instead of
+   shrinking. Measured at 320px: without this the document scrolls to 378px. */
+.split > * {
+  min-width: 0;
+}
+
+/* Inline code carries ids and identifiers with no break opportunity of their
+   own; let them wrap rather than push the column. */
+.prose code,
+.not-list code {
+  overflow-wrap: anywhere;
+}
+
 @media (min-width: 720px) {
   .split-2 {
     grid-template-columns: 1fr 1fr;
