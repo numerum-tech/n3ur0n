@@ -2220,10 +2220,10 @@ function activateSettingsSection(name) {
         actions.innerHTML = `<button class="primary" id="settings-add-cap">${escapeHtml(t("settings.caps.add"))}</button>`;
         document.getElementById("settings-add-cap")?.addEventListener("click", () => openCapTemplatePicker());
         renderCapsCards();
-    } else if (name === "lobes") {
-        title.textContent = t("settings.lobes.title");
-        sub.textContent = t("settings.lobes.subtitle");
-        renderLobesPage();
+    } else if (name === "identity") {
+        title.textContent = t("settings.identity.title");
+        sub.textContent = t("settings.identity.subtitle");
+        renderIdentityPage();
     } else if (name === "gateways") {
         title.textContent = t("settings.gateways.title");
         sub.textContent = t("settings.gateways.subtitle");
@@ -2772,7 +2772,12 @@ async function renderPlannerPage() {
     applyIcons();
 }
 
-// ---- Lobes section ----
+// ---- Identity section ----
+//
+// What this instance *is* on the network: the id every signed call carries,
+// and the federations it claims. Both were split before — the id sat under
+// About next to the licence and the source URL, which is where a reader looks
+// for facts about the project, not about their own node.
 
 /// Client-side twin of `n3ur0n_core::lobe::validate_lobe_id`. The server is
 /// the authority; this only spares the user a round-trip to learn they typed
@@ -2783,8 +2788,10 @@ function lobeIdError(id) {
     return null;
 }
 
-async function renderLobesPage() {
+async function renderIdentityPage() {
     const body = document.getElementById("settings-page-body");
+    let me = { instance_id: "?" };
+    try { me = await api("GET", "/api/v0/whoami"); } catch { /* id card degrades to "?" */ }
     let data;
     try {
         data = await api("GET", "/api/v0/settings/lobes");
@@ -2815,7 +2822,17 @@ async function renderLobesPage() {
     body.innerHTML = `
         <article class="card" style="max-width: 720px;">
             <div class="card-head">
-                <div class="card-icon">🌐</div>
+                <div class="card-icon">${iconHtml("fingerprint", { size: 18 })}</div>
+                <span class="card-title">${escapeHtml(t("settings.identity.instance_id"))}</span>
+            </div>
+            <div class="card-meta">
+                <code style="word-break: break-all; display: block; padding: 8px;">${escapeHtml(me.instance_id || "?")}</code>
+            </div>
+            <p class="card-meta">${t("settings.identity.instance_id.help")}</p>
+        </article>
+        <article class="card" style="max-width: 720px; margin-top: 12px;">
+            <div class="card-head">
+                <div class="card-icon">${iconHtml("globe", { size: 18 })}</div>
                 <span class="card-title">${escapeHtml(t("settings.lobes.current"))}</span>
             </div>
             <div id="lobes-chips" class="lobe-row"></div>
@@ -2941,15 +2958,17 @@ async function renderAboutPage() {
     document.getElementById("settings-page-title").textContent = "About N3UR0N";
     document.getElementById("settings-page-subtitle").textContent =
         "Federated AI gateway. One manifest per skill, signed protocol, optional peer network.";
-    let me = { instance_id: "?" };
-    try { me = await api("GET", "/api/v0/whoami"); } catch { /* ignore */ }
+    // Read the version rather than restate it: the badge said v0.4.1 for the
+    // whole of 0.4.2 because a literal here has nothing keeping it honest.
+    let build = {};
+    try { build = await api("GET", "/n3ur0n/v0/health"); } catch { /* badge falls back below */ }
     body.innerHTML = `
         <article class="card" style="max-width: 720px;">
             <div class="card-head">
                 <img class="brand-mark" src="/ui/brand-mark.png" width="36" height="36" alt="" aria-hidden="true"
                     style="border-radius:8px;object-fit:contain;background:transparent;">
                 <span class="card-title">N3UR0N</span>
-                <span class="card-kind">v0.4.1</span>
+                <span class="card-kind">${build.version ? `v${escapeHtml(build.version)}` : ""}</span>
             </div>
             <div class="card-meta">
                 A peer-to-peer gateway for AI capabilities — local + remote LLMs,
@@ -2959,25 +2978,10 @@ async function renderAboutPage() {
                 consumed from peers.
             </div>
             <div class="card-meta">
-                Protocol: <code>n3ur0n/0.3</code><br>
+                Protocol: <code>${escapeHtml(build.protocol_version || "n3ur0n/0.3")}</code><br>
                 License: Apache-2.0<br>
                 Source: <code>github.com/numerum-tech/n3ur0n</code>
             </div>
-        </article>
-        <article class="card" style="max-width: 720px; margin-top: 12px;">
-            <div class="card-head">
-                <div class="card-icon">${iconHtml("fingerprint", { size: 18 })}</div>
-                <span class="card-title">Instance ID</span>
-            </div>
-            <div class="card-meta">
-                <code style="word-break: break-all; display: block; padding: 8px;">${escapeHtml(me.instance_id || "?")}</code>
-            </div>
-            <p class="card-meta">
-                Your cryptographic identity — derived from your public key and used to
-                sign every call you make. Anyone receiving a signed call from you sees
-                this id. The private key lives in <code>keys.json</code> in the app
-                config dir (file mode 0600); treat it like a password.
-            </p>
         </article>
     `;
 }

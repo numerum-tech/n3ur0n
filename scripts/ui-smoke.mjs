@@ -86,7 +86,7 @@ step("auth gate visible", await evaluate(`!!document.querySelector('#auth-gate:n
 const openLobes = async () => {
     await evaluate(`document.querySelector('.rail-btn[data-section="settings"]').click()`);
     await sleep(900);
-    await evaluate(`document.querySelector('#settings-nav .settings-nav-item[data-section="lobes"]').click()`);
+    await evaluate(`document.querySelector('#settings-nav .settings-nav-item[data-section="identity"]').click()`);
     await sleep(1200);
 };
 await openLobes();
@@ -95,6 +95,8 @@ step("settings panel visible", await evaluate(
     `(() => { const p = document.getElementById('settings-page'); const r = p.getBoundingClientRect(); return !p.classList.contains('hidden') && r.width > 0 && r.height > 0; })()`));
 
 step("page title", await evaluate(`document.getElementById('settings-page-title')?.textContent`));
+step("instance id shown", await evaluate(
+    `/^n3:[a-z0-9]+$/.test(document.querySelector('#settings-page-body code')?.textContent?.trim() || '')`));
 step("empty state", await evaluate(`document.getElementById('lobes-chips')?.textContent?.trim()`));
 out.shots.push(await shot("01-lobes-empty"));
 
@@ -130,6 +132,17 @@ await evaluate(`(() => { const c = document.querySelector('[data-template]'); c?
 await sleep(1500);
 step("cap form lobe checkboxes", await evaluate(`[...document.querySelectorAll('.cf-lobe')].map(e => e.value)`));
 out.shots.push(await shot("05-cap-form-lobes"));
+
+// About keeps facts about the project; the instance id moved to Identity.
+await evaluate(`document.querySelector('.rail-btn[data-section="settings"]').click()`);
+await sleep(600);
+await evaluate(`document.querySelector('#settings-nav .settings-nav-item[data-section="about"]').click()`);
+await sleep(900);
+step("about mentions no instance id", await evaluate(
+    `!/n3:[a-z0-9]{20,}/.test(document.getElementById('settings-page-body').textContent || '')`));
+step("about version badge", await evaluate(
+    `document.querySelector('#settings-page-body .card-kind')?.textContent?.trim()`));
+out.shots.push(await shot("06-about"));
 
 console.log(JSON.stringify(out, null, 2));
 ws.close();

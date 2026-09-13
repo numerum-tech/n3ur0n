@@ -793,7 +793,7 @@ async fn upsert_cap_manifest(
         return settings_error(
             StatusCode::BAD_REQUEST,
             &format!(
-                "this instance does not belong to {}; join the lobe in Settings → Lobes first",
+                "this instance does not belong to {}; join the lobe in Settings → Identity first",
                 unclaimable.join(", ")
             ),
         );

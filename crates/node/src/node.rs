@@ -46,7 +46,7 @@ fn report_dropped_lobes(dropped_per_cap: Vec<(String, Vec<String>)>) {
             cap = %cap,
             lobes = %dropped.join(", "),
             "capability claims lobes this instance does not declare; ignoring them \
-             (declare them in settings → Lobes, or with `serve --lobe <id>`)"
+             (declare them in Settings → Identity, or with `serve --lobe <id>`)"
         );
     }
 }

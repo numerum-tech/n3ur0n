@@ -326,7 +326,7 @@ Trois règles, toutes appliquées **à l'écriture**, jamais à la lecture :
 
 Le jeu vit dans `instance.toml` (`[instance] lobe_ids`), se déclare aussi par
 `serve --lobe <id>` / `N3UR0N_LOBES`, et se modifie à chaud via
-`PUT /api/v0/settings/lobes` sans redémarrage.
+`PUT /api/v0/settings/lobes` sans redémarrage (UI : Réglages → Identité).
 
 **Ce que cela n'est pas** : une preuve. Rien ne vérifie qu'une instance
 appartient au lobe qu'elle déclare. Le cadrage par lobe (`@lobe:` dans le
