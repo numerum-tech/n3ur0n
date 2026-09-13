@@ -132,6 +132,28 @@ impl CapabilityRegistry {
         dropped_per_cap
     }
 
+    /// Keep only the named capabilities, dropping the rest.
+    ///
+    /// A compile-time backend declares everything it can do; an operator may
+    /// want to publish a subset — and a test cluster needs to, or every node
+    /// running the same backend is an identical publisher and the network
+    /// never has to choose between peers.
+    ///
+    /// Returns the names that matched nothing, so a typo is reported instead
+    /// of silently narrowing the node to fewer capabilities than intended.
+    pub fn retain_published(&mut self, allow: &[String]) -> Vec<String> {
+        if allow.is_empty() {
+            return Vec::new();
+        }
+        let unknown: Vec<String> = allow
+            .iter()
+            .filter(|name| !self.by_name.contains_key(*name))
+            .cloned()
+            .collect();
+        self.by_name.retain(|name, _| allow.contains(name));
+        unknown
+    }
+
     /// Number of registered capabilities.
     pub fn len(&self) -> usize {
         self.by_name.len()
@@ -197,6 +219,30 @@ mod tests {
         let dropped = reg.enforce_instance_lobes(&[]);
         assert_eq!(dropped.len(), 1);
         assert!(reg.get("a").unwrap().lobe_ids.is_empty());
+    }
+
+    #[test]
+    fn retain_published_keeps_the_named_caps_and_reports_typos() {
+        let mut reg = CapabilityRegistry::from_decls(vec![
+            decl("time", AccessMode::Free),
+            decl("reverse", AccessMode::Free),
+            decl("random_int", AccessMode::Free),
+        ]);
+        let unknown = reg.retain_published(&["time".into(), "nope".into()]);
+        assert_eq!(unknown, vec!["nope".to_string()]);
+        assert_eq!(reg.len(), 1);
+        assert!(reg.get("time").is_some());
+        assert!(reg.get("reverse").is_none());
+    }
+
+    #[test]
+    fn an_empty_allowlist_publishes_everything() {
+        let mut reg = CapabilityRegistry::from_decls(vec![
+            decl("time", AccessMode::Free),
+            decl("reverse", AccessMode::Free),
+        ]);
+        assert!(reg.retain_published(&[]).is_empty());
+        assert_eq!(reg.len(), 2);
     }
 
     #[test]

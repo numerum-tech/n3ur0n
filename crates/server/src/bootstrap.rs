@@ -49,6 +49,40 @@ pub fn keys_path(dir: &Path) -> PathBuf {
 
 /// Build a fully-wired [`Node`] from a config directory: load identity, open
 /// db, build a backend from the runtime selector, populate registry.
+/// Capabilities this node should publish, from `N3UR0N_CAPS` (CSV or
+/// whitespace-separated). Empty means publish everything the backend declares.
+///
+/// A compile-time backend is all-or-nothing: every node running `utility`
+/// publishes the same five capabilities. Without a way to narrow that, a
+/// multi-node cluster has one publisher repeated, and nothing ever has to
+/// choose between peers.
+pub fn env_published_caps() -> Vec<String> {
+    std::env::var("N3UR0N_CAPS")
+        .ok()
+        .map(|raw| {
+            raw.split(|c: char| c == ',' || c.is_whitespace())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn apply_published_caps(registry: &mut CapabilityRegistry) {
+    let allow = env_published_caps();
+    if allow.is_empty() {
+        return;
+    }
+    for unknown in registry.retain_published(&allow) {
+        tracing::warn!(
+            cap = %unknown,
+            "N3UR0N_CAPS names a capability this backend does not declare"
+        );
+    }
+    tracing::info!(published = registry.len(), "capability publication narrowed");
+}
+
 pub async fn load_node(
     config_dir: &Path,
     endpoint: Option<String>,
@@ -79,7 +113,8 @@ pub async fn load_node(
     //     build a binding-less CapabilityRegistry.
     match backend_kind {
         BackendKind::Manifest { dir } => {
-            let (registry, backends) = load_manifest_registry(&dir).await?;
+            let (mut registry, backends) = load_manifest_registry(&dir).await?;
+            apply_published_caps(&mut registry);
             let inert: Arc<dyn Backend> = Arc::new(EchoBackend);
             // Attach the BackendsRegistry + dir so the node can
             // hot-reload caps later without a restart.
@@ -89,7 +124,8 @@ pub async fn load_node(
         other => {
             let backend: Arc<dyn Backend> = build_backend(other)?;
             let decls = backend.describe().await?;
-            let registry = CapabilityRegistry::from_decls(decls);
+            let mut registry = CapabilityRegistry::from_decls(decls);
+            apply_published_caps(&mut registry);
             Ok(Node::new(kp, db, backend, registry, cfg))
         }
     }

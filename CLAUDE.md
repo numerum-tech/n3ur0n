@@ -189,7 +189,8 @@ docker compose -f docker/compose.yml down -v
 
 3 nodes (`node-a`/`node-b`/`node-c`) sur ports hôte 4242/4243/4244, réseau bridge interne `n3uronnet` (**sous-réseau figé `172.28.42.0/24`, dernier octet = port publié** : node-a `.42`/4242, node-b `.43`/4243, …). Sans épinglage, Docker attribue les adresses dans l'ordre de démarrage : recréer un conteneur redistribue les autres, et un nom mis en cache par un navigateur pointe alors vers un autre nœud. Pour savoir à quel nœud une page appartient, lire l'**identifiant d'instance** dans l'en-tête de l'UI, pas le nom d'hôte. Volumes par nœud. Healthcheck via `/n3ur0n/v0/health` (renvoie `{status, instance_id, protocol_version}`).
 
-- `node-a`, `node-b` : backend echo (default).
+- **Répartition des capacités** (aucun nœud n'a tout, un n'a rien, un annonce ce qu'il ne peut pas servir) : `node-a` `time`+`random_int`, `node-b` `rename_file`+`reverse`+`string_length`, `node-c` `chat` (Ollama hôte, fonctionne), `node-d` `chat` (LLM LAN volontairement injoignable), `node-e` rien.
+- `N3UR0N_CAPS` (CSV) restreint ce qu'un nœud publie parmi ce que son backend déclare. Un backend compilé est tout-ou-rien : sans ce filtre, deux nœuds sur le même backend sont deux publieurs identiques et le réseau n'a jamais à choisir.
 - `node-c` : backend Ollama via `host.docker.internal:11434` (host Ollama réutilisé via `extra_hosts: host-gateway`). Modèle override par env `OLLAMA_MODEL` (défaut `qwen2.5:0.5b`), base URL override par `OLLAMA_BASE_URL`.
 - `node-b` bootstrappe automatiquement depuis `node-a` (env `N3UR0N_BOOTSTRAP_PEERS`). Idem `node-c`, `node-d`, `node-e` : **node-a est le seed**, il ne bootstrappe depuis personne.
 - `node-e` n'a **volontairement aucune capacité propre** (profil consumer) : son dossier de manifestes est vide par défaut. Ne pas le « réparer ».

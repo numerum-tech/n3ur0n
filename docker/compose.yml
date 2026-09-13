@@ -5,11 +5,16 @@
 #   docker compose -f docker/compose.yml exec node-a \
 #       n3ur0n send --endpoint http://node-b:4242 --verb ping
 #
-# Nodes:
-#   node-a — planner (PlanExec), llama3.1:8b on host Ollama (port 4242)
-#   node-b — utility backend (4 caps, port 4243)
-#   node-c — chat cap via host Ollama llama3.1:8b (port 4244)
-#   node-d — chat cap via remote Ollama gpt-oss:20b on LAN (port 4245)
+# Nodes — the capability spread is the point: no single node has everything,
+# one node has nothing, and one advertises a capability it cannot serve.
+#   node-a — seed + planner (PlanExec, host Ollama); publishes time, random_int
+#   node-b — utility: rename_file, reverse, string_length (port 4243)
+#   node-c — chat via host Ollama (port 4244) — a working LLM cap
+#   node-d — chat via a remote LLM on the LAN (port 4245). Deliberately left
+#            pointing at an endpoint that is usually unreachable: a peer that
+#            advertises a capability and cannot serve it is a case the planner
+#            and the UI have to survive.
+#   node-e — no capability at all (consumer profile, port 4246)
 #
 # Each node has its own persistent volume so its identity survives restarts.
 #
@@ -50,6 +55,11 @@ services:
     environment:
       N3UR0N_ENDPOINT: http://node-a:4242
       N3UR0N_AUTH_DISABLE: "1"
+      # The seed publishes too: a node that only calls is not the common case,
+      # and a planner whose own instance offers something has to weigh local
+      # against remote. Two cheap caps are enough for that.
+      N3UR0N_BACKEND: utility
+      N3UR0N_CAPS: time,random_int
       # node-a runs the local planner: a 7B/8B model on the host's Ollama.
       # plan_exec: LLM compiles a typed plan upfront, deterministic executor
       # walks it. Override with PLANNER_MODE=llm to use the older ReAct loop.
@@ -79,6 +89,10 @@ services:
       N3UR0N_ENDPOINT: http://node-b:4242
       N3UR0N_AUTH_DISABLE: "1"
       N3UR0N_BACKEND: utility
+      # The complement of node-a's share. Splitting the backend's five caps
+      # across two nodes is what forces the planner to pick a peer instead of
+      # always landing on the one node that has everything.
+      N3UR0N_CAPS: rename_file,reverse,string_length
       N3UR0N_BOOTSTRAP_PEERS: http://node-a:4242
       RUST_LOG: info,n3ur0n=debug
     ports:
