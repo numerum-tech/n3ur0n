@@ -743,11 +743,11 @@ function appendStepper(isDirect = false) {
 
     const status = document.createElement("div");
     status.className = "stepper-status";
-    if (isDirect) {
-        setEllipsis(status);
-    } else {
-        status.textContent = t("stepper.compiling");
-    }
+    // Through `setStatus`, so the first status animates like every later one:
+    // assigning textContent here left the compile phase — the longest wait of
+    // the dispatch — as the only still line.
+    if (isDirect) setEllipsis(status);
+    else setStatus(t("stepper.compiling"));
     wrap.appendChild(status);
 
     const row = document.createElement("div");
@@ -767,8 +767,16 @@ function appendStepper(isDirect = false) {
     let currentRound = 1;
     const chipKey = (id) => `${currentRound}:${id}`;
 
+    /// A status ending in an ellipsis is a phase still running, in every
+    /// locale — that is what the character means. So the trailing "…" becomes
+    /// the same three animated dots direct mode waits with, and the line stops
+    /// looking finished while the plan is still moving. A status without one
+    /// (a ready plan, a result, an error) is a fact and stays still.
     function setStatus(text) {
-        status.textContent = text;
+        const running = text.endsWith("…");
+        status.textContent = running ? text.slice(0, -1) : text;
+        status.removeAttribute("aria-label");
+        if (running) appendDots(status);
     }
 
     /// Direct mode has a single LLM call and nothing to narrate: naming the
@@ -777,9 +785,16 @@ function appendStepper(isDirect = false) {
     function setEllipsis(el) {
         el.textContent = "";
         el.setAttribute("aria-label", t("stepper.waiting"));
+        appendDots(el);
+    }
+
+    function appendDots(el) {
+        // A gap before the first dot only when it follows words; direct mode
+        // has none and must stay flush with the bubbles above it.
+        const spaced = el.textContent.length > 0;
         for (let i = 0; i < 3; i++) {
             const dot = document.createElement("span");
-            dot.className = "typing-dot";
+            dot.className = i === 0 && spaced ? "typing-dot spaced" : "typing-dot";
             el.appendChild(dot);
         }
     }
