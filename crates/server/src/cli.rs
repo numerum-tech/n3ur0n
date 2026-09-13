@@ -228,16 +228,15 @@ pub(crate) async fn serve(args: ServeArgs) -> Result<()> {
             args.openai_api_key.clone(),
         )?
     };
-    let node =
-        bootstrap::load_node(
-            &dir,
-            args.endpoint,
-            bootstrap_peers.clone(),
-            backend_kind,
-            lobe_ids,
-            alias,
-        )
-        .await?;
+    let node = bootstrap::load_node(
+        &dir,
+        args.endpoint,
+        bootstrap_peers.clone(),
+        backend_kind,
+        lobe_ids,
+        alias,
+    )
+    .await?;
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], args.port));
     tracing::info!(instance_id = %node.instance_id(), port = args.port, "starting n3ur0n server");
 

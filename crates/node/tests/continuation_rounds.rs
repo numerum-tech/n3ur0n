@@ -16,8 +16,8 @@ mod common;
 
 use std::sync::Arc;
 
-use n3ur0n_adapters::openai::{OpenAIBackend, OpenAIConfig};
 use n3ur0n_adapters::echo::EchoBackend;
+use n3ur0n_adapters::openai::{OpenAIBackend, OpenAIConfig};
 use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample};
 use n3ur0n_node::conversation::ConversationState;
 use n3ur0n_node::planner::plan_exec::PlanExecPlanner;

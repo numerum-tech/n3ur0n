@@ -91,8 +91,7 @@ pub struct DirectionStats {
 /// forty capability calls.
 pub fn served_capability_stats(db: &Db, since: i64) -> StorageResult<DirectionStats> {
     let conn = db.get()?;
-    const NOT_META: &str =
-        "capability IS NULL OR capability NOT IN \
+    const NOT_META: &str = "capability IS NULL OR capability NOT IN \
          ('describe_self', 'ping', 'get_known_peers', 'blob_ticket')";
     let (calls, errors): (i64, i64) = conn.query_row(
         &format!(
@@ -256,16 +255,13 @@ fn ranked(
 ) -> StorageResult<Vec<Ranked>> {
     let conn = db.get()?;
     let mut stmt = conn.prepare(sql)?;
-    let rows = stmt.query_map(
-        rusqlite::params![direction.as_str(), since, limit],
-        |row| {
-            Ok(Ranked {
-                key: row.get(0)?,
-                calls: row.get(1)?,
-                errors: row.get(2)?,
-            })
-        },
-    )?;
+    let rows = stmt.query_map(rusqlite::params![direction.as_str(), since, limit], |row| {
+        Ok(Ranked {
+            key: row.get(0)?,
+            calls: row.get(1)?,
+            errors: row.get(2)?,
+        })
+    })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
 }
@@ -389,7 +385,11 @@ mod tests {
 
         // Add one pathological call. The mean would jump past 5000; the
         // reported figure must barely move.
-        record(&db, &entry(106, Direction::In, "n3:b", "time", "timeout", 30_000)).unwrap();
+        record(
+            &db,
+            &entry(106, Direction::In, "n3:b", "time", "timeout", 30_000),
+        )
+        .unwrap();
         let inbound = direction_stats(&db, Direction::In, 0).unwrap();
         assert_eq!(inbound.median_latency_ms, Some(9));
     }

@@ -11,8 +11,8 @@
 //! [`SignedMessage`](n3ur0n_core::SignedMessage), call
 //! [`Node::handle`](crate::Node::handle), and re-emit the resulting reply.
 
-pub mod backends_registry;
 pub mod audit;
+pub mod backends_registry;
 pub mod bindings;
 pub mod blob_client;
 pub mod blob_resolve;

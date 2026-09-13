@@ -131,7 +131,10 @@ async fn a_file_travels_to_a_live_peer_and_comes_back_identical() {
     );
 
     println!("hash      : {}", staged.hash);
-    println!("sender    : {} -> {}", before.anchor_kind, after.anchor_kind);
+    println!(
+        "sender    : {} -> {}",
+        before.anchor_kind, after.anchor_kind
+    );
     println!("node-b    : {}", mine["anchor_kind"]);
 }
 

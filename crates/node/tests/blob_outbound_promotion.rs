@@ -68,14 +68,23 @@ async fn a_staged_blob_becomes_outbound_once_it_is_uploaded_to_a_peer() {
     let dir = tempfile::tempdir().unwrap();
     let node = node_with_blobs(dir.path()).await;
 
-    let staged =
-        blob_resolve::store_local_cache(&node, b"hello n3ur0n", "text/plain", Some("x.txt"), None, None)
-            .unwrap();
+    let staged = blob_resolve::store_local_cache(
+        &node,
+        b"hello n3ur0n",
+        "text/plain",
+        Some("x.txt"),
+        None,
+        None,
+    )
+    .unwrap();
 
     let before = n3ur0n_storage::blobs::get(node.db(), &staged.hash)
         .unwrap()
         .unwrap();
-    assert_eq!(before.anchor_kind, "local_cache", "staged file starts class D");
+    assert_eq!(
+        before.anchor_kind, "local_cache",
+        "staged file starts class D"
+    );
     assert_eq!(before.processing_status, "staged");
 
     let peer = MockServer::start().await;
@@ -158,7 +167,9 @@ async fn an_inbound_result_is_never_relabelled_as_outbound() {
         .await
         .unwrap();
 
-    let after = n3ur0n_storage::blobs::get(node.db(), &hash).unwrap().unwrap();
+    let after = n3ur0n_storage::blobs::get(node.db(), &hash)
+        .unwrap()
+        .unwrap();
     assert_eq!(after.provenance, "inbound", "a result stays a result");
     assert_eq!(after.role, "output");
 }

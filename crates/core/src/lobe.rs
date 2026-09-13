@@ -121,10 +121,14 @@ mod tests {
 
     #[test]
     fn instance_set_is_bounded_and_duplicate_free() {
-        let five: Vec<String> = (0..MAX_LOBES_PER_INSTANCE).map(|i| format!("lobe{i}")).collect();
+        let five: Vec<String> = (0..MAX_LOBES_PER_INSTANCE)
+            .map(|i| format!("lobe{i}"))
+            .collect();
         validate_instance_lobes(&five).unwrap();
 
-        let six: Vec<String> = (0..=MAX_LOBES_PER_INSTANCE).map(|i| format!("lobe{i}")).collect();
+        let six: Vec<String> = (0..=MAX_LOBES_PER_INSTANCE)
+            .map(|i| format!("lobe{i}"))
+            .collect();
         assert!(validate_instance_lobes(&six).is_err());
 
         let dup = vec!["medical".to_string(), "medical".to_string()];

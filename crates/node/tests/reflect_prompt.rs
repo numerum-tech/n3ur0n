@@ -192,7 +192,8 @@ async fn reflect_keeps_earlier_turns_and_ends_on_the_request() {
         })
         .unwrap();
     assert_eq!(
-        reflect.last().unwrap()["content"], "second question",
+        reflect.last().unwrap()["content"],
+        "second question",
         "the request is the last thing the model reads"
     );
 }

@@ -56,10 +56,7 @@ fn parse_blob_ref(value: &Value) -> Option<BlobRef> {
             .get("fetch_url")
             .and_then(|u| u.as_str())
             .map(String::from),
-        name: value
-            .get("name")
-            .and_then(|n| n.as_str())
-            .map(String::from),
+        name: value.get("name").and_then(|n| n.as_str()).map(String::from),
     })
 }
 
@@ -273,7 +270,8 @@ pub async fn fetch_output_blobs(
         // has to move to class B and take the name the capability chose.
         if read_local_bytes(node, &br.hash).is_some() {
             let now = node.clock().now().unix_timestamp();
-            let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Output) as i64;
+            let expires =
+                now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Output) as i64;
             let name = br.name.as_deref().and_then(n3ur0n_core::sanitize_blob_path);
             blobs::mark_inbound_output(node.db(), &br.hash, name.as_deref(), expires)
                 .map_err(|e| e.to_string())?;

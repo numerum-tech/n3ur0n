@@ -80,7 +80,11 @@ pub fn set_alias(db: &Db, id: &str, alias: Option<&str>) -> StorageResult<()> {
 /// and silently widen a scope meant to narrow one.
 pub fn find_by_id_prefix(db: &Db, prefix: &str, limit: i64) -> StorageResult<Vec<PeerRecord>> {
     let body = prefix.strip_prefix("n3:").unwrap_or(prefix);
-    if body.is_empty() || !body.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()) {
+    if body.is_empty()
+        || !body
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    {
         return Ok(Vec::new());
     }
     let conn = db.get()?;

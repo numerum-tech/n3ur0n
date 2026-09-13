@@ -160,8 +160,8 @@ async fn put_alias(
     }
 
     // Keep the lobes: this route owns the alias, not the whole file.
-    let mut cfg = crate::instance_config::load_instance_user_config(&state.config_dir)
-        .unwrap_or_default();
+    let mut cfg =
+        crate::instance_config::load_instance_user_config(&state.config_dir).unwrap_or_default();
     cfg.alias = alias.clone();
     if let Err(e) = crate::instance_config::save_instance_user_config(&state.config_dir, &cfg) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
@@ -778,7 +778,10 @@ async fn get_cap_manifest(
     AxumState(state): AxumState<SettingsState>,
     AxumPath(name): AxumPath<String>,
 ) -> impl IntoResponse {
-    let target = state.manifest_dir().join("caps").join(format!("{name}.toml"));
+    let target = state
+        .manifest_dir()
+        .join("caps")
+        .join(format!("{name}.toml"));
     if !target.exists() {
         return settings_error(StatusCode::NOT_FOUND, "cap manifest not found");
     }
@@ -799,7 +802,10 @@ async fn delete_cap_manifest(
     {
         return settings_error(StatusCode::BAD_REQUEST, "invalid name");
     }
-    let target = state.manifest_dir().join("caps").join(format!("{name}.toml"));
+    let target = state
+        .manifest_dir()
+        .join("caps")
+        .join(format!("{name}.toml"));
     if !target.exists() {
         return settings_error(StatusCode::NOT_FOUND, "cap manifest not found");
     }

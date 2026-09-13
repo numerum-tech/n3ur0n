@@ -165,7 +165,11 @@ fn effective_expires(ticket: &BlobTicketPayload, now: i64) -> i64 {
     let default = default_ttl_secs(ticket.purpose) as i64;
     let granted = ticket
         .requested_ttl_secs
-        .map(|r| i64::try_from(r).unwrap_or(i64::MAX).clamp(default, MAX_GRANTED_TTL_SECS))
+        .map(|r| {
+            i64::try_from(r)
+                .unwrap_or(i64::MAX)
+                .clamp(default, MAX_GRANTED_TTL_SECS)
+        })
         .unwrap_or(default);
     now + granted
 }

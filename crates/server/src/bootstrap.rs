@@ -79,7 +79,10 @@ fn apply_published_caps(registry: &mut CapabilityRegistry) {
             "N3UR0N_CAPS names a capability this backend does not declare"
         );
     }
-    tracing::info!(published = registry.len(), "capability publication narrowed");
+    tracing::info!(
+        published = registry.len(),
+        "capability publication narrowed"
+    );
 }
 
 pub async fn load_node(

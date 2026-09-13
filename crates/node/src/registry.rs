@@ -205,7 +205,10 @@ mod tests {
             decl_in_lobes("c", &[]),
         ]);
         let dropped = reg.enforce_instance_lobes(&["medical".to_string()]);
-        assert_eq!(dropped, vec![("a".to_string(), vec!["finance".to_string()])]);
+        assert_eq!(
+            dropped,
+            vec![("a".to_string(), vec!["finance".to_string()])]
+        );
         assert_eq!(reg.get("a").unwrap().lobe_ids, vec!["medical".to_string()]);
         assert_eq!(reg.get("b").unwrap().lobe_ids, vec!["medical".to_string()]);
         assert!(reg.get("c").unwrap().lobe_ids.is_empty());

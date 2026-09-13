@@ -2183,7 +2183,11 @@ mod tests {
         let short = &id["n3:".len()..][..8];
 
         // The id alone still works, and so does the readable compound form.
-        let bare = resolve_scope(&node, &cat, &MentionScope::from_text(&format!("@peer:{short}")));
+        let bare = resolve_scope(
+            &node,
+            &cat,
+            &MentionScope::from_text(&format!("@peer:{short}")),
+        );
         let named = resolve_scope(
             &node,
             &cat,

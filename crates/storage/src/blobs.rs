@@ -399,8 +399,16 @@ mod tests {
     #[test]
     fn mark_outbound_promotes_local_cache_and_spares_every_other_class() {
         let db = crate::open_in_memory().unwrap();
-        upsert(&db, &row_classed("sha256:d", "outbound", "input", "local_cache")).unwrap();
-        upsert(&db, &row_classed("sha256:b", "inbound", "output", "user_session")).unwrap();
+        upsert(
+            &db,
+            &row_classed("sha256:d", "outbound", "input", "local_cache"),
+        )
+        .unwrap();
+        upsert(
+            &db,
+            &row_classed("sha256:b", "inbound", "output", "user_session"),
+        )
+        .unwrap();
         upsert(&db, &row_classed("sha256:c", "inbound", "input", "cap_job")).unwrap();
 
         assert!(mark_outbound(&db, "sha256:d", 9_000).unwrap());
@@ -426,7 +434,11 @@ mod tests {
     #[test]
     fn mark_outbound_on_an_already_outbound_blob_only_refreshes_expiry() {
         let db = crate::open_in_memory().unwrap();
-        upsert(&db, &row_classed("sha256:a", "outbound", "input", "user_session")).unwrap();
+        upsert(
+            &db,
+            &row_classed("sha256:a", "outbound", "input", "user_session"),
+        )
+        .unwrap();
         assert!(mark_outbound(&db, "sha256:a", 12_345).unwrap());
         let a = get(&db, "sha256:a").unwrap().unwrap();
         assert_eq!(a.anchor_kind, "user_session");
@@ -465,7 +477,11 @@ mod tests {
     #[test]
     fn mark_inbound_output_never_touches_cap_staging() {
         let db = crate::open_in_memory().unwrap();
-        upsert(&db, &row_classed("sha256:capjob", "inbound", "input", "cap_job")).unwrap();
+        upsert(
+            &db,
+            &row_classed("sha256:capjob", "inbound", "input", "cap_job"),
+        )
+        .unwrap();
         assert!(!mark_inbound_output(&db, "sha256:capjob", Some("mine.txt"), 9_000).unwrap());
         let r = get(&db, "sha256:capjob").unwrap().unwrap();
         assert_eq!(r.anchor_kind, "cap_job");

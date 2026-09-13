@@ -5,8 +5,8 @@
 // wide, low-value change. Deferred perf tuning, not a correctness issue.
 #![allow(clippy::result_large_err)]
 
-pub mod auth;
 pub mod activity_api;
+pub mod auth;
 pub mod blob_gc;
 pub mod blobs;
 pub mod bootstrap;
