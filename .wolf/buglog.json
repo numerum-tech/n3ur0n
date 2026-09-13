@@ -3515,6 +3515,26 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-09-13T10:23:18.051423Z"
+    },
+    {
+      "id": "bug-219",
+      "timestamp": "2026-09-13T10:42:54.244823Z",
+      "error_message": "The Files panel's Outbound section can never fill, and a sent file still shows as local cache",
+      "file": "crates/node/src/blob_resolve.rs",
+      "root_cause": "record_outbound_upload wrote through blobs::upsert, whose ON CONFLICT(hash) updates size, mime, path, expiry, storage_path and status but deliberately never provenance/role/anchor_kind — that immutability is what stops a later write from relabelling an inbound result (B) or a cap staging blob (C). But the only blobs eligible for an outbound PUT are the ones already indexed as class D by store_local_cache, since prepare_invoke_args reads their bytes from the local store. So the D-to-A transition the spec describes (D is 'not yet referenced on the network') never happened: Outbound stayed empty forever and a file that had travelled still displayed 'local cache, staged'. Class A was only reachable for bytes sitting in blobs_dir with no index row, i.e. dropped on disk by hand.",
+      "fix": "New storage::blobs::mark_outbound(hash, expires_at) issues an explicit UPDATE guarded by provenance='outbound' AND role='input' AND anchor_kind IN ('local_cache','user_session') — a clause that matches only classes A and D, so B (inbound/output) and C (cap_job) can never be caught. record_outbound_upload now promotes an existing row through it and only falls back to a fresh insert when no row exists. Covered by crates/node/tests/blob_outbound_promotion.rs against a wiremock peer, verified to fail without the fix (left: local_cache, right: user_session), plus three storage unit tests.",
+      "tags": [
+        "blob",
+        "storage",
+        "classification",
+        "files",
+        "rs"
+      ],
+      "related_bugs": [
+        "bug-218"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T10:42:54.244823Z"
     }
   ],
   "version": 1

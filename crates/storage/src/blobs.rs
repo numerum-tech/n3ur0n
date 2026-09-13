@@ -156,6 +156,37 @@ pub fn upsert(pool: &Db, row: &BlobInsert) -> StorageResult<()> {
 }
 
 /// Fetch a blob by hash.
+/// Promote a staged local-cache blob (class D) to an outbound upload (class A)
+/// once its bytes have actually been `PUT` at a peer.
+///
+/// [`upsert`] deliberately never rewrites a row's classification — that is what
+/// stops a later write from relabelling an inbound result (B) or a cap staging
+/// blob (C) — so the transition the spec describes (D is "not yet referenced on
+/// the network") needs its own statement. The `WHERE` clause is the guard:
+/// `outbound` + `input` matches only classes A and D, so B (`inbound`/`output`)
+/// and C (`cap_job`) can never be caught by it. Re-sending a file that is
+/// already class A refreshes its expiry and changes nothing else.
+///
+/// Returns whether a row was promoted.
+pub fn mark_outbound(pool: &Db, hash: &str, expires_at: i64) -> StorageResult<bool> {
+    let conn = pool.get()?;
+    let n = conn.execute(
+        "UPDATE blobs SET
+            anchor_kind = 'user_session',
+            processing_status = 'referenced',
+            user_visible = 1,
+            user_deletable = 1,
+            expires_at = ?2,
+            last_access_at = strftime('%s', 'now')
+         WHERE hash = ?1
+           AND provenance = 'outbound'
+           AND role = 'input'
+           AND anchor_kind IN ('local_cache', 'user_session')",
+        rusqlite::params![hash, expires_at],
+    )?;
+    Ok(n > 0)
+}
+
 pub fn get(pool: &Db, hash: &str) -> StorageResult<Option<BlobRecord>> {
     let conn = pool.get()?;
     let sql = format!("SELECT {SELECT_COLS} FROM blobs WHERE hash = ?1");
@@ -313,6 +344,58 @@ mod tests {
             uploader_id: None,
             recipients_whitelist: None,
         }
+    }
+
+    fn row_classed(hash: &str, provenance: &str, role: &str, anchor: &str) -> BlobInsert {
+        let mut r = row(hash, Some("client-a"), None);
+        r.provenance = provenance.into();
+        r.role = role.into();
+        r.anchor_kind = anchor.into();
+        r.processing_status = "staged".into();
+        r
+    }
+
+    #[test]
+    fn mark_outbound_promotes_local_cache_and_spares_every_other_class() {
+        let db = crate::open_in_memory().unwrap();
+        upsert(&db, &row_classed("sha256:d", "outbound", "input", "local_cache")).unwrap();
+        upsert(&db, &row_classed("sha256:b", "inbound", "output", "user_session")).unwrap();
+        upsert(&db, &row_classed("sha256:c", "inbound", "input", "cap_job")).unwrap();
+
+        assert!(mark_outbound(&db, "sha256:d", 9_000).unwrap());
+        let d = get(&db, "sha256:d").unwrap().unwrap();
+        assert_eq!(d.anchor_kind, "user_session");
+        assert_eq!(d.processing_status, "referenced");
+        assert_eq!(d.expires_at, 9_000);
+
+        // A class B result and a class C staging blob must survive untouched:
+        // relabelling either would change who may see or delete it.
+        assert!(!mark_outbound(&db, "sha256:b", 9_000).unwrap());
+        let b = get(&db, "sha256:b").unwrap().unwrap();
+        assert_eq!(b.anchor_kind, "user_session");
+        assert_eq!(b.role, "output");
+        assert_eq!(b.processing_status, "staged");
+
+        assert!(!mark_outbound(&db, "sha256:c", 9_000).unwrap());
+        let c = get(&db, "sha256:c").unwrap().unwrap();
+        assert_eq!(c.anchor_kind, "cap_job");
+        assert_eq!(c.processing_status, "staged");
+    }
+
+    #[test]
+    fn mark_outbound_on_an_already_outbound_blob_only_refreshes_expiry() {
+        let db = crate::open_in_memory().unwrap();
+        upsert(&db, &row_classed("sha256:a", "outbound", "input", "user_session")).unwrap();
+        assert!(mark_outbound(&db, "sha256:a", 12_345).unwrap());
+        let a = get(&db, "sha256:a").unwrap().unwrap();
+        assert_eq!(a.anchor_kind, "user_session");
+        assert_eq!(a.expires_at, 12_345);
+    }
+
+    #[test]
+    fn mark_outbound_reports_a_missing_blob() {
+        let db = crate::open_in_memory().unwrap();
+        assert!(!mark_outbound(&db, "sha256:nope", 9_000).unwrap());
     }
 
     /// The Files panel selects on `local_user_id = ?1 OR client_id = ?2`, so a

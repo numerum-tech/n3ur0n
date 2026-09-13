@@ -92,6 +92,22 @@ fn record_outbound_upload(
     let class = classify_outbound_upload();
     let now = node.clock().now().unix_timestamp();
     let expires = now + n3ur0n_core::default_ttl_secs(n3ur0n_core::BlobPurpose::Input) as i64;
+
+    // These bytes almost always already have a row: the only way to reach a
+    // `PUT` is to have staged the file locally first, which indexes it as
+    // class D. `upsert` never rewrites a classification, so going through it
+    // here left the blob reading "local cache, staged" forever — the Outbound
+    // section could not fill, and a file that had travelled still claimed it
+    // had not. Promote the existing row instead; the guard inside
+    // `mark_outbound` leaves classes B and C alone.
+    if blobs::get(node.db(), hash)
+        .map_err(|e| e.to_string())?
+        .is_some()
+    {
+        blobs::mark_outbound(node.db(), hash, expires).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
     let row = BlobInsert {
         hash: hash.to_string(),
         path: None,
