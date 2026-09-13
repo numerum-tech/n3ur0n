@@ -248,7 +248,7 @@ Le draft 1 listait quatre backends figés (`MCPBackend`, `OpenAIBackend`, `HTTPB
 Backends de support disponibles en `crates/adapters/` :
 - `EchoBackend` — identité, pour tests + smoke.
 - `OpenAIBackend` — implémentation concrète sous-jacente au binding `prompt`.
-- `UtilityBackend` — capacités utilitaires locales (typiquement déclarées `Private`).
+- ~~`UtilityBackend`~~ — **retiré le 2026-09-13.** Ses cinq fonctions (`time`, `random_int`, `reverse`, `string_length`, `rename_file`) vivent désormais hors de la passerelle, dans le service `docker/hermes/`, et les nœuds de test les atteignent par manifestes (`docker/manifests/`). Un backend compilé est publié à l'identique par toute instance faisant tourner ce build : le réseau n'a alors rien à router, et le descripteur existait en double, dans le Rust et dans le TOML.
 
 **Non implémenté v0.3, reporté** :
 - Binding `subprocess` générique (besoin largement absorbé par `mcp` stdio, à reconsidérer si retour utilisateur).

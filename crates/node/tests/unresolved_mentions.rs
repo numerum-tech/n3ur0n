@@ -6,10 +6,11 @@
 //! scoped to one peer when another served it. Resolution is deterministic and
 //! happens before any LLM call, so the refusal can be too.
 
+mod common;
+
 use std::sync::Arc;
 
-use n3ur0n_adapters::Backend;
-use n3ur0n_adapters::utility::UtilityBackend;
+use n3ur0n_adapters::echo::EchoBackend;
 use n3ur0n_node::conversation::{ConversationState, UserInput};
 use n3ur0n_node::planner::{DispatchMode, DispatchOptions, PlanExecPlanner, Planner};
 use n3ur0n_node::{CapabilityRegistry, Node, NodeConfig, NodeError};
@@ -30,9 +31,12 @@ fn unreachable_llm() -> Arc<n3ur0n_adapters::openai::OpenAIBackend> {
     )
 }
 
+/// A node whose catalogue holds the cluster's real capabilities. Nothing here
+/// invokes them — the point is a mention that resolves, or does not — so the
+/// backend behind them is an inert Echo.
 async fn node_with_utility_caps() -> Node {
-    let backend = Arc::new(UtilityBackend);
-    let decls = UtilityBackend.describe().await.unwrap();
+    let backend = Arc::new(EchoBackend);
+    let decls = common::cluster_cap_decls();
     Node::new(
         n3ur0n_core::Keypair::generate(),
         open_in_memory().unwrap(),

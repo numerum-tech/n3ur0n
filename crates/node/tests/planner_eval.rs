@@ -3,7 +3,7 @@
 //! Measures the compile step's accuracy + latency against a real LLM — the
 //! metric that matters most for the project. Golden cases live in
 //! `tests/fixtures/planner_cases.json` (data, not code): add cases there, no
-//! recompile needed. Catalog = the four `UtilityBackend` caps (time,
+//! recompile needed. Catalog = the cluster's manifest caps (time,
 //! random_int, reverse, string_length).
 //!
 //! Ignored by default (needs a running Ollama / OpenAI-compatible endpoint):
@@ -37,14 +37,14 @@
 //! plan is visible as a recovery rather than silently inflating the
 //! headline number — and so a retry that makes things worse cannot hide.
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use n3ur0n_adapters::Backend;
 use n3ur0n_adapters::embeddings::{EmbeddingClient, EmbeddingConfig};
 use n3ur0n_adapters::openai::{OpenAIBackend, OpenAIConfig};
-use n3ur0n_adapters::utility::UtilityBackend;
 use n3ur0n_node::planner::catalog::{Catalog, ToolDef};
 use n3ur0n_node::planner::compiler::{LocalLLMCompiler, PlanCompiler};
 use n3ur0n_node::planner::plan::{Plan, validate_plan};
@@ -88,8 +88,8 @@ fn load_cases() -> Vec<Case> {
         .collect()
 }
 
-/// Build the catalog the planner sees: the four real `UtilityBackend`
-/// caps, plus the harder fixture caps in `fixtures/planner_caps.json`.
+/// Build the catalog the planner sees: the capabilities the test cluster
+/// really publishes, read from `docker/manifests/`, plus the harder fixture caps in `fixtures/planner_caps.json`.
 ///
 /// The utility caps alone are trivially distinct, single-argument and all
 /// on one peer, which is why a competent 7B scores 100% against them and
@@ -107,10 +107,7 @@ async fn build_catalog() -> Catalog {
 /// test that is meaningless without it cannot silently run without it.
 async fn build_catalog_with(large: bool) -> Catalog {
     const EVAL_PEER: &str = "n3:evalpeer000000000000000000000000";
-    let decls = UtilityBackend
-        .describe()
-        .await
-        .expect("describe utility caps");
+    let decls = common::cluster_cap_decls();
     let mut tools: Vec<ToolDef> = decls
         .into_iter()
         .map(|cap| ToolDef {

@@ -12,9 +12,11 @@
 //! doubled question is the model's business, sending it twice is ours. A
 //! recording backend keeps this test free of any LLM.
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 
-use n3ur0n_adapters::utility::UtilityBackend;
+use n3ur0n_adapters::echo::EchoBackend;
 use n3ur0n_adapters::{AdapterResult, Backend, HealthStatus};
 use n3ur0n_core::capability::CapabilityDecl;
 use n3ur0n_node::conversation::ConversationState;
@@ -85,12 +87,8 @@ async fn dispatch_and_capture(message: &str) -> Vec<Vec<Value>> {
     let node = Node::new(
         n3ur0n_core::Keypair::generate(),
         db,
-        Arc::new(UtilityBackend),
-        CapabilityRegistry::from_decls(
-            <UtilityBackend as Backend>::describe(&UtilityBackend)
-                .await
-                .unwrap(),
-        ),
+        Arc::new(EchoBackend),
+        CapabilityRegistry::from_decls(common::cluster_cap_decls()),
         NodeConfig::default(),
     );
 
@@ -143,12 +141,8 @@ async fn reflect_keeps_earlier_turns_and_ends_on_the_request() {
     let node = Node::new(
         n3ur0n_core::Keypair::generate(),
         db,
-        Arc::new(UtilityBackend),
-        CapabilityRegistry::from_decls(
-            <UtilityBackend as Backend>::describe(&UtilityBackend)
-                .await
-                .unwrap(),
-        ),
+        Arc::new(EchoBackend),
+        CapabilityRegistry::from_decls(common::cluster_cap_decls()),
         NodeConfig::default(),
     );
     let conv_id = "conv_reflect_prompt_history";

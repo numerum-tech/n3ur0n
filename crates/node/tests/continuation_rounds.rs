@@ -12,10 +12,12 @@
 //!
 //! Needs an LLM: `cargo test -p n3ur0n-node --test continuation_rounds -- --ignored`
 
+mod common;
+
 use std::sync::Arc;
 
 use n3ur0n_adapters::openai::{OpenAIBackend, OpenAIConfig};
-use n3ur0n_adapters::utility::UtilityBackend;
+use n3ur0n_adapters::echo::EchoBackend;
 use n3ur0n_core::capability::{AccessMode, CapabilityDecl, CapabilityExample};
 use n3ur0n_node::conversation::ConversationState;
 use n3ur0n_node::planner::plan_exec::PlanExecPlanner;
@@ -89,12 +91,8 @@ async fn a_failed_step_triggers_a_second_round() {
     )
     .unwrap();
 
-    let backend = Arc::new(UtilityBackend);
-    let registry = CapabilityRegistry::from_decls(
-        <UtilityBackend as n3ur0n_adapters::Backend>::describe(&UtilityBackend)
-            .await
-            .unwrap(),
-    );
+    let backend = Arc::new(EchoBackend);
+    let registry = CapabilityRegistry::from_decls(common::cluster_cap_decls());
     let node = Node::new(
         n3ur0n_core::Keypair::generate(),
         db,
@@ -190,12 +188,8 @@ async fn a_deep_plan_triggers_a_second_round() {
     let model = std::env::var("PLANNER_EVAL_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into());
 
     let db = open_in_memory().unwrap();
-    let backend = Arc::new(UtilityBackend);
-    let registry = CapabilityRegistry::from_decls(
-        <UtilityBackend as n3ur0n_adapters::Backend>::describe(&UtilityBackend)
-            .await
-            .unwrap(),
-    );
+    let backend = Arc::new(EchoBackend);
+    let registry = CapabilityRegistry::from_decls(common::cluster_cap_decls());
     let node = Node::new(
         n3ur0n_core::Keypair::generate(),
         db,

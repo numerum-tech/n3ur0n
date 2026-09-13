@@ -9,7 +9,6 @@ use n3ur0n_adapters::{
     echo::EchoBackend,
     embeddings::{EmbeddingClient, EmbeddingConfig},
     openai::{OpenAIBackend, OpenAIConfig},
-    utility::UtilityBackend,
 };
 use n3ur0n_core::Keypair;
 use n3ur0n_node::backends_registry::BackendsRegistry;
@@ -204,8 +203,6 @@ pub enum BackendKind {
     /// Identity-style adapter; useful for cluster smoke and tests.
     #[default]
     Echo,
-    /// Multi-cap utility backend: time, random_int, reverse, string_length.
-    Utility,
     /// OpenAI-compatible chat endpoint (Ollama, llama.cpp, vLLM, OpenAI...).
     OpenAI(OpenAIConfig),
     /// v0.3: capabilities loaded from `<dir>/{backends,caps}/*.toml` at
@@ -218,7 +215,6 @@ pub enum BackendKind {
 fn build_backend(kind: BackendKind) -> Result<Arc<dyn Backend>> {
     match kind {
         BackendKind::Echo => Ok(Arc::new(EchoBackend)),
-        BackendKind::Utility => Ok(Arc::new(UtilityBackend)),
         BackendKind::OpenAI(cfg) => {
             let backend =
                 OpenAIBackend::new(cfg).map_err(|e| anyhow::anyhow!("openai backend init: {e}"))?;
