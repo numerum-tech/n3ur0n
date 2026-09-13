@@ -319,6 +319,17 @@ impl Node {
         self.manifest_dir.is_some()
     }
 
+    /// The directory this node loads `backends/` and `caps/` from, when it
+    /// runs in manifest mode.
+    ///
+    /// Anything that edits manifests has to write *here*: the settings API
+    /// used the config directory instead, so on a node started with
+    /// `--manifest-dir` pointing elsewhere it wrote a file nothing would ever
+    /// read, reloaded a different directory, and reported success.
+    pub fn manifest_dir(&self) -> Option<&std::path::Path> {
+        self.manifest_dir.as_deref()
+    }
+
     /// True when a named manifest backend is loaded and is `openai_compat`.
     pub fn has_openai_compat_backend(&self, name: &str) -> bool {
         let Some(cell) = self.backends.as_ref() else {

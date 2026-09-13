@@ -97,6 +97,18 @@ pub fn app_for_test(node: Node, runtime: Option<Arc<NodeRuntime>>) -> Router {
     build_app(node, cell, None, None, None, true)
 }
 
+/// Test helper: [`app_for_test`] with the settings sub-router mounted, so a
+/// test can exercise the manifest-editing routes without a login.
+#[doc(hidden)]
+pub fn app_with_settings_for_test(
+    node: Node,
+    runtime: Option<Arc<NodeRuntime>>,
+    config_dir: PathBuf,
+) -> Router {
+    let cell = Arc::new(ArcSwap::from_pointee(runtime));
+    build_app(node, cell, Some(config_dir), None, None, true)
+}
+
 /// Variant of [`app`] that also mounts the settings sub-router under
 /// `/api/v0`. The CLI / desktop call this directly so settings routes
 /// pass through the same auth middleware stack.

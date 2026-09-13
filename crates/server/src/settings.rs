@@ -25,7 +25,7 @@
 //! Lifted from the desktop shell so the headless server exposes the
 //! same Settings surface to the embedded web UI.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axum::extract::{Path as AxumPath, State as AxumState};
 use axum::http::StatusCode;
@@ -44,6 +44,19 @@ pub struct SettingsState {
     /// Present when the node was started with a planner; enables hot-reload
     /// after backend manifest edits that affect `planner.toml`.
     pub planner: Option<crate::planner_config::PlannerRuntimeHandle>,
+}
+
+impl SettingsState {
+    /// Where cap and backend manifests live for *this* node.
+    ///
+    /// The node loads them from `--manifest-dir` when it was given one, and
+    /// from the config directory otherwise. Reading or writing the config
+    /// directory unconditionally is what let a cap be saved to a folder the
+    /// node never reads, with `ok: true` and a reload count taken from the
+    /// other directory entirely.
+    fn manifest_dir(&self) -> &Path {
+        self.node.manifest_dir().unwrap_or(&self.config_dir)
+    }
 }
 
 pub fn router(
@@ -254,7 +267,7 @@ struct CreateBackendRequest {
 }
 
 async fn list_backends(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
-    let dir = state.config_dir.join("backends");
+    let dir = state.manifest_dir().join("backends");
     let mut out: Vec<Value> = Vec::new();
     for result in load_backend_dir(&dir) {
         match result {
@@ -462,7 +475,7 @@ base_url = "{base_url}"
         }
     };
 
-    let backends_dir = state.config_dir.join("backends");
+    let backends_dir = state.manifest_dir().join("backends");
     if let Err(e) = std::fs::create_dir_all(&backends_dir) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
@@ -735,7 +748,7 @@ fn default_parser() -> String {
 
 async fn list_cap_manifests(AxumState(state): AxumState<SettingsState>) -> impl IntoResponse {
     use n3ur0n_node::manifest::load_cap_dir;
-    let dir = state.config_dir.join("caps");
+    let dir = state.manifest_dir().join("caps");
     let mut out: Vec<Value> = Vec::new();
     for result in load_cap_dir(&dir) {
         match result {
@@ -765,7 +778,7 @@ async fn get_cap_manifest(
     AxumState(state): AxumState<SettingsState>,
     AxumPath(name): AxumPath<String>,
 ) -> impl IntoResponse {
-    let target = state.config_dir.join("caps").join(format!("{name}.toml"));
+    let target = state.manifest_dir().join("caps").join(format!("{name}.toml"));
     if !target.exists() {
         return settings_error(StatusCode::NOT_FOUND, "cap manifest not found");
     }
@@ -786,7 +799,7 @@ async fn delete_cap_manifest(
     {
         return settings_error(StatusCode::BAD_REQUEST, "invalid name");
     }
-    let target = state.config_dir.join("caps").join(format!("{name}.toml"));
+    let target = state.manifest_dir().join("caps").join(format!("{name}.toml"));
     if !target.exists() {
         return settings_error(StatusCode::NOT_FOUND, "cap manifest not found");
     }
@@ -855,7 +868,7 @@ async fn upsert_cap_manifest(
         Err(e) => return settings_error(StatusCode::BAD_REQUEST, &e.to_string()),
     };
 
-    let caps_dir = state.config_dir.join("caps");
+    let caps_dir = state.manifest_dir().join("caps");
     if let Err(e) = std::fs::create_dir_all(&caps_dir) {
         return settings_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
     }
