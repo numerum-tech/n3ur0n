@@ -342,7 +342,6 @@
   "activity.window.1h": "Last hour",
   "activity.window.24h": "Last 24 hours",
   "activity.window.7d": "Last 7 days",
-  "activity.context.hint": "What this instance answers, what it calls, and what it runs for you.",
   "activity.stat.served": "Served",
   "activity.stat.served.hint": "Capability calls answered for peers",
   "activity.stat.ran": "Run for you",

@@ -342,7 +342,6 @@
   "activity.window.1h": "Dernière heure",
   "activity.window.24h": "Dernières 24 heures",
   "activity.window.7d": "7 derniers jours",
-  "activity.context.hint": "Ce que cette instance répond, ce qu'elle appelle, et ce qu'elle exécute pour vous.",
   "activity.stat.served": "Servi",
   "activity.stat.served.hint": "Appels de capacité répondus à des pairs",
   "activity.stat.ran": "Exécuté pour vous",
