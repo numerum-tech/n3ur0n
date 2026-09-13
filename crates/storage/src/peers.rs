@@ -71,8 +71,13 @@ pub fn set_alias(db: &Db, id: &str, alias: Option<&str>) -> StorageResult<()> {
 /// directory. Returns every match, because two peers sharing a prefix is an
 /// ambiguity the caller has to see rather than a tie to break arbitrarily.
 ///
-/// The prefix is rejected unless it is plain lowercase base32 — the shape an
-/// id actually has — which also keeps `GLOB` metacharacters out of the pattern.
+/// `prefix` is a fragment of an **id**, never a name: a peer serves its alias
+/// bare (`toolbox`), and it is this node that composes `toolbox#ynhr3l57` for
+/// display, so by the time a mention gets here the readable half has already
+/// been discarded. The fragment is rejected unless it is plain lowercase
+/// base32 — the shape an id has — because it ends up inside a `GLOB` pattern:
+/// without the check, `@peer:*` would expand to every peer in the directory
+/// and silently widen a scope meant to narrow one.
 pub fn find_by_id_prefix(db: &Db, prefix: &str, limit: i64) -> StorageResult<Vec<PeerRecord>> {
     let body = prefix.strip_prefix("n3:").unwrap_or(prefix);
     if body.is_empty() || !body.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()) {
