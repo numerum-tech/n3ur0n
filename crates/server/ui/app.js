@@ -2002,6 +2002,11 @@ function openRemoteCapInspector(cap, peer) {
 
 let _lastNonSettingsSection = "chats";
 
+/// The node pushes a complete snapshot on a tick rather than incremental
+/// events, so rendering is a pure function of the last message and a dropped
+/// connection costs nothing but a gap: the next snapshot is already correct.
+let _activitySource = null;
+
 function activateSection(section) {
     if (section !== "settings") _lastNonSettingsSection = section;
 
@@ -2023,6 +2028,14 @@ function activateSection(section) {
     const chatView = document.getElementById("chat-view");
     const filesPage = document.getElementById("files-page");
     const settingsPage = document.getElementById("settings-page");
+    const activityPage = document.getElementById("activity-page");
+    // One open EventSource per tab is enough; leaving the section closes it
+    // rather than letting a background dashboard poll forever.
+    if (section !== "activity") {
+        stopActivityStream();
+        activityPage?.classList.add("hidden");
+        activityPage?.setAttribute("aria-hidden", "true");
+    }
     const workspaceEmpty = document.getElementById("workspace-empty");
     const workspaceHint = document.getElementById("workspace-empty-hint");
 
@@ -2054,6 +2067,18 @@ function activateSection(section) {
         workspaceEmpty?.classList.add("hidden");
         workspaceEmpty?.setAttribute("aria-hidden", "true");
         closeInspector();
+    } else if (section === "activity") {
+        chatView?.classList.add("hidden");
+        filesPage?.classList.add("hidden");
+        filesPage?.setAttribute("aria-hidden", "true");
+        settingsPage?.classList.add("hidden");
+        settingsPage?.setAttribute("aria-hidden", "true");
+        activityPage?.classList.remove("hidden");
+        activityPage?.setAttribute("aria-hidden", "false");
+        workspaceEmpty?.classList.add("hidden");
+        workspaceEmpty?.setAttribute("aria-hidden", "true");
+        closeInspector();
+        startActivityStream();
     } else if (section === "network" || section === "skills") {
         chatView?.classList.add("hidden");
         filesPage?.classList.add("hidden");
@@ -4214,4 +4239,135 @@ document.getElementById("inspector-back")?.addEventListener("click", () => {
 document.getElementById("inspector-close")?.addEventListener("click", closeInspector);
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeInspector();
+});
+
+// ---------------------------------------------------------------------------
+// Activity dashboard
+// ---------------------------------------------------------------------------
+
+function activityWindowSecs() {
+    const el = document.querySelector("#activity-nav .files-nav-item.active");
+    return Number(el?.dataset.window) || 3600;
+}
+
+function startActivityStream() {
+    stopActivityStream();
+    const live = document.getElementById("activity-live");
+    const url = `/api/v0/activity/stream?window=${activityWindowSecs()}`;
+    const src = new EventSource(url, { withCredentials: true });
+    src.addEventListener("snapshot", ev => {
+        live?.classList.remove("stale");
+        try {
+            renderActivity(JSON.parse(ev.data));
+        } catch {
+            /* a malformed frame is not worth blanking a live dashboard */
+        }
+    });
+    // The browser reconnects on its own; the dot says so until it does.
+    src.onerror = () => live?.classList.add("stale");
+    _activitySource = src;
+}
+
+function stopActivityStream() {
+    _activitySource?.close();
+    _activitySource = null;
+}
+
+function renderActivity(snap) {
+    renderActivityStats(snap);
+    renderActivityPulse(snap.pulse || []);
+    renderRankList("activity-caps", snap.top_capabilities, t("activity.empty.caps"));
+    renderRankList("activity-callers", snap.top_callers, t("activity.empty.callers"));
+    renderRankList("activity-callees", snap.top_callees, t("activity.empty.callees"));
+}
+
+function renderActivityStats(snap) {
+    const host = document.getElementById("activity-stats");
+    if (!host) return;
+    const tiles = [
+        ["in", t("activity.stat.served"), snap.served, t("activity.stat.served.hint")],
+        ["local", t("activity.stat.ran"), snap.ran, t("activity.stat.ran.hint")],
+        ["out", t("activity.stat.called"), snap.called, t("activity.stat.called.hint")],
+    ];
+    let html = tiles.map(([kind, label, stat, hint]) => {
+        const s = stat || { calls: 0, errors: 0, median_latency_ms: null };
+        const meta = [];
+        if (s.errors > 0) meta.push(`<span class="stat-errors">${t("activity.stat.errors", { count: s.errors })}</span>`);
+        if (s.median_latency_ms !== null && s.median_latency_ms !== undefined) {
+            meta.push(escapeHtml(t("activity.stat.median", { ms: s.median_latency_ms })));
+        }
+        return `
+            <div class="stat-tile stat-${kind}">
+                <span class="stat-label">${escapeHtml(label)}</span>
+                <span class="stat-value">${s.calls}</span>
+                <span class="stat-meta">${meta.join(" · ") || "&nbsp;"}</span>
+                <span class="stat-hint">${escapeHtml(hint)}</span>
+            </div>`;
+    }).join("");
+    // Discovery is protocol chatter, not work: it gets a quieter tile so it
+    // cannot be read as capability traffic.
+    html += `
+        <div class="stat-tile stat-meta-tile">
+            <span class="stat-label">${escapeHtml(t("activity.stat.discovery"))}</span>
+            <span class="stat-value">${snap.discovery ?? 0}</span>
+            <span class="stat-meta">&nbsp;</span>
+            <span class="stat-hint">${escapeHtml(t("activity.stat.discovery.hint"))}</span>
+        </div>`;
+    host.innerHTML = html;
+}
+
+/// Stacked bars, one per bucket, drawn as plain elements rather than a chart
+/// library: three series and thirty points do not justify a dependency.
+function renderActivityPulse(buckets) {
+    const host = document.getElementById("activity-pulse");
+    if (!host) return;
+    if (buckets.length === 0) {
+        host.innerHTML = `<p class="empty">${escapeHtml(t("activity.empty.pulse"))}</p>`;
+        return;
+    }
+    const peak = Math.max(1, ...buckets.map(b => b.inbound + b.local + b.outbound));
+    host.innerHTML = buckets.map(b => {
+        const total = b.inbound + b.local + b.outbound;
+        const pct = v => (v / peak) * 100;
+        const when = new Date(b.start * 1000).toLocaleTimeString();
+        const title = `${when} · ${t("activity.pulse.tooltip", {
+            in: b.inbound, local: b.local, out: b.outbound,
+        })}`;
+        return `
+            <div class="pulse-col" title="${escapeHtml(title)}">
+                <div class="pulse-stack">
+                    <div class="pulse-seg seg-out" style="height:${pct(b.outbound)}%"></div>
+                    <div class="pulse-seg seg-local" style="height:${pct(b.local)}%"></div>
+                    <div class="pulse-seg seg-in" style="height:${pct(b.inbound)}%"></div>
+                </div>
+                <div class="pulse-total">${total || ""}</div>
+            </div>`;
+    }).join("");
+}
+
+function renderRankList(id, rows, emptyText) {
+    const host = document.getElementById(id);
+    if (!host) return;
+    if (!rows || rows.length === 0) {
+        host.innerHTML = `<li class="empty">${escapeHtml(emptyText)}</li>`;
+        return;
+    }
+    const peak = Math.max(1, ...rows.map(r => r.calls));
+    host.innerHTML = rows.map(r => `
+        <li class="rank-row">
+            <span class="rank-label" title="${escapeHtml(r.key)}">${escapeHtml(r.label)}</span>
+            <span class="rank-bar"><i style="width:${(r.calls / peak) * 100}%"></i></span>
+            <span class="rank-count">${r.calls}${r.errors > 0
+                ? ` <span class="stat-errors">/${r.errors}</span>` : ""}</span>
+        </li>`).join("");
+}
+
+// The window picker is a nav list like every other section's, not a select:
+// it is the same kind of choice as picking a file class, and it reads as one.
+document.getElementById("activity-nav")?.addEventListener("click", ev => {
+    const item = ev.target.closest(".files-nav-item");
+    if (!item) return;
+    document.querySelectorAll("#activity-nav .files-nav-item")
+        .forEach(el => el.classList.toggle("active", el === item));
+    if (document.body.dataset.section === "activity") startActivityStream();
 });

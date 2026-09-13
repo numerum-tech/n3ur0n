@@ -3612,6 +3612,24 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-09-13T15:10:48.961569Z"
+    },
+    {
+      "id": "bug-224",
+      "timestamp": "2026-09-13T16:00:47.844825Z",
+      "error_message": "Cannot access '_activitySource' before initialization — the whole rail stops switching sections",
+      "file": "crates/server/ui/app.js",
+      "root_cause": "The activity block was appended at the end of app.js, including `let _activitySource = null;`. `activateSection` sits far above and calls `stopActivityStream()` for any section other than activity, and the bottom of the file runs `activateSection('chats')` at load. A `let` is hoisted but left uninitialised until its declaration executes, so that call threw in the temporal dead zone — and it threw from INSIDE activateSection, before the if/else chain, so every later rail click also died there: clicking Files while on Activity left the main pane showing Activity with the Files sidebar. The dashboard rendered nothing because the stream was never started either.",
+      "fix": "The declaration moved next to `activateSection`, above its first use; the functions themselves stay at the bottom (function declarations hoist). Verified over CDP on node-b: zero console errors, tiles and rankings render, and clicking Files now hides the activity page and shows the files page.",
+      "tags": [
+        "ui",
+        "js",
+        "tdz",
+        "activity",
+        "rail"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T16:00:47.844825Z"
     }
   ],
   "version": 1

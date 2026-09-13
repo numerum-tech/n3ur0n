@@ -62,7 +62,8 @@ impl WindowQuery {
 struct Snapshot {
     now: i64,
     window_secs: i64,
-    /// Calls this node answered — what it contributes to the network.
+    /// Capability calls this node answered for peers — what it contributes.
+    /// Discovery is counted separately, so the two never overlap.
     served: audit::DirectionStats,
     /// Calls this node made — what it consumes from the network.
     called: audit::DirectionStats,
@@ -103,7 +104,7 @@ fn snapshot(state: &AppState, window_secs: i64) -> Result<Snapshot, String> {
     Ok(Snapshot {
         now,
         window_secs,
-        served: audit::direction_stats(db, Direction::In, since).map_err(|e| e.to_string())?,
+        served: audit::served_capability_stats(db, since).map_err(|e| e.to_string())?,
         called: audit::direction_stats(db, Direction::Out, since).map_err(|e| e.to_string())?,
         ran: audit::direction_stats(db, Direction::Local, since).map_err(|e| e.to_string())?,
         discovery: audit::meta_calls_since(db, since).map_err(|e| e.to_string())?,

@@ -83,6 +83,52 @@ pub struct DirectionStats {
     pub median_latency_ms: Option<i64>,
 }
 
+/// Inbound capability calls only — discovery excluded.
+///
+/// "Served" and "discovery" are shown side by side on the dashboard, so the
+/// first counting the second made the two tiles double up and the label lie:
+/// a node answering nothing but `describe_self` crawls read as having served
+/// forty capability calls.
+pub fn served_capability_stats(db: &Db, since: i64) -> StorageResult<DirectionStats> {
+    let conn = db.get()?;
+    const NOT_META: &str =
+        "capability IS NULL OR capability NOT IN \
+         ('describe_self', 'ping', 'get_known_peers', 'blob_ticket')";
+    let (calls, errors): (i64, i64) = conn.query_row(
+        &format!(
+            "SELECT COUNT(*), COALESCE(SUM(status <> 'ok'), 0)
+             FROM audit_log WHERE direction = 'in' AND timestamp >= ?1 AND ({NOT_META})"
+        ),
+        [since],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let median_latency_ms = if calls == 0 {
+        None
+    } else {
+        conn.query_row(
+            &format!(
+                "SELECT latency_ms FROM audit_log
+                 WHERE direction = 'in' AND timestamp >= ?1 AND latency_ms IS NOT NULL
+                   AND ({NOT_META})
+                 ORDER BY latency_ms
+                 LIMIT 1 OFFSET (
+                    SELECT COUNT(*) / 2 FROM audit_log
+                    WHERE direction = 'in' AND timestamp >= ?1 AND latency_ms IS NOT NULL
+                      AND ({NOT_META})
+                 )"
+            ),
+            [since],
+            |r| r.get::<_, i64>(0),
+        )
+        .ok()
+    };
+    Ok(DirectionStats {
+        calls,
+        errors,
+        median_latency_ms,
+    })
+}
+
 pub fn direction_stats(db: &Db, direction: Direction, since: i64) -> StorageResult<DirectionStats> {
     let conn = db.get()?;
     let (calls, errors): (i64, i64) = conn.query_row(
@@ -364,6 +410,10 @@ mod tests {
         // crawl of four peers would otherwise outrank everything real.
         assert!(!names.contains(&"describe_self"), "{names:?}");
         assert_eq!(meta_calls_since(&db, 0).unwrap(), 1);
+        // The two tiles must partition the inbound traffic, not overlap:
+        // 5 inbound = 4 capability calls + 1 discovery exchange.
+        assert_eq!(direction_stats(&db, Direction::In, 0).unwrap().calls, 5);
+        assert_eq!(served_capability_stats(&db, 0).unwrap().calls, 4);
     }
 
     #[test]

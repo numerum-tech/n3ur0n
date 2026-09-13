@@ -13,6 +13,9 @@
     --tool: #2a2240;
     --error: #ef4444;
     --warn: #f59e0b;
+    /* Third series of the activity chart: work this node ran for its own
+       user, distinct from what it serves and what it calls. */
+    --ok: #22c55e;
     /* Type scale — single source of truth for font sizes. Every font-size in
        this file maps to one of these steps. --fs-sm is the app baseline. */
     --fs-2xs: 0.68rem;
@@ -39,6 +42,7 @@
     --tool: #ece4ff;
     --error: #b91c1c;
     --warn: #b45309;
+    --ok: #15803d;
 }
 
 * { box-sizing: border-box; }
@@ -2093,3 +2097,205 @@ button.secondary:hover,
     margin-right: 6px;
 }
 .stepper-status .status-icon svg { width: 14px; height: 14px; }
+
+/* ---------------------------------------------------------------------------
+   Activity dashboard
+   ------------------------------------------------------------------------ */
+
+.activity-page {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 20px 24px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.activity-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+.activity-header h1 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    letter-spacing: 0.04em;
+}
+
+/* The dot is the only thing on the page that says whether what you are
+   reading is current. It stops pulsing the moment the stream drops. */
+.activity-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: var(--fs-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.activity-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: activity-pulse 2s ease-in-out infinite;
+}
+.activity-live.stale .activity-live-dot {
+    background: var(--warn);
+    animation: none;
+}
+@keyframes activity-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .activity-live-dot { animation: none; }
+}
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+}
+.stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: 6px;
+}
+/* The left edge carries the series colour, so a tile and its band in the
+   chart below are recognisably the same thing. */
+.stat-in    { border-left-color: var(--accent); }
+.stat-local { border-left-color: var(--ok); }
+.stat-out   { border-left-color: var(--warn); }
+.stat-meta-tile { border-left-color: var(--border); opacity: 0.75; }
+
+.stat-label {
+    color: var(--muted);
+    font-size: var(--fs-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.stat-value {
+    font-size: var(--fs-xl, 22px);
+    font-variant-numeric: tabular-nums;
+}
+.stat-meta { color: var(--muted); font-size: var(--fs-2xs); }
+.stat-hint { color: var(--muted); font-size: var(--fs-2xs); opacity: 0.75; }
+.stat-errors { color: var(--error); }
+
+.activity-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    min-width: 0;
+}
+.activity-card h2 {
+    margin: 0 0 10px;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.activity-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+.pulse {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 120px;
+}
+.pulse-col {
+    flex: 1;
+    min-width: 3px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    height: 100%;
+}
+.pulse-stack {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    height: 100%;
+    gap: 1px;
+    /* A floor under every column, empty ones included: without it a quiet
+       stretch of the window is simply invisible and the chart reads as if
+       time began at the first call. */
+    border-bottom: 2px solid var(--border);
+}
+.pulse-seg { border-radius: 1px; }
+.seg-in    { background: var(--accent); }
+.seg-local { background: var(--ok); }
+.seg-out   { background: var(--warn); }
+.pulse-total {
+    text-align: center;
+    color: var(--muted);
+    font-size: var(--fs-2xs);
+    font-variant-numeric: tabular-nums;
+    height: 1.2em;
+}
+
+.pulse-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--muted);
+    font-size: var(--fs-2xs);
+}
+.pulse-legend li { display: flex; align-items: center; gap: 5px; }
+.swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    display: inline-block;
+}
+.swatch-in    { background: var(--accent); }
+.swatch-local { background: var(--ok); }
+.swatch-out   { background: var(--warn); }
+
+.rank-list { list-style: none; margin: 0; padding: 0; }
+.rank-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 80px auto;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: var(--fs-xs);
+}
+.rank-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-bar {
+    height: 6px;
+    background: var(--panel);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.rank-bar i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+}
+.rank-count {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+.rank-list .empty, .pulse .empty {
+    color: var(--muted);
+    font-size: var(--fs-xs);
+}

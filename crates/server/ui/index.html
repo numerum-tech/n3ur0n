@@ -42,6 +42,10 @@
             data-icon="folder"
             data-i18n-attr-title="nav.rail.files" data-i18n-attr-aria-label="nav.rail.files"
             title="Files" aria-label="Files"></button>
+        <button class="rail-btn" data-section="activity" type="button"
+            data-icon="activity"
+            data-i18n-attr-title="nav.rail.activity" data-i18n-attr-aria-label="nav.rail.activity"
+            title="Activity" aria-label="Activity"></button>
         <button class="rail-btn rail-btn-bottom" data-section="settings" type="button"
             data-icon="settings"
             data-i18n-attr-title="nav.rail.settings" data-i18n-attr-aria-label="nav.rail.settings"
@@ -135,6 +139,43 @@
                     </div>
                 </li>
             </ul>
+        </section>
+
+        <section class="context-section hidden" data-context="activity">
+            <h2 class="context-section-title" data-i18n="nav.rail.activity">Activity</h2>
+            <ul id="activity-nav" class="settings-nav files-nav">
+                <li class="settings-nav-item files-nav-item" data-window="900">
+                    <span class="nav-icon" data-icon="zap" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="activity.window.15m">Last 15 minutes</span>
+                        <span class="nav-sub" data-i18n="activity.window.15m.sub">What is happening now</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item files-nav-item active" data-window="3600">
+                    <span class="nav-icon" data-icon="activity" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="activity.window.1h">Last hour</span>
+                        <span class="nav-sub" data-i18n="activity.window.1h.sub">The current session</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item files-nav-item" data-window="86400">
+                    <span class="nav-icon" data-icon="globe" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="activity.window.24h">Last 24 hours</span>
+                        <span class="nav-sub" data-i18n="activity.window.24h.sub">A full day of traffic</span>
+                    </div>
+                </li>
+                <li class="settings-nav-item files-nav-item" data-window="604800">
+                    <span class="nav-icon" data-icon="network" data-icon-size="16"></span>
+                    <div class="nav-text">
+                        <span class="nav-title" data-i18n="activity.window.7d">Last 7 days</span>
+                        <span class="nav-sub" data-i18n="activity.window.7d.sub">What this node contributes over time</span>
+                    </div>
+                </li>
+            </ul>
+            <p class="context-hint" data-i18n="activity.context.hint">
+                What this instance answers, what it calls, and what it runs for you.
+            </p>
         </section>
 
         <section class="context-section hidden" data-context="settings">
@@ -290,6 +331,43 @@
                     data-i18n-attr-title="tooltip.close" title="Close"></button>
             </header>
             <div id="inspector-body" class="inspector-body"></div>
+        </section>
+
+        <section id="activity-page" class="activity-page hidden" aria-hidden="true">
+            <header class="activity-header">
+                <h1 data-i18n="activity.title">Activity</h1>
+                <span class="activity-live" id="activity-live">
+                    <span class="activity-live-dot"></span>
+                    <span data-i18n="activity.live">live</span>
+                </span>
+            </header>
+
+            <div class="stat-grid" id="activity-stats"></div>
+
+            <section class="activity-card">
+                <h2 data-i18n="activity.pulse.title">Traffic</h2>
+                <div class="pulse" id="activity-pulse"></div>
+                <ul class="pulse-legend">
+                    <li><i class="swatch swatch-in"></i><span data-i18n="activity.legend.in">Served for peers</span></li>
+                    <li><i class="swatch swatch-local"></i><span data-i18n="activity.legend.local">Run for you</span></li>
+                    <li><i class="swatch swatch-out"></i><span data-i18n="activity.legend.out">Called on peers</span></li>
+                </ul>
+            </section>
+
+            <div class="activity-columns">
+                <section class="activity-card">
+                    <h2 data-i18n="activity.caps.title">Most solicited capabilities</h2>
+                    <ul class="rank-list" id="activity-caps"></ul>
+                </section>
+                <section class="activity-card">
+                    <h2 data-i18n="activity.callers.title">Who calls this instance</h2>
+                    <ul class="rank-list" id="activity-callers"></ul>
+                </section>
+                <section class="activity-card">
+                    <h2 data-i18n="activity.callees.title">Peers this instance calls</h2>
+                    <ul class="rank-list" id="activity-callees"></ul>
+                </section>
+            </div>
         </section>
 
         <section id="settings-page" class="settings-page hidden" aria-hidden="true">
