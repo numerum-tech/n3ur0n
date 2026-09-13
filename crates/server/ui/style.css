@@ -2039,3 +2039,12 @@ button.secondary:hover,
     opacity: 0.5;
     pointer-events: none;
 }
+
+/* The stepper's error row carries a glyph rather than the word "error:": the
+   red text and the dashed border already say that much. */
+.stepper-status .status-icon {
+    display: inline-flex;
+    vertical-align: -2px;
+    margin-right: 6px;
+}
+.stepper-status .status-icon svg { width: 14px; height: 14px; }

@@ -713,7 +713,11 @@ async function send() {
             // The node recorded nothing, so neither do we: the bubble goes, the
             // text returns to the composer with the caret in it, and the user
             // fixes one token instead of retyping a sentence.
-            conv.querySelector(".bubble.user:last-of-type")?.remove();
+            // `:last-of-type` matches the last element of its *tag* among
+            // siblings, and the stepper appended after the bubble is a div
+            // too, so the selector matched nothing and the bubble stayed.
+            const bubbles = conv.querySelectorAll(".bubble.user");
+            bubbles[bubbles.length - 1]?.remove();
             promptEl.value = text;
             resizeComposerTextarea();
             draftAttachments = attachments.map(a => ({ ...a }));
@@ -759,6 +763,13 @@ function appendStepper(isDirect = false) {
 
     function setStatus(text) {
         status.textContent = text;
+    }
+
+    /// Same row, with a warning glyph instead of the word "error:". The prefix
+    /// said nothing the red text and the dashed border were not already
+    /// saying.
+    function setStatusRich(text) {
+        status.innerHTML = `<span class="status-icon">${iconHtml("alert-triangle", { size: 14 })}</span>${escapeHtml(text)}`;
     }
 
     function ensureChip(id, peerShort, capability) {
@@ -870,13 +881,10 @@ function appendStepper(isDirect = false) {
         },
         markError(msg, unresolved = []) {
             // An unknown reference is not a failure to explain in prose: it is
-            // a token the user can see and fix. Show which one, and say the
-            // request was not run at all.
-            if (unresolved.length) {
-                setStatus(t("dispatch.unresolved", { tokens: unresolved.join(", ") }));
-            } else {
-                setStatus(`error: ${msg}`);
-            }
+            // a token the user can see and fix. Name the kind they addressed —
+            // they wrote `@peer:`, so "unknown peer" says more than "unknown
+            // reference" — and show the token itself.
+            setStatusRich(unresolved.length ? unresolvedMessage(unresolved) : msg);
             wrap.classList.add("complete");
             wrap.classList.add("err");
         },
@@ -1564,6 +1572,17 @@ async function refreshSkills() {
         return;
     }
     renderSkillsList();
+}
+
+/// Word an unknown-reference refusal from the tokens themselves. The mention
+/// kind is right there in the token, so the message can name what the user was
+/// actually addressing instead of calling everything a "reference".
+function unresolvedMessage(unresolved) {
+    const kinds = new Set(
+        unresolved.map(tok => (tok.match(/^@(peer|cap|lobe|file):/) || [])[1]).filter(Boolean)
+    );
+    const key = kinds.size === 1 ? `dispatch.unknown.${[...kinds][0]}` : "dispatch.unknown.mixed";
+    return t(key, { tokens: unresolved.join(", ") });
 }
 
 /// Build the merged catalog: union of local caps + every peer's caps,

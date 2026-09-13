@@ -196,6 +196,26 @@ step("files category after upload", await evaluate(
 step("file cards shown", await evaluate(`document.querySelectorAll('#files-page-body .card').length`));
 out.shots.push(await shot("08-files-after-upload"));
 
+// This node has no planner, so the dispatch fails before mentions are ever
+// resolved — which still exercises the part that lives here: an error row
+// carries a glyph, never the word "error:". The unknown-reference wording is
+// checked against the cluster, where a planner exists.
+await evaluate(`document.querySelector('.rail-btn[data-section="chats"]').click()`);
+await sleep(800);
+await evaluate(`(() => { const b = document.getElementById('new-chat') ||
+    [...document.querySelectorAll('button')].find(e => /nouvelle|new/i.test(e.textContent||'')); b?.click(); })()`);
+await sleep(1200);
+await evaluate(`(() => { const el = document.getElementById('prompt');
+    el.value = '@peer:koka reverse this'; el.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('send')?.click()
+      || [...document.querySelectorAll('button')].find(e => e.id === 'send-btn')?.click(); })()`);
+await sleep(2500);
+step("error row has an icon", await evaluate(
+    `!!document.querySelector('.stepper.err .stepper-status .status-icon svg')`));
+step("error row has no `error:` prefix", await evaluate(
+    `!/^\\s*error:/.test(document.querySelector('.stepper.err .stepper-status')?.textContent || '')`));
+out.shots.push(await shot("09-unknown-reference"));
+
 // About keeps facts about the project; the instance id moved to Identity.
 await evaluate(`document.querySelector('.rail-btn[data-section="settings"]').click()`);
 await sleep(600);
