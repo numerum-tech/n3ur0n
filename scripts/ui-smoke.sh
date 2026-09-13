@@ -60,5 +60,6 @@ for _ in $(seq 1 40); do
     sleep 0.25
 done
 
-CDP_PORT="$CDP_PORT" node "$ROOT/scripts/ui-smoke.mjs" "http://localhost:$PORT" "$COOKIE" "$OUT"
+printf 'n3ur0n ui smoke sample\n' > "$WORK/sample.txt"
+CDP_PORT="$CDP_PORT" node "$ROOT/scripts/ui-smoke.mjs" "http://localhost:$PORT" "$COOKIE" "$OUT" "$WORK/sample.txt"
 echo "screenshots in $OUT"

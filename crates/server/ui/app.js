@@ -2151,10 +2151,26 @@ async function uploadFileBlob(file) {
 }
 
 async function uploadFiles(fileList) {
+    const uploaded = [];
     for (const file of fileList) {
-        await uploadFileBlob(file);
+        uploaded.push(await uploadFileBlob(file));
     }
     await refreshFiles();
+
+    // The server stages every upload in the local cache (class D), so an
+    // upload started from Inbound or Outbound lands somewhere the current
+    // view can never show: the list stayed empty and the upload read as
+    // broken, the only clue being the "n total" in the subtitle. Follow the
+    // file to wherever it actually went — read the class back off the stored
+    // record rather than assuming D here, so this keeps holding if the
+    // server ever classifies an upload differently.
+    const landed = uploaded.length
+        ? _filesCache.find(f => f.hash === uploaded[uploaded.length - 1].hash)
+        : null;
+    const category = { A: "class_a", B: "class_b", D: "class_d" }[blobClass(landed || {})];
+    if (category && _filesCategory !== "all" && _filesCategory !== category) {
+        setFilesCategory(category);
+    }
 }
 
 async function uploadDraftFiles(fileList) {

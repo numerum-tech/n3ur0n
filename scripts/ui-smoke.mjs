@@ -10,13 +10,20 @@
 // with no package.json, and a screenshot harness is no reason to introduce one.
 // Node 22 has a global WebSocket, Chrome ships the protocol — that is enough.
 //
-// usage: node ui-smoke.mjs <uiBaseUrl> <sessionCookie> <outDir>
+// usage: node ui-smoke.mjs <uiBaseUrl> <sessionCookie> <outDir> <sampleFile>
 
-const [, , BASE, COOKIE, OUT] = process.argv;
+const [, , BASE, COOKIE, OUT, SAMPLE] = process.argv;
 const CDP = process.env.CDP_PORT || "9222";
 
-const targets = await (await fetch(`http://127.0.0.1:${CDP}/json`)).json();
-const page = targets.find((t) => t.type === "page");
+// Chrome answers /json/version before it has opened a tab, so poll for the
+// page target rather than trusting the first listing — a missing one hangs
+// every later call on a promise that never settles.
+let page = null;
+for (let i = 0; i < 40 && !page; i++) {
+    const targets = await (await fetch(`http://127.0.0.1:${CDP}/json`)).json();
+    page = targets.find((t) => t.type === "page");
+    if (!page) await new Promise((r) => setTimeout(r, 250));
+}
 if (!page) throw new Error("no page target on the debugging port");
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -46,6 +53,7 @@ const consoleErrors = [];
 await send("Runtime.enable");
 await send("Page.enable");
 await send("Network.enable");
+await send("DOM.enable");
 ws.addEventListener("message", (m) => {
     const msg = JSON.parse(m.data);
     if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
@@ -153,6 +161,24 @@ step("type filter is a styled select", await evaluate(
     `(() => { const s = document.getElementById('caps-type-filter');
       return s ? [...s.classList].join(' ') + ' | appearance=' + getComputedStyle(s).appearance : 'missing'; })()`));
 out.shots.push(await shot("07-skills-filter"));
+
+// Files: an upload is staged in the local cache whatever category is on
+// screen, so the view has to follow the file. Watching from Inbound, where it
+// can never land, is the case that read as a broken upload.
+await evaluate(`document.querySelector('.rail-btn[data-section="files"]').click()`);
+await sleep(1200);
+await evaluate(`document.querySelector('#files-nav [data-category="class_b"]').click()`);
+await sleep(600);
+step("files category before upload", await evaluate(
+    `document.querySelector('#files-nav .files-nav-item.active')?.dataset.category`));
+const doc = await send("DOM.getDocument");
+const input = await send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: "#files-input" });
+await send("DOM.setFileInputFiles", { files: [SAMPLE], nodeId: input.nodeId });
+await sleep(2000);
+step("files category after upload", await evaluate(
+    `document.querySelector('#files-nav .files-nav-item.active')?.dataset.category`));
+step("file cards shown", await evaluate(`document.querySelectorAll('#files-page-body .card').length`));
+out.shots.push(await shot("08-files-after-upload"));
 
 // About keeps facts about the project; the instance id moved to Identity.
 await evaluate(`document.querySelector('.rail-btn[data-section="settings"]').click()`);

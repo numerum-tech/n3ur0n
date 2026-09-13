@@ -3497,6 +3497,24 @@
       "related_bugs": [],
       "occurrences": 2,
       "last_seen": "2026-09-13T08:35:19.256Z"
+    },
+    {
+      "id": "bug-218",
+      "timestamp": "2026-09-13T10:23:18.051423Z",
+      "error_message": "Uploading a file in the Files panel seems to do nothing",
+      "file": "crates/server/ui/app.js",
+      "root_cause": "Every upload is staged by store_local_cache, so a blob is always class D (Local cache). Starting an upload while Inbound or Outbound is selected put the file in a category the current view can never show: the grid stayed empty and the only clue was the 'n total' counter in the subtitle. Reproduced over CDP on a live node: server total 0 to 1, stored blob local_cache/outbound/input, view on class_b, 0 cards rendered.",
+      "fix": "uploadFiles() reads the stored record back after refreshFiles(), computes blobClass() on it, and switches the sidebar category to where the file actually landed. The class is read off the record rather than hardcoded to D, so it still holds if the server ever classifies an upload differently. Regression-covered by scripts/ui-smoke.sh, which uploads from Inbound and asserts the category flips to class_d with one card.",
+      "tags": [
+        "ui",
+        "files",
+        "blob",
+        "upload",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T10:23:18.051423Z"
     }
   ],
   "version": 1
