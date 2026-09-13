@@ -251,7 +251,7 @@ browser → /api/v0/conversations/:id/messages {message}
 - `POST /api/v0/invoke {peer_endpoint, capability, args}` → signed invoke générique
 - `POST /api/v0/peers/refresh|discover` → directory ops
 
-Local API (non signée, loopback-only en prod) :
+Local API (non signée, protégée par le RBAC — **pas** par l'interface d'écoute : le serveur bind sur `0.0.0.0`, cf. `cli.rs`. La seule preuve acceptée est le cookie de session obtenu par `POST /api/v0/auth/login` ; ni Bearer ni clé d'API, voir ROADMAP « Consumption surfaces ») :
 
 | Route | Méthode | Rôle |
 |---|---|---|

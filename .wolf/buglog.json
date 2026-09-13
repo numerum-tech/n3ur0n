@@ -169,7 +169,7 @@
     {
       "error_message": "Reflect quoted a PREVIOUS turn's tool value — no longer reproduces",
       "file": "crates/node/src/planner/plan_exec.rs",
-      "root_cause": "UNVERIFIED. Observed: dispatch 1 time=2026-09-12T18:30:52.901772712Z reply reversed=Z217277109.25:03:81T21-90-6202 (CORRECT). Dispatch 2 time=2026-09-12T18:36:19.391088723Z reply reversed=Z217277109.25:03:81T21-90-6202 (dispatch 1's value, wrong). reflect_only feeds the conversation tail (MAX_CONTEXT_TURNS) before the blackboard, so the composer appears to copy the earlier assistant message rather than the current results. Distinct from bug-212: the value is not invented, it is stale. | 2026-09-13: does not reproduce on 0.4.3. Two dispatches of the same question in one conversation return their own fresh values (16:55:40Z then 16:55:45Z, each matching its own step result). The likely cause is bug-221's fix, which removed a duplicated user turn from the same reflect prompt — same class of context contamination — but that is not proven: the original report was two dispatches MINUTES apart and this retest was seconds apart. Reopen if it returns.",
+      "root_cause": "UNVERIFIED. Observed: dispatch 1 time=2026-09-12T18:30:52.901772712Z reply reversed=Z217277109.25:03:81T21-90-6202 (CORRECT). Dispatch 2 time=2026-09-12T18:36:19.391088723Z reply reversed=Z217277109.25:03:81T21-90-6202 (dispatch 1's value, wrong). reflect_only feeds the conversation tail (MAX_CONTEXT_TURNS) before the blackboard, so the composer appears to copy the earlier assistant message rather than the current results. Distinct from bug-212: the value is not invented, it is stale. | 2026-09-13: does not reproduce on 0.4.3. Two dispatches of the same question in one conversation return their own fresh values (16:55:40Z then 16:55:45Z, each matching its own step result). The likely cause is bug-221's fix, which removed a duplicated user turn from the same reflect prompt — same class of context contamination — but that is not proven: the original report was two dispatches MINUTES apart and this retest was seconds apart. Reopen if it returns. | 2026-09-13, hypothèse de l'utilisateur : la contamination n'est peut-être pas dans le reflect mais dans le COMPILE. Le compilateur reçoit lui aussi la conversation, et un LLM qui reconnaît une question déjà posée peut recycler sa réponse précédente plutôt que replanifier — le raccourci se ferait alors en amont, et le blackboard frais n'y changerait rien. À distinguer expérimentalement : un dispatch dont l'étape produit la bonne valeur ET dont la réponse cite l'ancienne accuse le reflect ; un dispatch qui ne replanifie pas du tout accuse le compile.",
       "fix": "No targeted fix. Not reproducible after the reflect-prompt cleanup in bug-221; kept as a watch item.",
       "tags": [
         "planner",
@@ -179,9 +179,12 @@
       ],
       "id": "bug-215",
       "timestamp": "2026-09-12T18:38:19.514211Z",
-      "related_bugs": [],
+      "related_bugs": [
+        "bug-221",
+        "bug-225"
+      ],
       "occurrences": 1,
-      "last_seen": "2026-09-13T16:58:21.703685Z"
+      "last_seen": "2026-09-13T17:08:51.538520Z"
     },
     {
       "error_message": "Mojibake in every accented reply: 'chaÃ®ne inversÃ©e', 'caractÃ¨res'",
@@ -333,8 +336,29 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-09-13T16:00:47.844825Z"
+    },
+    {
+      "id": "bug-225",
+      "timestamp": "2026-09-13T17:08:51.538520Z",
+      "error_message": "OPEN — after a failed message, the next reply seems to answer both messages at once",
+      "file": "crates/node/src/planner/plan_exec.rs",
+      "root_cause": "UNVERIFIED, reported by the user 2026-09-13. Observed: a message produces an error; the next message succeeds; its reply nonetheless appears to address both. Leading hypothesis, by analogy with bug-221 measured the same day: the reflect prompt carries the conversation tail, which still holds the failed turn and its assistant reply, and the model answers what it reads rather than the current turn. bug-221 showed exactly that mechanism on a duplicated user turn — with two identical consecutive user messages, qwen2.5:7b answered 'I tried ... TWICE, but the tool failed BOTH TIMES' where one copy produced a single answer. A failed turn followed by a new one is the same shape with different content. The user also suspects the compile step rather than the reflect (see bug-215).",
+      "fix": "NOT FIXED — recorded for later, no investigation yet. Reproduction to build: one dispatch that fails (an invoke on node-d, whose LAN LLM is unreachable on purpose), then a second unrelated dispatch in the SAME conversation, and read whether the second reply mentions the first. Then separate the two candidate sites by logging the compile prompt and the reflect prompt for that second dispatch.",
+      "tags": [
+        "open",
+        "planner",
+        "reflect",
+        "context-contamination",
+        "rs"
+      ],
+      "related_bugs": [
+        "bug-215",
+        "bug-221"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-09-13T17:08:51.538520Z"
     }
   ],
   "version": 1,
-  "next_id": 225
+  "next_id": 226
 }

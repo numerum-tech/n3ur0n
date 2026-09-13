@@ -91,6 +91,33 @@ See [n3ur0n-blob-protocol-v0.md](n3ur0n-blob-protocol-v0.md) and
 - 🧭 Capability authoring still needs a backend to exist first; the UI does not offer to
   create one from the cap form
 
+## Consumption surfaces 💭
+
+How something other than a browser talks to an instance. Today there are
+three ways in and none of them fits a service:
+
+- the local `/api/v0` REST API reaches the planner, but the only credential
+  it accepts is a session cookie from `POST /api/v0/auth/login` — a
+  browser-shaped flow with a sliding TTL, not a service account;
+- the signed `/n3ur0n/v0/messages` protocol is the real machine-to-machine
+  surface, but it invokes a *named capability*: the caller must already know
+  which peer and which cap it wants, so it never reaches the planner;
+- the CLI is a client of the second.
+
+- 💭 **Service tokens on the local API.** `Authorization: Bearer`, backed by a
+  user and a role, revocable, no session. Small: `users` and the permission
+  set already exist; it needs a token table and one branch in
+  `session_middleware`.
+- 💭 **MCP server surface.** The node is an MCP *client* today
+  (`bindings/mcp_client.rs`, a capability can call an MCP tool); it exposes
+  no MCP server, so no MCP-speaking agent can mount an instance as a tool.
+  Probably the strongest adoption vector, and a milestone in its own right.
+- 💭 **Wire `PlannerAsCapability`.** `planner/planner_cap.rs` would expose the
+  planner on the network as the `plan` capability; nothing registers it —
+  referenced only from its own file and one comment. Note it compiles a plan
+  and does not execute it, so it is not "ask an instance a question" on its
+  own.
+
 ## v0.5 — federation 💭
 
 Untouched by 0.4.3: an instance now *declares* its lobes, but nothing
