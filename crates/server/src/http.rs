@@ -1291,8 +1291,13 @@ async fn conv_messages_stream(
             .handle_user_message_streaming_with_opts(&cid_owned, &id_owned, input, mode, opts, tx)
             .await
         {
+            let unresolved = match &e {
+                NodeError::UnresolvedMentions(tokens) => tokens.clone(),
+                _ => Vec::new(),
+            };
             let _ = tx_err.send(DispatchEvent::Error {
                 message: e.to_string(),
+                unresolved,
             });
         }
         // Drop tx_err to close the channel.
@@ -1373,6 +1378,19 @@ fn serve_asset(path: &str) -> Response {
 // ---------------------------------------------------------------------------
 
 fn http_error(err: &NodeError) -> axum::response::Response {
+    // The tokens travel as data so a client can mark the offending mention
+    // where the user typed it, instead of parsing them back out of a sentence.
+    if let NodeError::UnresolvedMentions(tokens) = err {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "unresolved_mentions",
+                "message": err.to_string(),
+                "unresolved": tokens,
+            })),
+        )
+            .into_response();
+    }
     let (status, kind): (StatusCode, &str) = match err {
         NodeError::Replay => (StatusCode::CONFLICT, "replay"),
         NodeError::UnknownCapability(_) => (StatusCode::NOT_FOUND, "unknown_capability"),

@@ -707,7 +707,18 @@ async function send() {
         // stepper stays visible alongside the streamed assistant bubble.
         await loadConversations();
     } catch (e) {
-        stepper.markError(e.message);
+        const unresolved = e.unresolved || [];
+        stepper.markError(e.message, unresolved);
+        if (unresolved.length) {
+            // The node recorded nothing, so neither do we: the bubble goes, the
+            // text returns to the composer with the caret in it, and the user
+            // fixes one token instead of retyping a sentence.
+            conv.querySelector(".bubble.user:last-of-type")?.remove();
+            promptEl.value = text;
+            resizeComposerTextarea();
+            draftAttachments = attachments.map(a => ({ ...a }));
+            renderComposerDraft();
+        }
     } finally {
         inFlight = false;
         syncComposerModeUi();
@@ -857,8 +868,15 @@ function appendStepper(isDirect = false) {
                 appendBubble("assistant", model ? `assistant · ${model}` : "assistant", reply);
             }
         },
-        markError(msg) {
-            setStatus(`error: ${msg}`);
+        markError(msg, unresolved = []) {
+            // An unknown reference is not a failure to explain in prose: it is
+            // a token the user can see and fix. Show which one, and say the
+            // request was not run at all.
+            if (unresolved.length) {
+                setStatus(t("dispatch.unresolved", { tokens: unresolved.join(", ") }));
+            } else {
+                setStatus(`error: ${msg}`);
+            }
             wrap.classList.add("complete");
             wrap.classList.add("err");
         },
@@ -937,9 +955,13 @@ function handleSseFrame(frame, stepper) {
         case "final":
             stepper.finalize(payload.reply, payload.model);
             break;
-        case "error":
-            stepper.markError(payload.message || "dispatch failed");
-            break;
+        case "error": {
+            const err = new Error(payload.message || "dispatch failed");
+            err.unresolved = payload.unresolved || [];
+            // Thrown rather than rendered here: `send` still holds the message
+            // text, and a refused command has to go back to the composer.
+            throw err;
+        }
     }
 }
 

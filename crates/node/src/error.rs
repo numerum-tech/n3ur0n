@@ -49,6 +49,16 @@ pub enum NodeError {
     #[error("serde: {0}")]
     Serde(#[from] serde_json::Error),
 
+    /// The user addressed something this node does not know — an unknown
+    /// peer, lobe or capability — so the request was refused rather than
+    /// answered against a wider scope than the one asked for.
+    ///
+    /// Carrying the tokens lets a caller point at what is wrong instead of
+    /// restating it in prose: naming the mistake is the interface's job, not
+    /// a model's.
+    #[error("unknown reference: {}", .0.join(", "))]
+    UnresolvedMentions(Vec<String>),
+
     /// Template substitution failed (missing path, unknown root, etc).
     #[error("template: {0}")]
     Template(#[from] crate::bindings::template::TemplateError),

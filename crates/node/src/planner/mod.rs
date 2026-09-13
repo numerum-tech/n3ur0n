@@ -127,7 +127,15 @@ pub enum DispatchEvent {
         model: Option<String>,
     },
     /// Fatal error during dispatch; stream is about to close.
-    Error { message: String },
+    Error {
+        message: String,
+        /// Mention tokens the node could not resolve, when that is why the
+        /// dispatch was refused. Carried as data so a client can mark the
+        /// offending token where the user typed it rather than parse it back
+        /// out of a sentence.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unresolved: Vec<String>,
+    },
 }
 
 /// Anything that can take a user message + conversation state and produce a

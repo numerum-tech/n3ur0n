@@ -306,6 +306,7 @@
   "role.operator": "Opérateur",
   "role.admin": "Admin",
   "mention.section.files": "Fichiers",
+  "dispatch.unresolved": "Non envoyé — ce nœud ne connaît pas {tokens}. Corrigez la référence et renvoyez.",
   "mention.peer.self": "Cette instance",
   "mention.section.peers": "Peers",
   "mention.section.lobes": "Lobes",

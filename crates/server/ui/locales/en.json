@@ -306,6 +306,7 @@
   "role.operator": "Operator",
   "role.admin": "Admin",
   "mention.section.files": "Files",
+  "dispatch.unresolved": "Not sent — this node does not know {tokens}. Fix the reference and send again.",
   "mention.peer.self": "This instance",
   "mention.section.peers": "Peers",
   "mention.section.lobes": "Lobes",

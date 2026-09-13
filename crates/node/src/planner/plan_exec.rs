@@ -214,12 +214,8 @@ impl PlanExecPlanner {
         events: Option<&EventSender>,
     ) -> NodeResult<DispatchOutcome> {
         let planner_text = input.planner_text();
-        // 1. Persist user turn.
-        state.push_user_input(&input);
-        persist_last(node.db(), state)
-            .map_err(|e| NodeError::InvalidPayload(format!("persist user: {e}")))?;
 
-        // 2. Build catalog, then rank and bound it against the user
+        // 1. Build catalog, then rank and bound it against the user
         //    message so prompt size stays bounded as the network grows.
         //    Scoring is the retriever's job (BM25, plus embeddings when
         //    configured); ranking policy is the catalog's.
@@ -256,15 +252,33 @@ impl PlanExecPlanner {
                 );
                 scoped
             } else {
-                // Nothing resolved: the catalogue is left whole rather than
-                // emptied, and the reply will say what could not be found.
                 debug!(
                     unresolved = ?resolved_scope.unresolved,
-                    "every mention was unresolved; catalogue left unscoped"
+                    "every mention was unresolved"
                 );
                 catalog
             }
         };
+
+        // Addressing something this node does not know is a mistake to point
+        // at, not a request to reinterpret. Answering anyway meant silently
+        // widening a scope the user had deliberately narrowed: they wrote one
+        // peer, the node used another and said nothing. The reflect prompt did
+        // ask the model to disclose it, which is the wrong place for a fact
+        // the runtime already holds — a 7B model drops the instruction and the
+        // user never learns. Refuse before spending a single LLM call.
+        if !resolved_scope.unresolved.is_empty() {
+            return Err(NodeError::UnresolvedMentions(
+                resolved_scope.unresolved.clone(),
+            ));
+        }
+
+        // Only now is the turn recorded. Resolving first costs one catalogue
+        // read and buys a clean refusal: a rejected command leaves no orphan
+        // user turn sitting in the thread with no reply under it.
+        state.push_user_input(&input);
+        persist_last(node.db(), state)
+            .map_err(|e| NodeError::InvalidPayload(format!("persist user: {e}")))?;
 
         let scores = self.retriever.score(&catalog.tools, &planner_text).await;
         let catalog = catalog.filter_with_scores(&scores, REMOTE_TOP_K);
