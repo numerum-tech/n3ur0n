@@ -74,12 +74,21 @@ fn whole_template(s: &str) -> Option<&str> {
     None
 }
 
+/// Split `args.a.b` into root and path. A bare root (`{{args}}`) is valid and
+/// yields an empty path, which [`resolve_path`] reads as "the whole object".
+///
+/// Without this, a capability with *optional* arguments could not be expressed
+/// at all: `body_template` naming each field fails to render the moment one is
+/// absent, and omitting `body_template` sends no body. Forwarding the argument
+/// object whole is the only shape that fits an upstream with defaults.
 fn split_root(path: &str) -> Result<(&str, &str), TemplateError> {
     match path.split_once('.') {
-        Some((root, rest)) => Ok((root, rest)),
-        None => Err(TemplateError::PathNotFound {
+        Some((root, rest)) if !rest.is_empty() => Ok((root, rest)),
+        // `args.` is a typo, not a whole-object reference.
+        Some(_) => Err(TemplateError::PathNotFound {
             path: path.to_string(),
         }),
+        None => Ok((path, "")),
     }
 }
 
@@ -93,6 +102,9 @@ fn check_root(root: &str) -> Result<(), TemplateError> {
 }
 
 fn resolve_path<'a>(args: &'a Value, dotted: &str) -> Option<&'a Value> {
+    if dotted.is_empty() {
+        return Some(args);
+    }
     let mut current = args;
     for segment in dotted.split('.') {
         if segment.is_empty() {
@@ -140,6 +152,33 @@ fn value_to_text(v: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_bare_args_forwards_the_whole_object() {
+        // The only shape that expresses a capability with optional arguments:
+        // naming each field fails to render as soon as one is absent.
+        let args = json!({"min": 1, "max": 10});
+        assert_eq!(render("{{args}}", &args).unwrap(), args);
+        // Including when it is empty — the upstream applies its own defaults.
+        assert_eq!(render("{{args}}", &json!({})).unwrap(), json!({}));
+        // And nested inside a body template.
+        assert_eq!(
+            render_value(&json!({"payload": "{{args}}"}), &args).unwrap(),
+            json!({"payload": {"min": 1, "max": 10}})
+        );
+    }
+
+    #[test]
+    fn a_root_that_is_not_args_is_still_rejected() {
+        let e = render("{{env}}", &json!({})).unwrap_err();
+        assert!(matches!(e, TemplateError::UnknownRoot { .. }), "{e:?}");
+    }
+
+    #[test]
+    fn a_trailing_dot_is_a_typo_not_the_whole_object() {
+        let e = render("{{args.}}", &json!({"a": 1})).unwrap_err();
+        assert!(matches!(e, TemplateError::PathNotFound { .. }), "{e:?}");
+    }
+
     use super::*;
     use serde_json::json;
 
