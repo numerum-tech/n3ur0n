@@ -1483,6 +1483,31 @@ function renderNetworkList() {
     });
 }
 
+/// Re-ask every known peer what it exposes, then re-render.
+///
+/// `refreshSkills` only re-reads local state: `/api/v0/peers` hands back the
+/// *cached* `describe_self` of each peer, so a peer that gained a capability
+/// since the last crawl stayed invisible however many times the button was
+/// pressed. `/api/v0/peers/refresh` is the only route that actually contacts a
+/// peer. One failing peer must not sink the others: each is settled on its own.
+async function refreshSkillsFromNetwork() {
+    const btn = document.getElementById("skills-refresh");
+    btn?.classList.add("is-busy");
+    try {
+        let endpoints = [];
+        try {
+            const d = await api("GET", "/api/v0/peers");
+            endpoints = (d.peers || []).map(p => p.endpoint).filter(Boolean);
+        } catch { /* fall through to the local re-render */ }
+        await Promise.allSettled(
+            endpoints.map(endpoint => api("POST", "/api/v0/peers/refresh", { endpoint }))
+        );
+        await refreshSkills();
+    } finally {
+        btn?.classList.remove("is-busy");
+    }
+}
+
 async function refreshSkills() {
     // Skills tab shows EVERY cap reachable from this node: the local
     // registry + every peer's cached describe_self. Pulls both endpoints
@@ -4017,7 +4042,7 @@ document.querySelectorAll("#app-rail .rail-btn").forEach(btn => {
 applyIcons();
 activateSection("chats");
 document.getElementById("network-refresh")?.addEventListener("click", refreshNetwork);
-document.getElementById("skills-refresh")?.addEventListener("click", refreshSkills);
+document.getElementById("skills-refresh")?.addEventListener("click", refreshSkillsFromNetwork);
 document.getElementById("files-refresh")?.addEventListener("click", refreshFiles);
 document.querySelectorAll("#files-nav .files-nav-item").forEach(el => {
     el.addEventListener("click", () => setFilesCategory(el.dataset.category));

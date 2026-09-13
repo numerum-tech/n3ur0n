@@ -2032,3 +2032,10 @@ button.secondary:hover,
     color: var(--muted);
 }
 .lobe-choice input { margin: 0; }
+
+/* A refresh that crawls the network takes a visible moment; without this the
+   button looks inert and invites a second click. */
+.icon-btn.is-busy {
+    opacity: 0.5;
+    pointer-events: none;
+}
